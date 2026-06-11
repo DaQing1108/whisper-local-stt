@@ -1,0 +1,26 @@
+# 環境變數（含 Notion token，絕對不能上傳）
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# 音訊暫存
+*.wav
+*.mp3
+*.m4a
+*.mp4
+*.flac
+*.ogg
+*.webm
+outputs/
+
+# macOS
+.DS_Store
+.DS_Store?
+*.zip
