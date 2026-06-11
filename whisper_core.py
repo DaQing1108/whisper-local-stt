@@ -36,52 +36,59 @@ _fw_cache_lock = threading.Lock()
 CHUNK_SECONDS = 30 * 60  # 30 分鐘一段
 
 # ── 領域 initial_prompt ───────────────────────────────────────
-_BASE_PROMPT = "以下是台灣繁體中文的會議記錄，請使用繁體中文輸出。"
+# initial_prompt 應放「前文語境」（自然語言），而非指令句。
+# 指令句（如「請使用繁體中文輸出」）會被 Whisper 誤當轉錄內容輸出。
+# 語言用 language='zh' 強制指定，不靠 prompt 引導。
 
-DOMAIN_PROMPTS: dict[str, str] = {
-    "media": (
-        "以下是台灣媒體科技公司的會議記錄，請使用繁體中文輸出。"
-        "涉及專業術語包含：ASR、DGX、RNG、timecode、字幕、後製、"
-        "歐拉密、健康2.0、TVBS、context window、LLM、API、Edge端。"
-    ),
-    "medical": (
-        "以下是台灣醫療會議記錄，請使用繁體中文輸出。"
-        "涉及醫療術語、病名、藥名及臨床程序。"
-    ),
-    "legal": (
-        "以下是台灣法律會議記錄，請使用繁體中文輸出。"
-        "涉及法條、訴訟程序及法律術語。"
-    ),
-    "tech": (
-        "以下是台灣科技公司的技術會議記錄，請使用繁體中文輸出。"
-        "涉及軟體開發、雲端架構、AI 模型及系統設計術語。"
-    ),
-    "general": _BASE_PROMPT,
+DOMAIN_TERMS: dict[str, str] = {
+    "media":   "ASR、DGX、RNG、timecode、字幕、後製、歐拉密、健康2.0、TVBS、context window、LLM、API、Edge端",
+    "medical": "",
+    "legal":   "",
+    "tech":    "軟體開發、雲端架構、AI模型、系統設計",
+    "general": "",
 }
 
 
 def build_prompt(domain: str, extra_terms: str = "") -> str:
-    base = DOMAIN_PROMPTS.get(domain, _BASE_PROMPT)
+    """回傳 initial_prompt（只放術語語境，無指令句）；無術語則回傳空字串。"""
+    parts = []
+    domain_terms = DOMAIN_TERMS.get(domain, "")
+    if domain_terms:
+        parts.append(domain_terms)
     if extra_terms:
-        return base + f"此次會議的專有名詞包含：{extra_terms}。"
-    return base
+        parts.append(extra_terms)
+    return "、".join(parts) if parts else ""
 
 
 def _strip_prompt_echo(text: str, prompt: str) -> str:
     """移除 Whisper 把 initial_prompt 誤當轉錄內容輸出的情況。"""
+    import re as _re
     if not text or not prompt:
         return text
-    # 把 prompt 拆成關鍵短語，任何一段出現在輸出就代表是 prompt echo
+
+    def _clean(s: str) -> str:
+        return _re.sub(r'[\s。，、；：？！]', '', s)
+
+    clean_prompt = _clean(prompt)
+
+    # 若每一行（去標點後）都是 prompt 的子字串 → 全是 prompt echo
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    if lines:
+        echo_count = sum(
+            1 for l in lines
+            if len(_clean(l)) >= 4 and _clean(l) in clean_prompt
+        )
+        non_empty = [l for l in lines if len(_clean(l)) >= 4]
+        if non_empty and echo_count == len(non_empty):
+            return ""
+
+    # prompt 完整字串出現在輸出開頭 → 取後面的真實內容
     markers = [s.strip() for s in prompt.replace("。", "。\n").splitlines() if len(s.strip()) > 4]
     for marker in markers:
         if marker in text:
             after = text.split(marker, 1)[-1].strip()
-            # marker 後若有真實內容就保留，否則整段都是 prompt echo → 回傳空
             return after if len(after) > 5 else ""
-    # 整段文字幾乎等於 prompt（允許少量差異）→ 也過濾掉
-    prompt_clean = prompt.replace("以下是", "").replace("，請使用繁體中文輸出。", "").strip()
-    if prompt_clean and text.strip() in prompt:
-        return ""
+
     return text
 
 
@@ -221,11 +228,13 @@ def run_whisper(
         domain      = kwargs.get("domain", "general")
         extra_terms = kwargs.get("extra_terms", "")
         prompt      = build_prompt(domain, extra_terms)
-        print(f"[Whisper] initial_prompt: {prompt[:60]}…", flush=True)
+        print(f"[Whisper] prompt={repr(prompt[:60])}, lang={language}", flush=True)
 
-        opts: dict = {"initial_prompt": prompt}
-        if language and language != "auto":
-            opts["language"] = language
+        # language：明確指定 zh；auto 時也預設 zh（台灣繁體中文錄音）
+        effective_lang = language if (language and language != "auto") else "zh"
+        opts: dict = {"language": effective_lang}
+        if prompt:
+            opts["initial_prompt"] = prompt
 
         info = {
             "model":            model_name,
