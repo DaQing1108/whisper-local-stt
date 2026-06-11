@@ -13,6 +13,7 @@ from flask import Blueprint, Response, jsonify, make_response, request, stream_w
 
 import integrations
 import sse as _sse
+from version import __version__
 from whisper_core import run_whisper
 
 bp = Blueprint("main", __name__)
@@ -26,6 +27,11 @@ _EXT_MAP = {
     "mp4": ".mp4", "m4a": ".m4a", "flac": ".flac",
     "webm": ".webm", "mpeg": ".mp3",
 }
+
+
+@bp.route("/api/version")
+def api_version():
+    return jsonify({"version": __version__})
 
 
 @bp.route("/")
@@ -139,8 +145,10 @@ def transcribe():
 
             _sse.broadcast("status",     {"msg": f"✅ 轉錄完成（偵測語言：{lang}）"})
             _sse.broadcast("transcript", {
-                "text": text, "language": lang,
-                "time": datetime.now().strftime("%H:%M:%S"),
+                "text":     text,
+                "language": lang,
+                "time":     datetime.now().strftime("%H:%M:%S"),
+                "segments": info.get("segments", []),
             })
 
             obsidian_file = ""
@@ -211,7 +219,7 @@ def get_config():
     token   = os.getenv("NOTION_TOKEN", "")
     page_id = os.getenv("NOTION_PAGE_ID", "")
     ready   = bool(token and page_id)
-    label   = ""
+    label   = page_id
     if ready:
         try:
             from notion_client import Client
@@ -223,6 +231,7 @@ def get_config():
             label  = tl[0]["plain_text"] if tl else page_id
         except Exception:
             ready = False
+            label = page_id
     return jsonify(ready=ready, page_label=label, page_id=page_id)
 
 

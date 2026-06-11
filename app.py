@@ -18,6 +18,8 @@ from dotenv import load_dotenv
 from flask import Flask
 from werkzeug.serving import WSGIRequestHandler
 
+from version import __version__
+
 load_dotenv()
 
 # ── 從根部封殺 Broken pipe ────────────────────────────────────
@@ -64,18 +66,11 @@ app.register_blueprint(routes.bp)
 
 # ── 入口 ──────────────────────────────────────────────────────
 if __name__ == "__main__":
-    from whisper_core import _transcribe_file
-    port = int(os.environ.get("PORT", 5001))
-    print(f"🚀 啟動中… 開啟 http://localhost:{port}")
-    threading.Thread(
-        target=lambda: _transcribe_file('/tmp/test_silence.wav', 'small', {})
-        if __import__('pathlib').Path('/tmp/test_silence.wav').exists() else None,
-        daemon=True,
-    ).start()
-    app.run(
-        host="0.0.0.0",
-        port=port,
-        debug=False,
-        threaded=True,
-        request_handler=_QuietHandler,
-    )
+    import os as _os
+    # 確保 cwd 是專案目錄（.app bundle 啟動時 cwd 可能是 /）
+    _os.chdir(_os.path.dirname(_os.path.abspath(__file__)))
+
+    from waitress import serve
+    port = int(_os.environ.get("PORT", 5001))
+    print(f"🚀 Whisper STT v{__version__} 啟動中… 開啟 http://localhost:{port}")
+    serve(app, host="0.0.0.0", port=port, threads=8)

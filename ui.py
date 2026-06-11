@@ -347,7 +347,21 @@ HTML_PAGE = r"""<!DOCTYPE html>
   .transcript-text  { font-size: 16px; letter-spacing: 0.2px; }
 
   /* ── Action buttons ── */
-  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .export-item {
+    padding: 7px 12px; font-size: 13px; cursor: pointer;
+    border-radius: 7px; color: var(--text);
+    transition: background .15s;
+  }
+  .export-item:hover { background: var(--surface); }
+  .history-item {
+    padding: 10px 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); margin-bottom: 8px;
+    transition: background .15s;
+  }
+  .history-item:hover { background: var(--surface); }
+  .history-item-meta { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .history-item-preview { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .btn {
     padding: 9px 18px; border-radius: 8px;
     font-size: 14px; font-weight: 500;
@@ -463,6 +477,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <header>
   <span class="logo">🎙️</span>
   <h1>Whisper 語音轉文字</h1>
+  <span id="app-version" style="font-size:11px;opacity:.45;margin-right:auto;margin-left:6px;"></span>
   <span class="badge" id="notion-badge" title="未連線"><span class="status-dot"></span><span id="notion-badge-text">Notion 未連線</span></span>
 </header>
 
@@ -591,8 +606,26 @@ HTML_PAGE = r"""<!DOCTYPE html>
           📤 上傳至 Notion
         </button>
         <button class="btn" onclick="copyTranscript()">📋 複製</button>
+        <div class="export-wrap" style="position:relative;display:inline-block;">
+          <button class="btn" id="export-btn" onclick="toggleExportMenu()" disabled>⬇️ 匯出</button>
+          <div id="export-menu" style="display:none;position:absolute;bottom:110%;left:0;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:6px;min-width:140px;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,.3);">
+            <div class="export-item" onclick="exportAs('txt')">📄 純文字 .txt</div>
+            <div class="export-item" onclick="exportAs('srt')">🎬 字幕 .srt</div>
+            <div class="export-item" onclick="exportAs('md')">📝 Markdown .md</div>
+          </div>
+        </div>
         <button class="btn" onclick="clearTranscript()">🗑 清除</button>
+        <button class="btn" id="history-btn" onclick="toggleHistory()" style="margin-left:auto;">🕓 歷史</button>
       </div>
+    </div>
+
+    <!-- 歷史記錄面板 -->
+    <div id="history-panel" style="display:none;" class="card">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>🕓 轉錄歷史</span>
+        <button class="btn" onclick="clearHistory()" style="padding:2px 8px;font-size:11px;">清除全部</button>
+      </div>
+      <div id="history-list" style="max-height:300px;overflow-y:auto;"></div>
     </div>
   </section>
 
@@ -634,6 +667,9 @@ evtSrc.addEventListener('status', e => {
 evtSrc.addEventListener('transcript', e => {
   const d = JSON.parse(e.data)
   addTranscript(d.text, d.language, d.time)
+  _exportSegments = d.segments || []
+  _syncExportBtn()
+  saveToHistory(d.text, d.language, d.segments || [])
 })
 evtSrc.addEventListener('chunk', e => {
   const d = JSON.parse(e.data)
@@ -662,6 +698,10 @@ let defaultVocabs = ["DGX", "健康2.0", "TVBS", "Bag & Pulse", "ASR", "Claude C
 window.onload = async () => {
   await checkConfig();
   loadVocabLibrary();
+  fetch('/api/version').then(r => r.json()).then(d => {
+    const el = document.getElementById('app-version');
+    if (el) el.textContent = 'v' + d.version;
+  }).catch(() => {});
 };
 
 function getVocabLibrary() {
@@ -790,8 +830,9 @@ async function checkConfig() {
     const badge = document.getElementById('notion-badge')
     const badgeText = document.getElementById('notion-badge-text')
     if (r.ready) {
-      badgeText.textContent = `Notion 已連線`
-      badge.title = `Target: ${r.page_label}`
+      const label = r.page_label && r.page_label !== r.page_id ? r.page_label : r.page_id
+      badgeText.textContent = `Notion｜${label}`
+      badge.title = `頁面 ID：${r.page_id}`
       badge.className = 'badge ok'
     } else {
       badgeText.textContent = 'Notion 未連線'
@@ -984,7 +1025,9 @@ function addTranscript(text, lang, time) {
                      <div class="transcript-text">${escHtml(text)}</div>`
   box.appendChild(entry)
   box.scrollTop = box.scrollHeight
+  lastText = text
   syncUploadBtn()
+  _syncExportBtn()
 }
 
 function copyTranscript() {
@@ -993,12 +1036,142 @@ function copyTranscript() {
   setStatus('📋 已複製到剪貼簿', 'ok')
 }
 
+// ── O1: 匯出功能 ──────────────────────────────────────────────
+let _exportSegments = []   // [{text, start, end}] 由後端回傳時儲存
+
+function toggleExportMenu() {
+  const m = document.getElementById('export-menu')
+  m.style.display = m.style.display === 'none' ? 'block' : 'none'
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.export-wrap')) {
+    const m = document.getElementById('export-menu')
+    if (m) m.style.display = 'none'
+  }
+})
+
+function _secToTimecode(s, srt=false) {
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60), ms = Math.round((s%1)*1000)
+  const pad = (n,d=2) => String(n).padStart(d,'0')
+  return srt
+    ? `${pad(h)}:${pad(m)}:${pad(sec)},${pad(ms,3)}`
+    : `${pad(h)}:${pad(m)}:${pad(sec)}`
+}
+
+function exportAs(fmt) {
+  document.getElementById('export-menu').style.display = 'none'
+  const rawText = document.getElementById('transcript-box').innerText.trim()
+  if (!rawText) return
+
+  const now = new Date()
+  const dateStr = now.toISOString().slice(0,10)
+  const timeStr = now.toTimeString().slice(0,8).replace(/:/g,'-')
+  let content = '', ext = fmt, mime = 'text/plain'
+
+  if (fmt === 'txt') {
+    content = rawText
+  } else if (fmt === 'md') {
+    content = `# 轉錄記錄 ${dateStr} ${now.toTimeString().slice(0,8)}\n\n${rawText}\n`
+    mime = 'text/markdown'
+  } else if (fmt === 'srt') {
+    if (_exportSegments.length > 0) {
+      content = _exportSegments.map((seg, i) => {
+        const start = _secToTimecode(seg.start, true)
+        const end   = _secToTimecode(seg.end,   true)
+        return `${i+1}\n${start} --> ${end}\n${seg.text.trim()}\n`
+      }).join('\n')
+    } else {
+      // 無 segment 資料時退回純文字格式
+      content = rawText.split('\n').filter(l=>l.trim()).map((line, i) => {
+        const t = i * 3
+        return `${i+1}\n${_secToTimecode(t,true)} --> ${_secToTimecode(t+3,true)}\n${line}\n`
+      }).join('\n')
+    }
+  }
+
+  const blob = new Blob([content], {type: mime})
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `whisper_${dateStr}_${timeStr}.${ext}`
+  a.click()
+  URL.revokeObjectURL(a.href)
+  setStatus(`⬇️ 已匯出 .${ext}`, 'ok')
+}
+
+function _syncExportBtn() {
+  document.getElementById('export-btn').disabled = !lastText
+}
+
+// ── O2: 轉錄歷史 ─────────────────────────────────────────────
+const HISTORY_KEY = 'whisper_history'
+const HISTORY_MAX = 20
+
+function saveToHistory(text, lang, segments) {
+  const lib = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
+  lib.unshift({ text, lang, segments: segments || [], ts: new Date().toISOString() })
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(lib.slice(0, HISTORY_MAX)))
+  renderHistory()
+}
+
+function renderHistory() {
+  const lib = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
+  const list = document.getElementById('history-list')
+  if (!lib.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px;">尚無歷史記錄</div>'
+    return
+  }
+  list.innerHTML = lib.map((item, i) => {
+    const dt = new Date(item.ts)
+    const label = dt.toLocaleString('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
+    const preview = item.text.slice(0, 60).replace(/\n/g,' ')
+    return `<div class="history-item" onclick="restoreHistory(${i})">
+      <div class="history-item-meta">${label}｜${item.lang}</div>
+      <div class="history-item-preview">${escHtml(preview)}…</div>
+    </div>`
+  }).join('')
+}
+
+function restoreHistory(i) {
+  const lib = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
+  const item = lib[i]
+  if (!item) return
+  const box = document.getElementById('transcript-box')
+  box.innerHTML = ''
+  const entry = document.createElement('div')
+  entry.className = 'transcript-entry'
+  const ts = new Date(item.ts).toTimeString().slice(0,8)
+  entry.innerHTML = `<div class="transcript-time">${ts}｜${item.lang}</div>
+                     <div class="transcript-text">${escHtml(item.text)}</div>`
+  box.appendChild(entry)
+  lastText = item.text
+  _exportSegments = item.segments || []
+  _syncExportBtn()
+  syncUploadBtn()
+  toggleHistory()
+  setStatus('🕓 已從歷史記錄還原', 'ok')
+}
+
+function clearHistory() {
+  if (!confirm('確定清除所有歷史記錄？')) return
+  localStorage.removeItem(HISTORY_KEY)
+  renderHistory()
+}
+
+function toggleHistory() {
+  const panel = document.getElementById('history-panel')
+  const visible = panel.style.display !== 'none'
+  panel.style.display = visible ? 'none' : 'block'
+  if (!visible) renderHistory()
+}
+
 function clearTranscript() {
   document.getElementById('transcript-box').innerHTML = ''
-  document.getElementById('local-audio-player').style.display = 'none';
-  document.getElementById('local-audio-player').src = '';
+  document.getElementById('local-audio-player').style.display = 'none'
+  document.getElementById('local-audio-player').src = ''
   lastText = ''
+  _exportSegments = []
   syncUploadBtn()
+  _syncExportBtn()
 }
 
 function syncUploadBtn() {

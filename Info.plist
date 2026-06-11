@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>Whisper STT</string>
+
+  <key>CFBundleDisplayName</key>
+  <string>Whisper STT</string>
+
+  <key>CFBundleIdentifier</key>
+  <string>com.local.whisper-stt</string>
+
+  <key>CFBundleVersion</key>
+  <string>1.1.0</string>
+
+  <key>CFBundleShortVersionString</key>
+  <string>1.1</string>
+
+  <key>CFBundleExecutable</key>
+  <string>whisper-launcher</string>
+
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+
+  <key>CFBundleSignature</key>
+  <string>????</string>
+
+  <!-- 在 Dock 顯示圖示（設 true 則不顯示） -->
+  <key>LSUIElement</key>
+  <false/>
+
+  <!-- 圖示 -->
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+
+  <!-- 支援 Retina -->
+  <key>NSHighResolutionCapable</key>
+  <true/>
+
+  <!-- 麥克風權限（瀏覽器側錄音，此項為保險） -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Whisper STT 需要麥克風權限以進行語音轉文字。</string>
+</dict>
+</plist>

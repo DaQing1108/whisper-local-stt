@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# launcher.sh — Whisper STT.app 內部執行腳本
+# build_app.sh 會將此檔嵌入 .app bundle，並在 build 時將 PROJECT_DIR 寫死。
+#
+# 為何用 AppleScript 呼叫 Terminal：
+#   macOS .app bundle 的 shell process 缺乏「完整磁碟存取」權限，
+#   無法讀取 ~/Documents 下的 Python 檔案。
+#   透過 Terminal.app（已有完整磁碟存取）執行則無此限制。
+
+PROJECT_DIR="/Users/daqingliao/Documents/AI-Workspace/1P_Projects/Whisper"
+PORT=5001
+LOG="$PROJECT_DIR/whisper_server.log"
+
+# ── 若 server 已在執行，直接開啟瀏覽器 ──────────────────────
+if lsof -ti tcp:$PORT &>/dev/null; then
+  open "http://localhost:$PORT"
+  exit 0
+fi
+
+# ── 透過 AppleScript 在 Terminal 背景啟動 server ────────────
+SCRIPT="cd '$PROJECT_DIR' && nohup python3 app.py >> '$LOG' 2>&1 &"
+
+osascript <<APPLESCRIPT
+tell application "Terminal"
+  do script "$SCRIPT"
+  delay 0.5
+  -- 啟動後關閉視窗（背景執行不需要視窗）
+  close front window
+end tell
+APPLESCRIPT
+
+# ── 等候 server 就緒（最多 30 秒）──────────────────────────
+echo "[Whisper] 等候 server 就緒…" >> "$LOG"
+for i in $(seq 1 30); do
+  if curl -sf "http://localhost:$PORT" &>/dev/null; then
+    echo "[Whisper] Server 就緒（${i}s）" >> "$LOG"
+    break
+  fi
+  sleep 1
+done
+
+# ── 開啟瀏覽器 ───────────────────────────────────────────────
+open "http://localhost:$PORT"
