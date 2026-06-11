@@ -67,6 +67,24 @@ def build_prompt(domain: str, extra_terms: str = "") -> str:
     return base
 
 
+def _strip_prompt_echo(text: str, prompt: str) -> str:
+    """移除 Whisper 把 initial_prompt 誤當轉錄內容輸出的情況。"""
+    if not text or not prompt:
+        return text
+    # 把 prompt 拆成關鍵短語，任何一段出現在輸出就代表是 prompt echo
+    markers = [s.strip() for s in prompt.replace("。", "。\n").splitlines() if len(s.strip()) > 4]
+    for marker in markers:
+        if marker in text:
+            after = text.split(marker, 1)[-1].strip()
+            # marker 後若有真實內容就保留，否則整段都是 prompt echo → 回傳空
+            return after if len(after) > 5 else ""
+    # 整段文字幾乎等於 prompt（允許少量差異）→ 也過濾掉
+    prompt_clean = prompt.replace("以下是", "").replace("，請使用繁體中文輸出。", "").strip()
+    if prompt_clean and text.strip() in prompt:
+        return ""
+    return text
+
+
 # ── mlx subprocess 轉錄腳本 ──────────────────────────────────
 _MLX_SCRIPT = """
 import sys, json
@@ -223,7 +241,7 @@ def run_whisper(
                 "msg": f"⏳ 啟動 Whisper {model_name} 模型進行語音辨識 (由於硬體效能，這可能需花費數十秒)..."
             })
             result    = _transcribe_file(tmp_wav, model_name, opts)
-            full_text = result.get("text", "").strip()
+            full_text = _strip_prompt_echo(result.get("text", "").strip(), prompt)
             lang      = result.get("language", "?")
             if has_llm_key():
                 broadcast("status", {"msg": "⏳ 語音辨識完畢，正在啟動 LLM 進行語意糾錯與標點處理..."})
@@ -247,7 +265,7 @@ def run_whisper(
                     cw.writeframes(frames)
                 try:
                     result   = _transcribe_file(chunk_path, model_name, opts)
-                    seg_text = result.get("text", "").strip()
+                    seg_text = _strip_prompt_echo(result.get("text", "").strip(), prompt)
                     lang     = result.get("language", lang)
                     texts.append(seg_text)
                 finally:
