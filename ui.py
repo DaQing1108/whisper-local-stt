@@ -745,6 +745,23 @@ function _initSSE() {
     lastText = Array.from(box.querySelectorAll('.transcript-text')).map(el => el.textContent).join('\n')
     syncUploadBtn()
   })
+  evtSrc.addEventListener('done', async e => {
+    const d = JSON.parse(e.data)
+    setBtnState('idle')
+    hideProcessingModal()
+    if (!d.ok) {
+      if (d.error !== 'empty') setStatus(`❌ ${d.error}`, 'error')
+      syncUploadBtn()
+      return
+    }
+    lastText = d.text
+    lastLang = d.language
+    syncUploadBtn()
+    setStatus('✅ 轉錄完成', 'ok')
+    if (notionEnabled && notionReady) {
+      await doUpload(d.text, d.language)
+    }
+  })
   return evtSrc
 }
 
@@ -1040,25 +1057,7 @@ recordArea.addEventListener('drop', e => {
   }
 });
 
-// SSE done 事件：轉錄背景完成後觸發
-evtSrc.addEventListener('done', async e => {
-  const d = JSON.parse(e.data)
-  setBtnState('idle')
-  hideProcessingModal()
-  
-  if (!d.ok) {
-    if (d.error !== 'empty') setStatus(`❌ ${d.error}`, 'error')
-    syncUploadBtn()
-    return
-  }
-  lastText = d.text
-  lastLang = d.language
-  syncUploadBtn()
-  setStatus('✅ 轉錄完成', 'ok')
-  if (notionEnabled && notionReady) {
-    await doUpload(d.text, d.language)
-  }
-})
+// done 事件已移入 _initSSE()，確保重連後仍有效
 
 // ── Upload ────────────────────────────────────────────────────
 async function uploadToNotion() {
