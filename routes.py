@@ -273,3 +273,59 @@ def save_config():
     os.environ["NOTION_PAGE_ID"] = page_id
 
     return jsonify(ok=True, page_label=label)
+
+
+@bp.route("/api/save_to_obsidian", methods=["POST"])
+def save_to_obsidian():
+    data = request.json or {}
+    text = data.get("text", "").strip()
+    title = data.get("title", "").strip()
+    source_file = data.get("source_file", "").strip()
+    tags = data.get("tags", [])
+
+    if not text:
+        return jsonify(error="沒有內容可存"), 400
+
+    vault_dir = Path(os.environ.get(
+        "OBSIDIAN_VAULT_DIR",
+        "/Users/daqingliao/Documents/Obsidian Vault/1P_Projects/1P-AI Meeting"
+    ))
+
+    try:
+        vault_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        return jsonify(error=f"無法建立資料夾：{e}"), 500
+
+    from datetime import datetime
+    now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H%M")
+
+    safe_title = title.replace("/", "-").replace(":", "-") if title else "會議記錄"
+    filename = f"{date_str}-{safe_title}.md"
+    filepath = vault_dir / filename
+
+    # 若同名檔案已存在，加上時間戳避免覆蓋
+    if filepath.exists():
+        filename = f"{date_str}-{time_str}-{safe_title}.md"
+        filepath = vault_dir / filename
+
+    tag_str = "\n".join(f"  - {t}" for t in (tags or ["會議記錄", "AI轉錄"]))
+    source_line = f"source_file: \"{source_file}\"\n" if source_file else ""
+
+    md_content = f"""---
+title: "{safe_title}"
+date: {date_str}
+{source_line}tags:
+{tag_str}
+---
+
+{text}
+"""
+
+    try:
+        filepath.write_text(md_content, encoding="utf-8")
+    except Exception as e:
+        return jsonify(error=f"寫入失敗：{e}"), 500
+
+    return jsonify(ok=True, filename=filename, path=str(filepath))

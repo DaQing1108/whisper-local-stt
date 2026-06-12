@@ -614,6 +614,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <div class="export-item" onclick="exportAs('md')">📝 Markdown .md</div>
           </div>
         </div>
+        <button class="btn" id="obsidian-btn" onclick="saveToObsidian()" disabled>🟣 存入 Obsidian</button>
         <button class="btn" onclick="clearTranscript()">🗑 清除</button>
         <button class="btn" id="history-btn" onclick="toggleHistory()" style="margin-left:auto;">🕓 歷史</button>
       </div>
@@ -1137,6 +1138,47 @@ function exportAs(fmt) {
 
 function _syncExportBtn() {
   document.getElementById('export-btn').disabled = !lastText
+  const ob = document.getElementById('obsidian-btn')
+  if (ob) ob.disabled = !lastText
+}
+
+async function saveToObsidian() {
+  const text = document.getElementById('transcript-box').innerText.trim()
+  if (!text) return
+
+  const now = new Date()
+  const dateStr = now.toISOString().slice(0,10)
+  const defaultTitle = `${dateStr} 會議記錄`
+  const title = prompt('筆記標題（將作為檔案名稱）', defaultTitle)
+  if (title === null) return  // 使用者取消
+
+  const btn = document.getElementById('obsidian-btn')
+  btn.disabled = true
+  btn.textContent = '🟣 存入中...'
+
+  try {
+    const res = await fetch('/api/save_to_obsidian', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        text,
+        title: title.trim() || defaultTitle,
+        source_file: lastLang ? `轉錄語言: ${lastLang}` : '',
+        tags: ['會議記錄', 'AI轉錄']
+      })
+    })
+    const d = await res.json()
+    if (d.ok) {
+      setStatus(`🟣 已存入 Obsidian：${d.filename}`, 'ok')
+    } else {
+      setStatus(`❌ 存入失敗：${d.error}`, 'error')
+    }
+  } catch(e) {
+    setStatus(`❌ 網路錯誤：${e.message}`, 'error')
+  } finally {
+    btn.disabled = !lastText
+    btn.textContent = '🟣 存入 Obsidian'
+  }
 }
 
 // ── O2: 轉錄歷史 ─────────────────────────────────────────────
