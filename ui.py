@@ -1146,12 +1146,6 @@ async function saveToObsidian() {
   const text = document.getElementById('transcript-box').innerText.trim()
   if (!text) return
 
-  const now = new Date()
-  const dateStr = now.toISOString().slice(0,10)
-  const defaultTitle = `${dateStr} 會議記錄`
-  const title = prompt('筆記標題（將作為檔案名稱）', defaultTitle)
-  if (title === null) return  // 使用者取消
-
   const btn = document.getElementById('obsidian-btn')
   btn.disabled = true
   btn.textContent = '🟣 存入中...'
@@ -1162,14 +1156,13 @@ async function saveToObsidian() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         text,
-        title: title.trim() || defaultTitle,
-        source_file: lastLang ? `轉錄語言: ${lastLang}` : '',
-        tags: ['會議記錄', 'AI轉錄']
+        lang: lastLang || 'zh',
+        meta: {}
       })
     })
     const d = await res.json()
     if (d.ok) {
-      setStatus(`🟣 已存入 Obsidian：${d.filename}`, 'ok')
+      setStatus(`🟣 已存入 Obsidian，LLM 整理中：${d.filename}`, 'ok')
     } else {
       setStatus(`❌ 存入失敗：${d.error}`, 'error')
     }
