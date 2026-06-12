@@ -196,6 +196,151 @@ def transcribe():
     return jsonify(status="processing"), 202
 
 
+# ── Chunked recording session state ──────────────────────────────
+_chunk_sessions: dict[str, dict] = {}
+_chunk_sessions_lock = threading.Lock()
+
+
+@bp.route("/api/upload-chunk", methods=["POST"])
+def upload_chunk():
+    """接收錄音分段，背景轉錄，每段完成後 SSE 推送 chunk_done。
+    最後一段完成且全段完成後，合併全文推送 transcript + done。"""
+    audio = request.files.get("audio")
+    if not audio:
+        return jsonify(error="沒有收到音訊"), 400
+
+    session_id  = request.form.get("session_id", "unknown")
+    chunk_index = int(request.form.get("chunk_index", 0))
+    is_last     = request.form.get("is_last", "false").lower() == "true"
+    model_name  = request.form.get("model", "small")
+    language    = request.form.get("language", "auto")
+    domain      = request.form.get("domain", "general")
+    extra_terms = request.form.get("extra_terms", "")
+    save_obsidian = request.form.get("obsidian", "false").lower() == "true"
+
+    ext = Path(audio.filename).suffix.lower() if audio.filename else ".webm"
+    audio_bytes = audio.read()
+
+    with _chunk_sessions_lock:
+        if session_id not in _chunk_sessions:
+            _chunk_sessions[session_id] = {
+                "chunks":       {},   # chunk_index → text
+                "langs":        {},   # chunk_index → lang
+                "total":        None, # set when is_last received
+                "done_count":   0,
+                "model":        model_name,
+                "language":     language,
+                "domain":       domain,
+                "extra_terms":  extra_terms,
+                "save_obsidian": save_obsidian,
+            }
+        sess = _chunk_sessions[session_id]
+        if is_last:
+            sess["total"] = chunk_index + 1
+
+    def _worker():
+        domain_label = {"media": "媒體", "medical": "醫療", "legal": "法律",
+                        "tech": "科技", "general": "通用"}.get(domain, domain)
+
+        if not _sse._transcribe_sem.acquire(blocking=False):
+            _sse._transcribe_sem.acquire()
+
+        try:
+            _sse.broadcast("status", {
+                "msg": f"⏳ 轉錄第 {chunk_index + 1} 段（模型：{model_name}，領域：{domain_label}）…"
+            })
+
+            # 取前一段結尾當 initial_prompt 增加連貫性
+            with _chunk_sessions_lock:
+                prev_text = sess["chunks"].get(chunk_index - 1, "")
+            context = prev_text[-100:].strip() if prev_text else ""
+
+            try:
+                from whisper_core import transcribe_audio as _transcribe_audio
+                text, lang, info = _transcribe_audio(
+                    audio_bytes, ext, model_name, language,
+                    domain=domain, extra_terms=extra_terms,
+                    initial_prompt_override=context or None,
+                )
+            except Exception as e:
+                logging.error("[Chunk %d] 轉錄失敗\n%s", chunk_index, traceback.format_exc())
+                _sse.broadcast("status", {"msg": f"❌ 第 {chunk_index + 1} 段轉錄失敗：{e}"})
+                text, lang = "", "?"
+
+            with _chunk_sessions_lock:
+                sess["chunks"][chunk_index] = text
+                sess["langs"][chunk_index]  = lang
+                sess["done_count"] += 1
+                total      = sess["total"]
+                done_count = sess["done_count"]
+                all_done   = (total is not None and done_count >= total)
+
+            _sse.broadcast("chunk_done", {
+                "session_id":  session_id,
+                "chunk_index": chunk_index,
+                "chunk_total": total or "?",
+                "text":        text,
+                "language":    lang,
+            })
+
+            if all_done:
+                _finish_session(session_id)
+
+        finally:
+            _sse._transcribe_sem.release()
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify(status="processing", session_id=session_id, chunk_index=chunk_index), 202
+
+
+def _finish_session(session_id: str) -> None:
+    """所有段落轉錄完畢：合併全文 → LLM 標點 → Obsidian → SSE transcript + done。"""
+    with _chunk_sessions_lock:
+        sess = _chunk_sessions.pop(session_id, None)
+    if not sess:
+        return
+
+    total = sess["total"] or len(sess["chunks"])
+    texts = [sess["chunks"].get(i, "") for i in range(total)]
+    langs = [sess["langs"].get(i, "?") for i in range(total)]
+    lang  = next((l for l in langs if l not in ("?", "")), "?")
+
+    full_text = "\n".join(t for t in texts if t).strip()
+    if not full_text:
+        _sse.broadcast("status", {"msg": "⚠️ 沒有偵測到語音內容"})
+        _sse.broadcast("done",   {"ok": False, "error": "empty"})
+        return
+
+    from llm_post import has_llm_key, llm_punctuate
+    if has_llm_key():
+        _sse.broadcast("status", {"msg": "⏳ 全文合併完畢，正在啟動 LLM 進行語意糾錯與標點處理…"})
+    full_text = llm_punctuate(full_text, sess.get("extra_terms", ""))
+
+    info = {"model": sess["model"], "domain": sess["domain"],
+            "extra_terms": sess["extra_terms"], "duration_seconds": 0}
+
+    _save_last_transcript({
+        "text":     full_text,
+        "language": lang,
+        "time":     datetime.now().strftime("%H:%M:%S"),
+        "segments": [],
+    })
+    _sse.broadcast("status",     {"msg": f"✅ 全部轉錄完成（偵測語言：{lang}）"})
+    _sse.broadcast("transcript", _last_transcript)
+
+    obsidian_file = ""
+    if sess.get("save_obsidian") and integrations._OBSIDIAN_PATH:
+        _sse.broadcast("status", {"msg": "💾 存入 Obsidian Vault…"})
+        obsidian_file = integrations.save_to_obsidian(full_text, lang, info)
+        if obsidian_file:
+            _sse.broadcast("status", {"msg": f"✅ 已存入 Obsidian：{Path(obsidian_file).name}"})
+        else:
+            _sse.broadcast("status", {"msg": "⚠️ Obsidian 存檔失敗"})
+
+    _sse.broadcast("done", {"ok": True, "text": full_text, "language": lang,
+                            "obsidian_file": obsidian_file})
+
+
 @bp.route("/upload", methods=["POST"])
 def upload():
     data    = request.json or {}

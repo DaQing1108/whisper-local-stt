@@ -27,7 +27,6 @@ _LLM_PUNCT_PROMPT = """\
 
 _LLM_PROVIDERS = [
     ("claude", "ANTHROPIC_API_KEY"),
-    ("gemini", "GEMINI_API_KEY"),
     ("openai", "OPENAI_API_KEY"),
 ]
 
@@ -67,32 +66,6 @@ def _llm_call_chunk(chunk: str, provider: str, api_key: str, extra_terms: str = 
         )
         with _req.urlopen(req, timeout=60) as resp:
             return _json.loads(resp.read())["content"][0]["text"]
-
-    elif provider == "gemini":
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"gemini-2.5-flash:generateContent?key={api_key}"
-        )
-        payload = _json.dumps({
-            "system_instruction": {"parts": [{"text": system_prompt}]},
-            "contents": [{"parts": [{"text": chunk}]}],
-            "generationConfig": {"temperature": 0},
-        }).encode()
-        req = _req.Request(url, data=payload, headers={"Content-Type": "application/json"})
-        with _req.urlopen(req, timeout=60) as resp:
-            data = _json.loads(resp.read())
-        candidates = data.get("candidates", [])
-        if not candidates:
-            raise RuntimeError(f"Gemini API returned no candidates: {data}")
-        content = candidates[0].get("content")
-        if not content:
-            raise RuntimeError(
-                f"Gemini API content blocked. FinishReason: {candidates[0].get('finishReason')}"
-            )
-        parts = content.get("parts", [])
-        if not parts:
-            raise RuntimeError("Gemini API returned empty parts")
-        return parts[0].get("text", "")
 
     else:  # openai
         payload = _json.dumps({

@@ -309,6 +309,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
   }
   #status-bar.ok    { color: var(--green); }
   #status-bar.error { color: var(--red); }
+  #status-bar.warn  { color: #f59e0b; }
 
   /* ── Timer ── */
   #timer {
@@ -660,14 +661,90 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
 <script>
 // ── State ─────────────────────────────────────────────────────
-let mediaRecorder = null
-let audioChunks   = []
-let isRecording   = false
-let timerInterval = null
-let timerSec      = 0
-let lastText      = ''
-let lastLang      = ''
-let notionEnabled   = false
+let mediaRecorder    = null
+let audioChunks      = []
+let isRecording      = false
+let timerInterval    = null
+let timerSec         = 0
+let lastText         = ''
+let lastLang         = ''
+let notionEnabled    = false
+let _wakeLock        = null
+
+// ── Chunked recording state ────────────────────────────────────
+const CHUNK_INTERVAL_MS = 10 * 60 * 1000  // 10 分鐘
+let _sessionId       = null
+let _chunkIndex      = 0
+let _chunkTimer      = null
+let _pendingChunks   = 0   // 上傳中的段數，全部完成才算 done
+
+function _genSessionId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
+}
+
+async function _flushChunk(isLast = false) {
+  if (audioChunks.length === 0) {
+    if (isLast) _onAllChunksUploaded()
+    return
+  }
+  const blob  = new Blob(audioChunks, { type: 'audio/webm' })
+  audioChunks = []   // 立刻清空，釋放記憶體
+  const idx   = _chunkIndex++
+
+  const form = new FormData()
+  form.append('audio',       blob, `chunk_${idx}.webm`)
+  form.append('session_id',  _sessionId)
+  form.append('chunk_index', idx)
+  form.append('is_last',     isLast ? 'true' : 'false')
+  form.append('model',       document.getElementById('model-sel').value)
+  form.append('language',    document.getElementById('lang-sel').value)
+  form.append('domain',      document.getElementById('domain-sel').value)
+  form.append('extra_terms', document.getElementById('extra-terms').value)
+  form.append('obsidian',    obsidianEnabled ? 'true' : 'false')
+
+  _pendingChunks++
+  try {
+    const r = await fetch('/api/upload-chunk', { method: 'POST', body: form })
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}))
+      setStatus(`❌ 上傳第 ${idx + 1} 段失敗：${d.error || '未知錯誤'}`, 'error')
+    }
+  } catch(e) {
+    setStatus(`❌ 上傳第 ${idx + 1} 段失敗：${e.message}`, 'error')
+  } finally {
+    _pendingChunks--
+    if (isLast && _pendingChunks === 0) _onAllChunksUploaded()
+  }
+}
+
+function _onAllChunksUploaded() {
+  // 所有段都已上傳，等 SSE done 事件由 server 觸發
+}
+
+function _fmtChunkTime(idx) {
+  const start = idx * 10
+  const end   = (idx + 1) * 10
+  return `${start}:00 - ${end}:00`
+}
+
+async function _acquireWakeLock() {
+  if (!('wakeLock' in navigator)) {
+    setStatus('⚠️ 錄音中請勿讓螢幕休眠（此裝置不支援自動防休眠）', 'warn')
+    return
+  }
+  try {
+    _wakeLock = await navigator.wakeLock.request('screen')
+    _wakeLock.addEventListener('release', () => {
+      if (isRecording) setStatus('⚠️ 螢幕鎖定可能中斷錄音，請保持螢幕開啟', 'warn')
+    })
+  } catch(e) {
+    setStatus('⚠️ 無法鎖定螢幕喚醒，長時間錄音請確認螢幕不會休眠', 'warn')
+  }
+}
+
+function _releaseWakeLock() {
+  if (_wakeLock) { _wakeLock.release(); _wakeLock = null }
+}
 let obsidianEnabled = false
 
 // ── 分頁互斥鎖 ────────────────────────────────────────────────
@@ -854,6 +931,21 @@ function _initSSE() {
     entry.className = 'transcript-entry'
     const now = new Date().toTimeString().slice(0,8)
     entry.innerHTML = `<div class="transcript-time" contenteditable="false">${now}｜第 ${d.chunk}/${d.total} 段</div>
+                       <div class="transcript-text">${escHtml(d.text)}</div>`
+    box.appendChild(entry)
+    box.scrollTop = box.scrollHeight
+    lastText = Array.from(box.querySelectorAll('.transcript-text')).map(el => el.textContent).join('\n')
+    syncUploadBtn()
+  })
+  evtSrc.addEventListener('chunk_done', e => {
+    const d = JSON.parse(e.data)
+    // 單段錄音不顯示中間結果，等 transcript 事件統一顯示
+    if (!d.text || d.chunk_total === 1) return
+    const box = document.getElementById('transcript-box')
+    const entry = document.createElement('div')
+    entry.className = 'transcript-entry chunk-interim'
+    const label = `第 ${d.chunk_index + 1}/${d.chunk_total} 段｜${_fmtChunkTime(d.chunk_index)}`
+    entry.innerHTML = `<div class="transcript-time" contenteditable="false">${label}</div>
                        <div class="transcript-text">${escHtml(d.text)}</div>`
     box.appendChild(entry)
     box.scrollTop = box.scrollHeight
@@ -1141,30 +1233,37 @@ async function startRecording() {
   }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    audioChunks  = []
+    audioChunks   = []
+    _sessionId    = _genSessionId()
+    _chunkIndex   = 0
+    _pendingChunks = 0
     mediaRecorder = new MediaRecorder(stream)
     mediaRecorder.ondataavailable = e => {
       if (e.data.size > 0) audioChunks.push(e.data)
     }
     mediaRecorder.onstop = async () => {
       stream.getTracks().forEach(t => t.stop())
-      if (audioChunks.length === 0) {
+      // 上傳最後一段（可能是唯一一段）
+      if (audioChunks.length === 0 && _chunkIndex === 0) {
         setStatus('⚠️ 錄音內容為空，請重試', 'error')
+        setBtnState('idle')
         return
       }
-      const blob = new Blob(audioChunks, { type: 'audio/webm' })
-      if (blob.size < 1000) {
-        setStatus('⚠️ 錄音太短或無聲音，請重試', 'error')
-        return
-      }
+      // 建立預覽播放器（必須在 _flushChunk 清空 audioChunks 之前）
       const player = document.getElementById('local-audio-player')
-      player.src = URL.createObjectURL(blob)
-      player.style.display = 'block'
-      await uploadFileBlob(blob, 'recording.webm')
+      if (audioChunks.length > 0) {
+        const previewBlob = new Blob([...audioChunks], { type: 'audio/webm' })
+        player.src = URL.createObjectURL(previewBlob)
+        player.style.display = 'block'
+      }
+      await _flushChunk(true)
     }
+    // 每 10 分鐘自動切段
+    _chunkTimer = setInterval(() => _flushChunk(false), CHUNK_INTERVAL_MS)
     mediaRecorder.start(100)
 
     _acquireTabLock()
+    await _acquireWakeLock()
     isRecording = true
     startWaveform(stream)
     startTimer()
@@ -1177,11 +1276,13 @@ async function startRecording() {
 
 function stopRecording() {
   isRecording = false
+  if (_chunkTimer) { clearInterval(_chunkTimer); _chunkTimer = null }
   stopTimer()
   stopWaveform()
   setRecordingUI(false)
   setStatus('⏳ 處理中…')
   _releaseTabLock()
+  _releaseWakeLock()
 
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop()  // onstop 已在 startRecording 設好，會自動送出
@@ -1281,6 +1382,8 @@ async function doUpload(text, lang) {
 // ── Transcript UI ─────────────────────────────────────────────
 function addTranscript(text, lang, time) {
   const box = document.getElementById('transcript-box')
+  // 清除分段的暫存條目，換成最終合併結果
+  box.querySelectorAll('.chunk-interim').forEach(el => el.remove())
   const entry = document.createElement('div')
   entry.className = 'transcript-entry'
   entry.innerHTML = `<div class="transcript-time">${time}｜${lang}</div>

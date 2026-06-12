@@ -413,6 +413,9 @@ def run_whisper(
         domain      = kwargs.get("domain", "general")
         extra_terms = kwargs.get("extra_terms", "")
         prompt      = build_prompt(domain, extra_terms)
+        # 分段錄音：用前段結尾覆蓋 initial_prompt 增加連貫性
+        if kwargs.get("initial_prompt_override"):
+            prompt = kwargs["initial_prompt_override"]
         print(f"[Whisper] prompt={repr(prompt[:60])}, lang={language}", flush=True)
 
         # language：明確指定 zh；auto 時也預設 zh（台灣繁體中文錄音）
@@ -476,3 +479,6 @@ def run_whisper(
     finally:
         Path(tmp_in_path).unlink(missing_ok=True)
         Path(tmp_wav).unlink(missing_ok=True)
+
+# alias for chunked upload route
+transcribe_audio = run_whisper
