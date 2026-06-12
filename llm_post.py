@@ -90,7 +90,7 @@ def _llm_call_chunk(chunk: str, provider: str, api_key: str, extra_terms: str = 
 
 def llm_punctuate(text: str, extra_terms: str = "") -> str:
     """自動選擇可用的 LLM provider 精修標點與同音詞糾錯。失敗時回傳原文。"""
-    if not text.strip():
+    if len(text.strip()) < 10:  # 少於 10 字無意義，跳過 LLM
         return text
 
     for provider, env_var in _LLM_PROVIDERS:
@@ -117,6 +117,13 @@ def llm_punctuate(text: str, extra_terms: str = "") -> str:
 
         results = [_llm_call_chunk(c, provider, api_key, extra_terms) for c in chunks]
         refined = "\n".join(results)
+
+        # 防護：若 LLM 回傳明顯是 meta-response（比輸入長超過 3 倍），回傳原文
+        if len(refined) > len(text) * 3:
+            logging.warning("[LLM:%s] 回傳疑似 meta-response（%d → %d 字），改用原始輸出",
+                            provider, len(text), len(refined))
+            return text
+
         logging.info("[LLM:%s] 標點後處理完成（%d → %d 字）", provider, len(text), len(refined))
         return refined
 

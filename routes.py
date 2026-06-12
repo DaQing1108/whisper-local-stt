@@ -217,6 +217,7 @@ def upload_chunk():
     domain      = request.form.get("domain", "general")
     extra_terms = request.form.get("extra_terms", "")
     save_obsidian = request.form.get("obsidian", "false").lower() == "true"
+    live_mode = request.form.get("mode", "standard") == "live"
 
     ext = Path(audio.filename).suffix.lower() if audio.filename else ".webm"
     audio_bytes = audio.read()
@@ -233,6 +234,7 @@ def upload_chunk():
                 "domain":       domain,
                 "extra_terms":  extra_terms,
                 "save_obsidian": save_obsidian,
+                "live_mode":    live_mode,
             }
         sess = _chunk_sessions[session_id]
         if is_last:
@@ -257,13 +259,16 @@ def upload_chunk():
 
             try:
                 from whisper_core import transcribe_audio as _transcribe_audio
+                print(f"[Chunk {chunk_index}] 開始轉錄 bytes={len(audio_bytes)} ext={ext}", flush=True)
                 text, lang, info = _transcribe_audio(
                     audio_bytes, ext, model_name, language,
                     domain=domain, extra_terms=extra_terms,
                     initial_prompt_override=context or None,
                 )
+                print(f"[Chunk {chunk_index}] 完成 text_len={len(text)} lang={lang}", flush=True)
             except Exception as e:
                 logging.error("[Chunk %d] 轉錄失敗\n%s", chunk_index, traceback.format_exc())
+                print(f"[Chunk {chunk_index}] 失敗: {traceback.format_exc()}", flush=True)
                 _sse.broadcast("status", {"msg": f"❌ 第 {chunk_index + 1} 段轉錄失敗：{e}"})
                 text, lang = "", "?"
 
@@ -281,6 +286,7 @@ def upload_chunk():
                 "chunk_total": total or "?",
                 "text":        text,
                 "language":    lang,
+                "live_mode":   sess.get("live_mode", False),
             })
 
             if all_done:
@@ -291,6 +297,33 @@ def upload_chunk():
 
     threading.Thread(target=_worker, daemon=True).start()
     return jsonify(status="processing", session_id=session_id, chunk_index=chunk_index), 202
+
+
+@bp.route("/api/finish-session", methods=["POST"])
+def finish_session_endpoint():
+    """當最後一段音訊為空（已在計時器 flush 時送出），強制結束 session。"""
+    session_id = request.form.get("session_id", "")
+    if not session_id:
+        return jsonify(error="missing session_id"), 400
+
+    with _chunk_sessions_lock:
+        sess = _chunk_sessions.get(session_id)
+        if sess is None:
+            return jsonify(status="not_found"), 200
+        # 若 total 尚未設定，以目前已完成的 chunk 數作為 total
+        done = sess.get("done_count", 0)
+        if sess["total"] is None:
+            sess["total"] = done
+        all_done = done >= sess["total"] and sess["total"] > 0
+
+    if all_done:
+        threading.Thread(target=_finish_session, args=(session_id,), daemon=True).start()
+    else:
+        # 可能還有 worker 在跑，讓最後的 worker 觸發 _finish_session
+        # 但要確保 total 已設定，這樣 all_done 條件能成立
+        pass
+
+    return jsonify(status="ok"), 200
 
 
 def _finish_session(session_id: str) -> None:
@@ -306,6 +339,7 @@ def _finish_session(session_id: str) -> None:
     lang  = next((l for l in langs if l not in ("?", "")), "?")
 
     full_text = "\n".join(t for t in texts if t).strip()
+    print(f"[Session {session_id[:8]}] total={total} chunks={len(texts)} full_text_len={len(full_text)}", flush=True)
     if not full_text:
         _sse.broadcast("status", {"msg": "⚠️ 沒有偵測到語音內容"})
         _sse.broadcast("done",   {"ok": False, "error": "empty"})

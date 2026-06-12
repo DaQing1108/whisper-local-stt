@@ -517,6 +517,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <option value="legal">法律</option>
           </select>
         </div>
+        <div class="flex-col">
+          <label>轉錄模式</label>
+          <select id="mode-sel">
+            <option value="standard" selected>標準（高品質）</option>
+            <option value="live">即時（15 秒延遲）</option>
+          </select>
+        </div>
         
         <div class="flex-col">
           <label>自訂專有名詞庫 <span style="color:var(--muted);font-size:11px">（按 Enter 新增）</span></label>
@@ -672,11 +679,13 @@ let notionEnabled    = false
 let _wakeLock        = null
 
 // ── Chunked recording state ────────────────────────────────────
-const CHUNK_INTERVAL_MS = 10 * 60 * 1000  // 10 分鐘
+const CHUNK_INTERVAL_STANDARD = 10 * 60 * 1000  // 10 分鐘
+const CHUNK_INTERVAL_LIVE     = 15 * 1000        // 15 秒
 let _sessionId       = null
 let _chunkIndex      = 0
 let _chunkTimer      = null
 let _pendingChunks   = 0   // 上傳中的段數，全部完成才算 done
+let _webmHeader      = null  // 第一個 webm blob（含 EBML header）
 
 function _genSessionId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
@@ -684,10 +693,32 @@ function _genSessionId() {
 
 async function _flushChunk(isLast = false) {
   if (audioChunks.length === 0) {
+    // 沒有新音訊，但若已有 chunks 且這是最後一段，需通知 server 結束
+    if (isLast && _chunkIndex > 0) {
+      const form = new FormData()
+      // 送一個空 blob（server 端會轉錄失敗但會觸發 all_done 判斷）
+      // 改為：直接用 session finalize endpoint
+      form.append('session_id',  _sessionId)
+      form.append('chunk_index', _chunkIndex)
+      form.append('is_last',     'true')
+      form.append('mode',        document.getElementById('mode-sel').value)
+      form.append('model',       document.getElementById('model-sel').value)
+      form.append('language',    document.getElementById('lang-sel').value)
+      form.append('domain',      document.getElementById('domain-sel').value)
+      form.append('extra_terms', document.getElementById('extra-terms').value)
+      form.append('obsidian',    obsidianEnabled ? 'true' : 'false')
+      try {
+        await fetch('/api/finish-session', { method: 'POST', body: form })
+      } catch(e) {}
+    }
     if (isLast) _onAllChunksUploaded()
     return
   }
-  const blob  = new Blob(audioChunks, { type: 'audio/webm' })
+  // chunk 1+ 需要在前面加上第一個 blob（含 WebM EBML header），否則 ffmpeg 無法解析
+  const chunks = (_chunkIndex > 0 && _webmHeader !== null)
+    ? [_webmHeader, ...audioChunks]
+    : [...audioChunks]
+  const blob  = new Blob(chunks, { type: 'audio/webm' })
   audioChunks = []   // 立刻清空，釋放記憶體
   const idx   = _chunkIndex++
 
@@ -701,6 +732,7 @@ async function _flushChunk(isLast = false) {
   form.append('domain',      document.getElementById('domain-sel').value)
   form.append('extra_terms', document.getElementById('extra-terms').value)
   form.append('obsidian',    obsidianEnabled ? 'true' : 'false')
+  form.append('mode',        document.getElementById('mode-sel').value)
 
   _pendingChunks++
   try {
@@ -939,12 +971,16 @@ function _initSSE() {
   })
   evtSrc.addEventListener('chunk_done', e => {
     const d = JSON.parse(e.data)
-    // 單段錄音不顯示中間結果，等 transcript 事件統一顯示
-    if (!d.text || d.chunk_total === 1) return
+    if (!d.text) return
+    const isLiveMode = d.live_mode === true
+    // 標準模式單段：等 transcript 統一顯示
+    if (!isLiveMode && d.chunk_total === 1) return
     const box = document.getElementById('transcript-box')
     const entry = document.createElement('div')
     entry.className = 'transcript-entry chunk-interim'
-    const label = `第 ${d.chunk_index + 1}/${d.chunk_total} 段｜${_fmtChunkTime(d.chunk_index)}`
+    const label = isLiveMode
+      ? new Date().toTimeString().slice(0,8)
+      : `第 ${d.chunk_index + 1}/${d.chunk_total} 段｜${_fmtChunkTime(d.chunk_index)}`
     entry.innerHTML = `<div class="transcript-time" contenteditable="false">${label}</div>
                        <div class="transcript-text">${escHtml(d.text)}</div>`
     box.appendChild(entry)
@@ -1234,12 +1270,25 @@ async function startRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     audioChunks   = []
+    _webmHeader   = null
     _sessionId    = _genSessionId()
     _chunkIndex   = 0
     _pendingChunks = 0
-    mediaRecorder = new MediaRecorder(stream)
+    // 重置 player，避免舊的 Error 狀態殘留
+    const _player = document.getElementById('local-audio-player')
+    _player.src   = ''
+    _player.style.display = 'none'
+    const _mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : MediaRecorder.isTypeSupported('audio/mp4')
+        ? 'audio/mp4'
+        : ''
+    mediaRecorder = _mimeType ? new MediaRecorder(stream, { mimeType: _mimeType }) : new MediaRecorder(stream)
     mediaRecorder.ondataavailable = e => {
-      if (e.data.size > 0) audioChunks.push(e.data)
+      if (e.data.size > 0) {
+        if (_webmHeader === null) _webmHeader = e.data  // 第一個 blob 含 EBML header
+        audioChunks.push(e.data)
+      }
     }
     mediaRecorder.onstop = async () => {
       stream.getTracks().forEach(t => t.stop())
@@ -1249,17 +1298,26 @@ async function startRecording() {
         setBtnState('idle')
         return
       }
-      // 建立預覽播放器（必須在 _flushChunk 清空 audioChunks 之前）
+      // 建立預覽播放器（即時模式因時間軸不連續無法正常播放，略過）
       const player = document.getElementById('local-audio-player')
-      if (audioChunks.length > 0) {
-        const previewBlob = new Blob([...audioChunks], { type: 'audio/webm' })
-        player.src = URL.createObjectURL(previewBlob)
+      const _isLiveMode = document.getElementById('mode-sel').value === 'live'
+      if (!_isLiveMode && audioChunks.length > 0) {
+        const actualType = mediaRecorder.mimeType || 'audio/webm'
+        const previewBlob = new Blob([...audioChunks], { type: actualType })
+        const previewURL  = URL.createObjectURL(previewBlob)
+        player.onerror = () => { player.style.display = 'none'; URL.revokeObjectURL(previewURL) }
+        player.src = previewURL
         player.style.display = 'block'
+      } else {
+        player.src = ''
+        player.style.display = 'none'
       }
       await _flushChunk(true)
     }
     // 每 10 分鐘自動切段
-    _chunkTimer = setInterval(() => _flushChunk(false), CHUNK_INTERVAL_MS)
+    const isLive = document.getElementById('mode-sel').value === 'live'
+    const chunkMs = isLive ? CHUNK_INTERVAL_LIVE : CHUNK_INTERVAL_STANDARD
+    _chunkTimer = setInterval(() => _flushChunk(false), chunkMs)
     mediaRecorder.start(100)
 
     _acquireTabLock()
@@ -1268,7 +1326,8 @@ async function startRecording() {
     startWaveform(stream)
     startTimer()
     setRecordingUI(true)
-    setStatus('🔴 錄音中…按下停止以轉錄')
+    const modeLabel = isLive ? '即時模式' : '標準模式'
+    setStatus(`🔴 錄音中（${modeLabel}）…按下停止以轉錄`)
   } catch(e) {
     setStatus(`❌ 無法存取麥克風：${e.message}`, 'error')
   }
