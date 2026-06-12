@@ -246,19 +246,32 @@ def get_config():
     token   = os.getenv("NOTION_TOKEN", "")
     page_id = os.getenv("NOTION_PAGE_ID", "")
     ready   = bool(token and page_id)
-    label   = page_id
+    label   = page_id[:8] + "…" if len(page_id) > 8 else page_id
     if ready:
         try:
             from notion_client import Client
             notion = Client(auth=token)
             page   = notion.pages.retrieve(page_id=page_id)
             props  = page.get("properties", {})
-            tp     = props.get("title", props.get("Name", {}))
-            tl     = tp.get("title", [])
-            label  = tl[0]["plain_text"] if tl else page_id
-        except Exception:
-            ready = False
-            label = page_id
+            # 嘗試各種可能的標題屬性名稱
+            title_prop = None
+            for key in ("title", "Name", "名稱", "標題"):
+                if key in props:
+                    title_prop = props[key]
+                    break
+            if title_prop is None:
+                # 找第一個 type=title 的屬性
+                for v in props.values():
+                    if isinstance(v, dict) and v.get("type") == "title":
+                        title_prop = v
+                        break
+            if title_prop:
+                tl = title_prop.get("title", [])
+                if tl:
+                    label = tl[0]["plain_text"]
+        except Exception as e:
+            logging.warning("[Config] Notion 標題抓取失敗：%s", e)
+            # ready 維持 True，只是 label 用縮短 ID
     return jsonify(ready=ready, page_label=label, page_id=page_id)
 
 
