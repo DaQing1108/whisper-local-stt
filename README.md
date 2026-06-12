@@ -1,4 +1,4 @@
-# 🎙️ Whisper 本地語音轉文字系統
+# 🎙️ Whisper 本地語音轉文字系統 v1.3.0
 
 利用 OpenAI Whisper 開源模型在本地端**免費**進行語音轉文字，支援長達 120 分鐘的會議錄音，並可一鍵上傳至 Notion 或 Obsidian。
 
