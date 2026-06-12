@@ -103,7 +103,14 @@ NOTION_PAGE_ID=你的頁面ID
 OBSIDIAN_MEETING_PATH=/Users/yourname/ObsidianVault/Meetings
 ```
 
-存檔後自動產生含 Dataview YAML 的 Markdown，並在背景喚醒 Claudian（Claude Code CLI）整理摘要與待辦事項。
+點擊「🟣 存入 Obsidian」後，系統自動在指定資料夾產生**兩個檔案**：
+
+| 檔案 | 說明 |
+|------|------|
+| `YYYY-MM-DD HH:MM 逐字稿前20字.md` | 原始逐字稿，含完整 YAML frontmatter（date / time / lang / model / domain） |
+| `YYYY-MM-DD HH:MM 逐字稿前20字_會議記錄.md` | LLM 自動整理的結構化會議記錄（摘要、決策、行動事項） |
+
+LLM 整理在背景非同步執行，完成後透過 SSE 推送狀態至 UI。
 
 ---
 
