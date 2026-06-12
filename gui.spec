@@ -70,7 +70,7 @@ app = BUNDLE(
     bundle_identifier='com.via.whisper-ai',
     info_plist={
         'NSMicrophoneUsageDescription': 'Whisper AI 需要麥克風進行會議錄音',
-        'CFBundleShortVersionString':   '1.2.0',
+        'CFBundleShortVersionString':   '1.3.0',
         'CFBundleName':                 'Whisper AI 會議記錄',
         'LSMinimumSystemVersion':       '12.0',
         'NSHighResolutionCapable':      True,
