@@ -8,6 +8,9 @@ transcribe.py — Whisper 本地轉錄 + Notion 自動匯入
 import argparse
 import json
 import os
+
+# 確保 Homebrew ffmpeg 在 PATH 中（.app 或非互動式 shell 環境）
+os.environ["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "")
 import sys
 from datetime import datetime
 from pathlib import Path

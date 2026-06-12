@@ -12,8 +12,24 @@ import sys
 import threading
 import time
 
-# 確保 cwd 是專案目錄（打包後 sys.executable 路徑不同）
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+# cwd 設為專案目錄（.app 和 Terminal 模式都統一）
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(_APP_DIR)
+# 確保 Resources 目錄也加入 sys.path（.app 打包後 import 需要）
+if _APP_DIR not in sys.path:
+    sys.path.insert(0, _APP_DIR)
+
+# 確保 Homebrew ffmpeg 在 PATH（.app 環境不繼承 shell PATH）
+os.environ["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "")
+
+# 將 stderr 導向 log 檔，方便排查 .app 崩潰原因
+import logging
+logging.basicConfig(
+    filename=os.path.join(_APP_DIR, "whisper_app.log"),
+    level=logging.WARNING,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+sys.stderr = open(os.path.join(_APP_DIR, "whisper_app.log"), "a")
 
 from dotenv import load_dotenv
 load_dotenv()

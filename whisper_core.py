@@ -15,11 +15,29 @@ from typing import Optional
 from llm_post import has_llm_key, llm_punctuate
 from sse import broadcast
 
+# ── ffmpeg 路徑解析（lazy，呼叫時才找，避免 import 時 PATH 尚未設好）────
+os.environ["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "")
+
+_FFMPEG: str | None = None
+
+def _get_ffmpeg() -> str:
+    global _FFMPEG
+    if _FFMPEG:
+        return _FFMPEG
+    for candidate in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "ffmpeg"):
+        try:
+            subprocess.run([candidate, "-version"], capture_output=True, check=True)
+            _FFMPEG = candidate
+            return candidate
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            continue
+    raise FileNotFoundError("找不到 ffmpeg，請執行：brew install ffmpeg")
+
 # ── mlx-whisper 可用性偵測 ────────────────────────────────────
 try:
     import mlx_whisper as _mlx_check  # noqa: F401
     _HAS_MLX = True
-except ImportError:
+except (ImportError, Exception):
     _HAS_MLX = False
 
 MLX_REPOS: dict[str, str] = {
@@ -215,7 +233,7 @@ def run_whisper(
     tmp_wav = tmp_in_path + ".wav"
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-i", tmp_in_path,
+            [_get_ffmpeg(), "-y", "-i", tmp_in_path,
              "-ar", "16000", "-ac", "1", "-f", "wav", tmp_wav],
             check=True, capture_output=True,
         )

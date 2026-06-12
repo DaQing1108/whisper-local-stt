@@ -1146,7 +1146,22 @@ async function startRecording() {
     mediaRecorder.ondataavailable = e => {
       if (e.data.size > 0) audioChunks.push(e.data)
     }
-    mediaRecorder.onstop = () => sendAudio(stream)
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop())
+      if (audioChunks.length === 0) {
+        setStatus('⚠️ 錄音內容為空，請重試', 'error')
+        return
+      }
+      const blob = new Blob(audioChunks, { type: 'audio/webm' })
+      if (blob.size < 1000) {
+        setStatus('⚠️ 錄音太短或無聲音，請重試', 'error')
+        return
+      }
+      const player = document.getElementById('local-audio-player')
+      player.src = URL.createObjectURL(blob)
+      player.style.display = 'block'
+      await uploadFileBlob(blob, 'recording.webm')
+    }
     mediaRecorder.start(100)
 
     _acquireTabLock()
@@ -1161,26 +1176,20 @@ async function startRecording() {
 }
 
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop()
-  }
   isRecording = false
   stopTimer()
   stopWaveform()
   setRecordingUI(false)
   setStatus('⏳ 處理中…')
   _releaseTabLock()
-  
-  if (audioChunks.length > 0) {
-    const blob = new Blob(audioChunks, { type: 'audio/webm' });
-    const player = document.getElementById('local-audio-player');
-    player.src = URL.createObjectURL(blob);
-    player.style.display = 'block';
+
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop()  // onstop 已在 startRecording 設好，會自動送出
   }
 }
 
 async function sendAudio(stream) {
-  stream.getTracks().forEach(t => t.stop())
+  stream?.getTracks().forEach(t => t.stop())
   const blob = new Blob(audioChunks, { type: 'audio/webm' })
   await uploadFileBlob(blob, 'recording.webm')
 }
