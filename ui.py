@@ -787,6 +787,7 @@ async function _onSSEReconnected() {
 
 // ── SSE ──────────────────────────────────────────────────────
 let _sseConnected = false
+let _sseEverConnected = false  // 第一次成功連線後才設為 true
 let _sseReconnectTimer = null
 let _sseRetryCount = 0
 const _SSE_MAX_RETRY = 10
@@ -824,12 +825,13 @@ function _initSSE() {
     saveToHistory(d.text, d.language, d.segments || [])
   })
   evtSrc.onopen = () => {
-    const wasDisconnected = !_sseConnected
+    const isReconnect = _sseEverConnected && !_sseConnected
     _sseConnected = true
+    _sseEverConnected = true
     _sseRetryCount = 0
     if (_sseReconnectTimer) { clearTimeout(_sseReconnectTimer); _sseReconnectTimer = null }
     _showSSEBanner(false)
-    if (wasDisconnected) _onSSEReconnected()
+    if (isReconnect) _onSSEReconnected()
   }
   evtSrc.onerror = () => {
     if (!_sseConnected && _sseRetryCount === 0) return // 初次連線失敗靜默等待
