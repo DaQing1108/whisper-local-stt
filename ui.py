@@ -670,6 +670,56 @@ let lastLang      = ''
 let notionEnabled   = false
 let obsidianEnabled = false
 
+// ── 分頁互斥鎖 ────────────────────────────────────────────────
+const TAB_ID = Math.random().toString(36).slice(2)
+const TAB_LOCK_KEY = 'whisper_recording_tab'
+const _tabChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('whisper_tab') : null
+
+function _acquireTabLock() {
+  localStorage.setItem(TAB_LOCK_KEY, TAB_ID)
+  _tabChannel?.postMessage({ type: 'recording_started', tabId: TAB_ID })
+}
+function _releaseTabLock() {
+  if (localStorage.getItem(TAB_LOCK_KEY) === TAB_ID) {
+    localStorage.removeItem(TAB_LOCK_KEY)
+  }
+  _tabChannel?.postMessage({ type: 'recording_stopped', tabId: TAB_ID })
+}
+function _isTabLocked() {
+  const owner = localStorage.getItem(TAB_LOCK_KEY)
+  return owner && owner !== TAB_ID
+}
+
+// 監聽其他分頁的廣播
+if (_tabChannel) {
+  _tabChannel.onmessage = e => {
+    if (e.data.tabId === TAB_ID) return
+    if (e.data.type === 'recording_started') {
+      // 其他分頁開始錄音，鎖定本頁錄音按鈕
+      _applyTabLockUI(true)
+    } else if (e.data.type === 'recording_stopped') {
+      _applyTabLockUI(false)
+    }
+  }
+}
+
+function _applyTabLockUI(locked) {
+  const btn = document.getElementById('record-btn')
+  const lbl = document.getElementById('btn-label')
+  if (!btn) return
+  if (locked) {
+    btn.disabled = true
+    btn.classList.add('processing')
+    if (lbl) lbl.textContent = '其他分頁錄音中'
+    setStatus('⚠️ 已有另一個分頁正在錄音，請關閉後使用此分頁', 'error')
+  } else {
+    btn.disabled = false
+    btn.classList.remove('processing')
+    if (lbl) lbl.textContent = '點擊開始錄音'
+    setStatus('')
+  }
+}
+
 const SESSION_KEY = 'whisper_session'
 
 function _saveSession() {
@@ -850,6 +900,9 @@ window.onload = async () => {
     const el = document.getElementById('app-version');
     if (el) el.textContent = 'v' + d.version;
   }).catch(() => {});
+
+  // 頁面載入時檢查是否有其他分頁正在錄音
+  if (_isTabLocked()) _applyTabLockUI(true)
 
   // 頁面載入時主動補領上次轉錄結果（應對電腦關機/伺服器重啟後重開頁面）
   if (!lastText) {
@@ -1076,9 +1129,14 @@ function cancelRecording() {
   stopTimer()
   stopWaveform()
   setRecordingUI(false)
+  _releaseTabLock()
 }
 
 async function startRecording() {
+  if (_isTabLocked()) {
+    setStatus('⚠️ 已有另一個分頁正在錄音，請先關閉該分頁', 'error')
+    return
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     audioChunks  = []
@@ -1089,6 +1147,7 @@ async function startRecording() {
     mediaRecorder.onstop = () => sendAudio(stream)
     mediaRecorder.start(100)
 
+    _acquireTabLock()
     isRecording = true
     startWaveform(stream)
     startTimer()
@@ -1108,6 +1167,7 @@ function stopRecording() {
   stopWaveform()
   setRecordingUI(false)
   setStatus('⏳ 處理中…')
+  _releaseTabLock()
   
   if (audioChunks.length > 0) {
     const blob = new Blob(audioChunks, { type: 'audio/webm' });
