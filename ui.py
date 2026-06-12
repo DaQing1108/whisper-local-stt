@@ -704,9 +704,60 @@ function _restoreSession() {
 
 let notionReady   = false
 
+// ── SSE reconnect recovery ────────────────────────────────────
+async function _onSSEReconnected() {
+  try {
+    const r = await fetch('/api/last_transcript')
+    const d = await r.json()
+    if (d.ok && d.text) {
+      if (!lastText) {
+        // UI 是空的，補回結果
+        addTranscript(d.text, d.language, d.time)
+        _exportSegments = d.segments || []
+        _syncExportBtn()
+        saveToHistory(d.text, d.language, d.segments || [])
+        setBtnState('idle')
+        hideProcessingModal()
+        setStatus('✅ 連線恢復，已補回轉錄結果', 'ok')
+      } else {
+        // UI 已有內容，只恢復 idle 狀態
+        setBtnState('idle')
+        hideProcessingModal()
+        setStatus('✅ 伺服器連線恢復', 'ok')
+      }
+    } else {
+      // 伺服器沒有暫存結果（可能重啟過），如果 UI 卡在進度就重置
+      setBtnState('idle')
+      hideProcessingModal()
+      if (!lastText) setStatus('⚠️ 連線已恢復，轉錄結果不存在，請重新上傳', 'error')
+      else setStatus('✅ 伺服器連線恢復', 'ok')
+    }
+  } catch(e) {}
+}
+
 // ── SSE ──────────────────────────────────────────────────────
 let _sseConnected = false
 let _sseReconnectTimer = null
+let _sseRetryCount = 0
+const _SSE_MAX_RETRY = 10
+const _SSE_RETRY_DELAYS = [2, 3, 5, 8, 13, 21, 30, 30, 30, 30] // 秒，指數退避
+
+function _showSSEBanner(show) {
+  let banner = document.getElementById('sse-banner')
+  if (!banner) {
+    banner = document.createElement('div')
+    banner.id = 'sse-banner'
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2000;background:rgba(239,68,68,0.9);color:#fff;text-align:center;padding:8px 16px;font-size:13px;backdrop-filter:blur(8px);transition:transform .3s;'
+    document.body.prepend(banner)
+  }
+  if (show) {
+    const retry = _SSE_RETRY_DELAYS[Math.min(_sseRetryCount, _SSE_MAX_RETRY - 1)]
+    banner.textContent = `⚠️ 與伺服器的連線中斷，${retry} 秒後自動重連（第 ${_sseRetryCount + 1} 次）`
+    banner.style.transform = 'translateY(0)'
+  } else {
+    banner.style.transform = 'translateY(-100%)'
+  }
+}
 
 function _initSSE() {
   const evtSrc = new EventSource('/events')
@@ -723,27 +774,26 @@ function _initSSE() {
     saveToHistory(d.text, d.language, d.segments || [])
   })
   evtSrc.onopen = () => {
+    const wasDisconnected = !_sseConnected
     _sseConnected = true
+    _sseRetryCount = 0
     if (_sseReconnectTimer) { clearTimeout(_sseReconnectTimer); _sseReconnectTimer = null }
+    _showSSEBanner(false)
+    if (wasDisconnected) _onSSEReconnected()
   }
   evtSrc.onerror = () => {
+    if (!_sseConnected && _sseRetryCount === 0) return // 初次連線失敗靜默等待
     _sseConnected = false
     evtSrc.close()
-    // 3 秒後重連，重連後補領最後一次轉錄結果
-    _sseReconnectTimer = setTimeout(async () => {
-      _initSSE()
-      try {
-        const r = await fetch('/api/last_transcript')
-        const d = await r.json()
-        if (d.ok && d.text && !lastText) {
-          addTranscript(d.text, d.language, d.time)
-          _exportSegments = d.segments || []
-          _syncExportBtn()
-          saveToHistory(d.text, d.language, d.segments || [])
-          setStatus('✅ 連線恢復，已補回轉錄結果', 'ok')
-        }
-      } catch(e) {}
-    }, 3000)
+    if (_sseRetryCount >= _SSE_MAX_RETRY) {
+      setStatus('❌ 伺服器連線失敗，請重新整理頁面', 'error')
+      _showSSEBanner(false)
+      return
+    }
+    _showSSEBanner(true)
+    const delay = (_SSE_RETRY_DELAYS[Math.min(_sseRetryCount, _SSE_RETRY_DELAYS.length - 1)]) * 1000
+    _sseRetryCount++
+    _sseReconnectTimer = setTimeout(() => _initSSE(), delay)
   }
   evtSrc.addEventListener('chunk', e => {
     const d = JSON.parse(e.data)
