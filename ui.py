@@ -692,31 +692,63 @@ function _restoreSession() {
 let notionReady   = false
 
 // ── SSE ──────────────────────────────────────────────────────
-const evtSrc = new EventSource('/events')
-evtSrc.addEventListener('status', e => {
-  const d = JSON.parse(e.data)
-  setStatus(d.msg)
-})
-evtSrc.addEventListener('transcript', e => {
-  const d = JSON.parse(e.data)
-  addTranscript(d.text, d.language, d.time)
-  _exportSegments = d.segments || []
-  _syncExportBtn()
-  saveToHistory(d.text, d.language, d.segments || [])
-})
-evtSrc.addEventListener('chunk', e => {
-  const d = JSON.parse(e.data)
-  const box = document.getElementById('transcript-box')
-  const entry = document.createElement('div')
-  entry.className = 'transcript-entry'
-  const now = new Date().toTimeString().slice(0,8)
-  entry.innerHTML = `<div class="transcript-time" contenteditable="false">${now}｜第 ${d.chunk}/${d.total} 段</div>
-                     <div class="transcript-text">${escHtml(d.text)}</div>`
-  box.appendChild(entry)
-  box.scrollTop = box.scrollHeight
-  lastText = Array.from(box.querySelectorAll('.transcript-text')).map(el => el.textContent).join('\n')
-  syncUploadBtn()
-})
+let _sseConnected = false
+let _sseReconnectTimer = null
+
+function _initSSE() {
+  const evtSrc = new EventSource('/events')
+
+  evtSrc.addEventListener('status', e => {
+    const d = JSON.parse(e.data)
+    setStatus(d.msg)
+  })
+  evtSrc.addEventListener('transcript', e => {
+    const d = JSON.parse(e.data)
+    addTranscript(d.text, d.language, d.time)
+    _exportSegments = d.segments || []
+    _syncExportBtn()
+    saveToHistory(d.text, d.language, d.segments || [])
+  })
+  evtSrc.onopen = () => {
+    _sseConnected = true
+    if (_sseReconnectTimer) { clearTimeout(_sseReconnectTimer); _sseReconnectTimer = null }
+  }
+  evtSrc.onerror = () => {
+    _sseConnected = false
+    evtSrc.close()
+    // 3 秒後重連，重連後補領最後一次轉錄結果
+    _sseReconnectTimer = setTimeout(async () => {
+      _initSSE()
+      try {
+        const r = await fetch('/api/last_transcript')
+        const d = await r.json()
+        if (d.ok && d.text && !lastText) {
+          addTranscript(d.text, d.language, d.time)
+          _exportSegments = d.segments || []
+          _syncExportBtn()
+          saveToHistory(d.text, d.language, d.segments || [])
+          setStatus('✅ 連線恢復，已補回轉錄結果', 'ok')
+        }
+      } catch(e) {}
+    }, 3000)
+  }
+  evtSrc.addEventListener('chunk', e => {
+    const d = JSON.parse(e.data)
+    const box = document.getElementById('transcript-box')
+    const entry = document.createElement('div')
+    entry.className = 'transcript-entry'
+    const now = new Date().toTimeString().slice(0,8)
+    entry.innerHTML = `<div class="transcript-time" contenteditable="false">${now}｜第 ${d.chunk}/${d.total} 段</div>
+                       <div class="transcript-text">${escHtml(d.text)}</div>`
+    box.appendChild(entry)
+    box.scrollTop = box.scrollHeight
+    lastText = Array.from(box.querySelectorAll('.transcript-text')).map(el => el.textContent).join('\n')
+    syncUploadBtn()
+  })
+  return evtSrc
+}
+
+_initSSE()
 
 // 監聽文字即時修改
 document.getElementById('transcript-box').addEventListener('input', (e) => {

@@ -21,6 +21,9 @@ bp = Blueprint("main", __name__)
 # HTML_PAGE 由 app.py 在建立 Blueprint 後注入
 HTML_PAGE: str = ""
 
+# 暫存最後一次轉錄結果，供 SSE 重連後補領
+_last_transcript: dict | None = None
+
 # 副檔名對照表
 _EXT_MAP = {
     "ogg": ".ogg", "wav": ".wav", "mp3": ".mp3",
@@ -143,13 +146,15 @@ def transcribe():
                 _sse.broadcast("done",   {"ok": False, "error": "empty"})
                 return
 
-            _sse.broadcast("status",     {"msg": f"✅ 轉錄完成（偵測語言：{lang}）"})
-            _sse.broadcast("transcript", {
+            global _last_transcript
+            _last_transcript = {
                 "text":     text,
                 "language": lang,
                 "time":     datetime.now().strftime("%H:%M:%S"),
                 "segments": info.get("segments", []),
-            })
+            }
+            _sse.broadcast("status",     {"msg": f"✅ 轉錄完成（偵測語言：{lang}）"})
+            _sse.broadcast("transcript", _last_transcript)
 
             obsidian_file = ""
             if save_obsidian and integrations._OBSIDIAN_PATH:
@@ -273,6 +278,13 @@ def save_config():
     os.environ["NOTION_PAGE_ID"] = page_id
 
     return jsonify(ok=True, page_label=label)
+
+
+@bp.route("/api/last_transcript", methods=["GET"])
+def last_transcript():
+    if _last_transcript:
+        return jsonify(ok=True, **_last_transcript)
+    return jsonify(ok=False)
 
 
 @bp.route("/api/save_to_obsidian", methods=["POST"])
