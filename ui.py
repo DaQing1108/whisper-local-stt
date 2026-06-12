@@ -656,6 +656,38 @@ let lastLang      = ''
 let notionEnabled   = false
 let obsidianEnabled = false
 
+const SESSION_KEY = 'whisper_session'
+
+function _saveSession() {
+  const box = document.getElementById('transcript-box')
+  if (!box) return
+  localStorage.setItem(SESSION_KEY, JSON.stringify({
+    html: box.innerHTML,
+    text: lastText,
+    lang: lastLang,
+    segments: _exportSegments || [],
+    ts: Date.now()
+  }))
+}
+
+function _restoreSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY)
+    if (!raw) return
+    const s = JSON.parse(raw)
+    // 只還原 6 小時內的 session
+    if (Date.now() - s.ts > 6 * 3600 * 1000) return
+    if (!s.html) return
+    const box = document.getElementById('transcript-box')
+    box.innerHTML = s.html
+    lastText = s.text || ''
+    lastLang = s.lang || ''
+    _exportSegments = s.segments || []
+    _syncExportBtn()
+    syncUploadBtn()
+  } catch(e) {}
+}
+
 let notionReady   = false
 
 // ── SSE ──────────────────────────────────────────────────────
@@ -689,6 +721,7 @@ evtSrc.addEventListener('chunk', e => {
 document.getElementById('transcript-box').addEventListener('input', (e) => {
   lastText = Array.from(e.currentTarget.querySelectorAll('.transcript-text')).map(el => el.textContent).join('\n') || e.currentTarget.innerText;
   syncUploadBtn();
+  _saveSession();
 });
 
 
@@ -696,8 +729,10 @@ document.getElementById('transcript-box').addEventListener('input', (e) => {
 let defaultVocabs = ["DGX", "健康2.0", "TVBS", "Bag & Pulse", "ASR", "Claude Code"];
 
 window.onload = async () => {
+  _restoreSession()
   await checkConfig();
   loadVocabLibrary();
+  renderHistory();
   fetch('/api/version').then(r => r.json()).then(d => {
     const el = document.getElementById('app-version');
     if (el) el.textContent = 'v' + d.version;
@@ -1026,8 +1061,10 @@ function addTranscript(text, lang, time) {
   box.appendChild(entry)
   box.scrollTop = box.scrollHeight
   lastText = text
+  lastLang = lang
   syncUploadBtn()
   _syncExportBtn()
+  _saveSession()
 }
 
 function copyTranscript() {
@@ -1169,7 +1206,9 @@ function clearTranscript() {
   document.getElementById('local-audio-player').style.display = 'none'
   document.getElementById('local-audio-player').src = ''
   lastText = ''
+  lastLang = ''
   _exportSegments = []
+  localStorage.removeItem(SESSION_KEY)
   syncUploadBtn()
   _syncExportBtn()
 }
