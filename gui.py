@@ -24,6 +24,24 @@ PORT = int(os.environ.get("PORT", 5001))
 URL  = f"http://localhost:{PORT}"
 
 
+def _free_port() -> None:
+    """釋放 PORT 上的舊程序（避免 .app 重複開啟時 port 衝突）。"""
+    import signal, subprocess
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f"tcp:{PORT}"],
+            capture_output=True, text=True
+        )
+        for pid in result.stdout.strip().splitlines():
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+            except Exception:
+                pass
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+
 def _start_flask() -> None:
     """在背景執行緒啟動 Flask + Waitress。"""
     import warnings
@@ -55,6 +73,8 @@ def _wait_for_server(timeout: int = 15) -> bool:
 
 def main() -> None:
     import webview
+
+    _free_port()
 
     # Flask 在 daemon 執行緒跑，視窗關掉後自動結束
     t = threading.Thread(target=_start_flask, daemon=True)
