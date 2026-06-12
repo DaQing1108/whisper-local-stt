@@ -1,6 +1,7 @@
 """routes.py — Flask 路由定義。"""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -21,8 +22,30 @@ bp = Blueprint("main", __name__)
 # HTML_PAGE 由 app.py 在建立 Blueprint 後注入
 HTML_PAGE: str = ""
 
-# 暫存最後一次轉錄結果，供 SSE 重連後補領
+# 最後一次轉錄結果 — 記憶體 + 磁碟雙重持久化
+_LAST_RESULT_FILE = Path(".last_result.json")
 _last_transcript: dict | None = None
+
+
+def _load_last_transcript() -> None:
+    global _last_transcript
+    if _LAST_RESULT_FILE.exists():
+        try:
+            _last_transcript = json.loads(_LAST_RESULT_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+
+def _save_last_transcript(data: dict) -> None:
+    global _last_transcript
+    _last_transcript = data
+    try:
+        _LAST_RESULT_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        logging.warning("[LastResult] 磁碟寫入失敗：%s", e)
+
+
+_load_last_transcript()
 
 # 副檔名對照表
 _EXT_MAP = {
@@ -146,13 +169,12 @@ def transcribe():
                 _sse.broadcast("done",   {"ok": False, "error": "empty"})
                 return
 
-            global _last_transcript
-            _last_transcript = {
+            _save_last_transcript({
                 "text":     text,
                 "language": lang,
                 "time":     datetime.now().strftime("%H:%M:%S"),
                 "segments": info.get("segments", []),
-            }
+            })
             _sse.broadcast("status",     {"msg": f"✅ 轉錄完成（偵測語言：{lang}）"})
             _sse.broadcast("transcript", _last_transcript)
 

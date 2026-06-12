@@ -850,7 +850,37 @@ window.onload = async () => {
     const el = document.getElementById('app-version');
     if (el) el.textContent = 'v' + d.version;
   }).catch(() => {});
+
+  // 頁面載入時主動補領上次轉錄結果（應對電腦關機/伺服器重啟後重開頁面）
+  if (!lastText) {
+    try {
+      const r = await fetch('/api/last_transcript')
+      const d = await r.json()
+      if (d.ok && d.text) {
+        addTranscript(d.text, d.language, d.time)
+        _exportSegments = d.segments || []
+        _syncExportBtn()
+        saveToHistory(d.text, d.language, d.segments || [])
+        setStatus('📂 已還原上次轉錄結果', 'ok')
+      }
+    } catch(e) {}
+  }
 };
+
+// 錄音中或轉錄中關閉/離開頁面時警告
+window.addEventListener('beforeunload', e => {
+  if (isRecording) {
+    e.preventDefault()
+    e.returnValue = '錄音尚未停止，關閉頁面將遺失錄音內容。'
+    return e.returnValue
+  }
+  const modal = document.getElementById('processing-modal')
+  if (modal && modal.classList.contains('active')) {
+    e.preventDefault()
+    e.returnValue = '轉錄正在進行中，關閉頁面後伺服器會繼續處理，重新開啟可補回結果。'
+    return e.returnValue
+  }
+})
 
 function getVocabLibrary() {
   let lib = localStorage.getItem('whisper_vocab_library');
