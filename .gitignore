@@ -25,3 +25,8 @@ outputs/
 .DS_Store?
 *.zip
 .last_result.json
+build/
+dist/
+*.app/
+__pycache__/
+*.spec.bak
