@@ -108,10 +108,9 @@ def main() -> None:
         min_size     = (720, 600),
         resizable    = True,
         text_select  = True,
-        confirm_close= True,      # 關閉前詢問（對應錄音中的 beforeunload）
+        confirm_close= True,
     )
 
-    # macOS：隱藏標題列讓 UI 佔滿視窗
     webview.start(debug=False, http_server=False)
 
 

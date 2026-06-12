@@ -34,11 +34,16 @@ def _get_ffmpeg() -> str:
     raise FileNotFoundError("找不到 ffmpeg，請執行：brew install ffmpeg")
 
 # ── mlx-whisper 可用性偵測 ────────────────────────────────────
-try:
-    import mlx_whisper as _mlx_check  # noqa: F401
-    _HAS_MLX = True
-except (ImportError, Exception):
+# PyInstaller frozen context: Metal/MLX causes C-level crashes inside the app sandbox.
+# Use faster-whisper (CPU) instead for reliability in the packaged .app.
+if getattr(sys, "frozen", False):
     _HAS_MLX = False
+else:
+    try:
+        import mlx_whisper as _mlx_check  # noqa: F401
+        _HAS_MLX = True
+    except (ImportError, Exception):
+        _HAS_MLX = False
 
 MLX_REPOS: dict[str, str] = {
     "tiny":   "mlx-community/whisper-tiny-mlx",
@@ -50,6 +55,21 @@ MLX_REPOS: dict[str, str] = {
 
 _fw_cache: dict = {}
 _fw_cache_lock = threading.Lock()
+
+
+def preload_default_model() -> None:
+    """起動時にバックグラウンドでデフォルトモデルをロード。
+    録音停止→転写時のメモリスパイクを防ぎ WKWebView content process のクラッシュを回避する。"""
+    model_name = "small"
+    try:
+        from faster_whisper import WhisperModel
+        with _fw_cache_lock:
+            if model_name not in _fw_cache:
+                print(f"[Whisper] preloading {model_name} model…", file=__import__('sys').stderr, flush=True)
+                _fw_cache[model_name] = WhisperModel(model_name, device="cpu", compute_type="int8")
+                print(f"[Whisper] model ready", file=__import__('sys').stderr, flush=True)
+    except Exception as e:
+        print(f"[Whisper] preload failed: {e}", file=__import__('sys').stderr, flush=True)
 
 CHUNK_SECONDS = 30 * 60  # 30 分鐘一段
 
@@ -180,11 +200,158 @@ def _transcribe_mlx_subprocess(
     return _json.loads(last_line[-1])
 
 
+def _transcribe_mlx_inprocess(
+    wav_path: str, model_name: str, language: Optional[str], initial_prompt: str = ""
+) -> dict:
+    # In a PyInstaller frozen app, sys.executable is the bootloader — running it with -c
+    # spawns a new full app instance (which calls _free_port() and kills the parent).
+    # Safe to call mlx_whisper directly since Metal already initialized at import time.
+    import mlx_whisper
+    repo   = MLX_REPOS.get(model_name, MLX_REPOS["small"])
+    kwargs: dict = {}
+    if language:
+        kwargs["language"] = language
+    if initial_prompt:
+        kwargs["initial_prompt"] = initial_prompt
+    result   = mlx_whisper.transcribe(wav_path, path_or_hf_repo=repo, **kwargs)
+    segments = [
+        {"text": s.get("text", ""), "start": s.get("start", 0), "end": s.get("end", 0)}
+        for s in result.get("segments", [])
+    ]
+    return {"text": result.get("text", ""), "language": result.get("language", "?"), "segments": segments}
+
+
+_FW_SUBPROCESS_SCRIPT = """
+import sys, json
+from faster_whisper import WhisperModel
+wav_path    = sys.argv[1]
+model_name  = sys.argv[2]
+language    = sys.argv[3] if sys.argv[3] != '__auto__' else None
+init_prompt = sys.argv[4] if len(sys.argv) > 4 else ''
+model = WhisperModel(model_name, device='cpu', compute_type='int8')
+segs_raw, info = model.transcribe(
+    wav_path, language=language, beam_size=5,
+    initial_prompt=init_prompt or None,
+    vad_filter=True, vad_parameters={'min_silence_duration_ms': 300},
+)
+segments = [{'text': s.text, 'start': s.start, 'end': s.end} for s in segs_raw]
+print(json.dumps({'text': ' '.join(s['text'] for s in segments).strip(),
+                  'language': info.language, 'segments': segments}))
+"""
+
+_SYSTEM_PYTHON: str | None = None
+_SYSTEM_PYTHON_MLX: str | None = None
+
+_SYS_PYTHON_CANDIDATES = (
+    "/Library/Developer/CommandLineTools/usr/bin/python3",
+    "/usr/bin/python3",
+    "/opt/homebrew/bin/python3",
+    "python3",
+)
+
+
+def _get_system_python() -> str | None:
+    """系統 python3 with faster_whisper。"""
+    global _SYSTEM_PYTHON
+    if _SYSTEM_PYTHON:
+        return _SYSTEM_PYTHON
+    for candidate in _SYS_PYTHON_CANDIDATES:
+        try:
+            r = subprocess.run(
+                [candidate, "-c", "from faster_whisper import WhisperModel"],
+                capture_output=True, timeout=10,
+            )
+            if r.returncode == 0:
+                _SYSTEM_PYTHON = candidate
+                return candidate
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    return None
+
+
+def _get_system_python_mlx() -> str | None:
+    """系統 python3 with mlx_whisper（Apple Silicon 加速）。"""
+    global _SYSTEM_PYTHON_MLX
+    if _SYSTEM_PYTHON_MLX:
+        return _SYSTEM_PYTHON_MLX
+    for candidate in _SYS_PYTHON_CANDIDATES:
+        try:
+            r = subprocess.run(
+                [candidate, "-c", "import mlx_whisper"],
+                capture_output=True, timeout=10,
+            )
+            if r.returncode == 0:
+                _SYSTEM_PYTHON_MLX = candidate
+                return candidate
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    return None
+
+
+def _transcribe_mlx_system_subprocess(
+    wav_path: str, model_name: str, language: Optional[str], initial_prompt: str = ""
+) -> dict:
+    """frozen .app 用：系統 python3 で mlx_whisper 転写 → メモリ分離 + Apple Silicon 加速。"""
+    import json as _json
+    py      = _get_system_python_mlx()
+    repo    = MLX_REPOS.get(model_name, MLX_REPOS["small"])
+    lang_arg = language or "__auto__"
+    proc = subprocess.run(
+        [py, "-c", _MLX_SCRIPT, wav_path, repo, lang_arg, initial_prompt],
+        capture_output=True, text=True, timeout=7200,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip().splitlines()[-1] if proc.stderr else "mlx subprocess failed")
+    last_line = [l for l in proc.stdout.strip().splitlines() if l.startswith("{")]
+    if not last_line:
+        raise RuntimeError("mlx subprocess 無輸出")
+    return _json.loads(last_line[-1])
+
+
+def _transcribe_fw_subprocess(
+    wav_path: str, model_name: str, language: Optional[str], initial_prompt: str = ""
+) -> dict:
+    """frozen .app 用：系統 python3 で faster-whisper 転写 → WKWebView とメモリ分離。"""
+    import json as _json
+    py       = _get_system_python()
+    lang_arg = language or "__auto__"
+    proc = subprocess.run(
+        [py, "-c", _FW_SUBPROCESS_SCRIPT, wav_path, model_name, lang_arg, initial_prompt],
+        capture_output=True, text=True, timeout=7200,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip().splitlines()[-1] if proc.stderr else "fw subprocess failed")
+    last_line = [l for l in proc.stdout.strip().splitlines() if l.startswith("{")]
+    if not last_line:
+        raise RuntimeError("fw subprocess 無輸出")
+    return _json.loads(last_line[-1])
+
+
 def _transcribe_file(wav_path: str, model_name: str, opts: dict) -> dict:
-    """優先 mlx-whisper subprocess；失敗或未安裝時 fallback faster-whisper。"""
+    """優先 mlx-whisper；frozen 時は system subprocess で分離；fallback faster-whisper。"""
     language       = opts.get("language") or None
     initial_prompt = opts.get("initial_prompt", "")
 
+    # frozen .app: 系統 python3 subprocess（メモリ分離）で優先 mlx → fallback fw
+    if getattr(sys, "frozen", False):
+        if _get_system_python_mlx():
+            try:
+                data = _transcribe_mlx_system_subprocess(wav_path, model_name, language, initial_prompt)
+                segs = data.get("segments", [])
+                text = _punctuate_segments(segs) if segs else data.get("text", "").strip()
+                return {"text": text, "language": data.get("language", "?"), "segments": segs}
+            except Exception as e:
+                print(f"[Whisper] mlx subprocess 失敗（{e}），切換 fw subprocess", flush=True)
+        if _get_system_python():
+            try:
+                data = _transcribe_fw_subprocess(wav_path, model_name, language, initial_prompt)
+                segs = data.get("segments", [])
+                text = _punctuate_segments(segs) if segs else data.get("text", "").strip()
+                return {"text": text, "language": data.get("language", "?"), "segments": segs}
+            except Exception as e:
+                print(f"[Whisper] fw subprocess 失敗（{e}），in-process fallback", file=sys.stderr, flush=True)
+
+    # 開發模式：mlx subprocess → fallback in-process faster-whisper
     if _HAS_MLX:
         try:
             data = _transcribe_mlx_subprocess(wav_path, model_name, language, initial_prompt)
@@ -194,7 +361,7 @@ def _transcribe_file(wav_path: str, model_name: str, opts: dict) -> dict:
         except Exception as e:
             print(f"[Whisper] mlx 失敗（{e}），切換 faster-whisper", flush=True)
 
-    # Fallback: faster-whisper
+    # Fallback: in-process faster-whisper
     from faster_whisper import WhisperModel
     with _fw_cache_lock:
         if model_name not in _fw_cache:
