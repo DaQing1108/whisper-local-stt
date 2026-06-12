@@ -645,6 +645,19 @@ HTML_PAGE = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- 停止錄音確認 modal -->
+<div id="stop-confirm-modal" class="modal-overlay" style="z-index:1000;">
+  <div class="modal-content" style="max-width:340px; text-align:center; padding:32px 28px;">
+    <div style="font-size:36px; margin-bottom:12px;">⏹️</div>
+    <h3 style="margin:0 0 8px; font-size:17px;">停止並轉錄？</h3>
+    <p id="stop-confirm-duration" style="color:var(--muted); font-size:13px; margin:0 0 24px;"></p>
+    <div style="display:flex; gap:10px; justify-content:center;">
+      <button class="btn" onclick="confirmStop(false)" style="flex:1; padding:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.15); border-radius:12px;">繼續錄音</button>
+      <button class="btn primary" onclick="confirmStop(true)" style="flex:1; padding:10px; border-radius:12px;">停止轉錄</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── State ─────────────────────────────────────────────────────
 let mediaRecorder = null
@@ -948,10 +961,41 @@ function toggleObsidian() {
 // ── Record ────────────────────────────────────────────────────
 async function toggleRecord() {
   if (isRecording) {
-    stopRecording()
+    // 錄音不足 3 秒 → 直接取消，不送出
+    if (timerSec < 3) {
+      cancelRecording()
+      setStatus('⚠️ 錄音太短，已取消', 'error')
+      return
+    }
+    // 顯示確認 modal
+    const m = document.getElementById('stop-confirm-modal')
+    const mins = Math.floor(timerSec / 60)
+    const secs = timerSec % 60
+    document.getElementById('stop-confirm-duration').textContent =
+      `已錄製 ${mins > 0 ? mins + ' 分 ' : ''}${secs} 秒，停止後將立即送出轉錄。`
+    m.classList.add('active')
   } else {
     await startRecording()
   }
+}
+
+function confirmStop(doStop) {
+  document.getElementById('stop-confirm-modal').classList.remove('active')
+  if (doStop) stopRecording()
+}
+
+function cancelRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.ondataavailable = null
+    mediaRecorder.onstop = null
+    mediaRecorder.stop()
+    mediaRecorder.stream?.getTracks().forEach(t => t.stop())
+  }
+  isRecording = false
+  audioChunks = []
+  stopTimer()
+  stopWaveform()
+  setRecordingUI(false)
 }
 
 async function startRecording() {
