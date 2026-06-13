@@ -584,6 +584,31 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <span id="config-status" style="font-size:13px;color:var(--muted)"></span>
       </div>
     </div>
+
+    <!-- LLM API Key 設定 card（P0-4）-->
+    <div class="card" id="llm-settings-card" style="margin-top: 16px;">
+      <div class="card-title">LLM 設定 <span style="font-size:11px;font-weight:normal;color:var(--muted);margin-left:6px;">（選填，用於標點後處理）</span></div>
+      <div class="settings-grid">
+        <div class="field full">
+          <label style="display:flex;justify-content:space-between;align-items:center;">
+            <span>Claude API Key <span style="color:var(--green);font-size:11px;" id="anthropic-key-status"></span></span>
+            <a href="https://console.anthropic.com/" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;">取得 Key ↗</a>
+          </label>
+          <input type="password" id="anthropic-key" placeholder="sk-ant-api03-…" autocomplete="new-password">
+        </div>
+        <div class="field full">
+          <label style="display:flex;justify-content:space-between;align-items:center;">
+            <span>OpenAI API Key <span style="color:var(--green);font-size:11px;" id="openai-key-status"></span></span>
+            <a href="https://platform.openai.com/api-keys" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;">取得 Key ↗</a>
+          </label>
+          <input type="password" id="openai-key" placeholder="sk-…" autocomplete="new-password">
+        </div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+        <button class="btn primary" onclick="saveLlmKeys()">儲存 API Key</button>
+        <span id="llm-save-status" style="font-size:13px;color:var(--muted)"></span>
+      </div>
+    </div>
   </aside>
 
   <!-- Right Workspace: Recording and Transcripts -->
@@ -653,6 +678,20 @@ HTML_PAGE = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- 模型下載 overlay（P0-2）-->
+<div id="model-download-overlay" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.75);backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;">
+  <div style="background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:36px 40px;max-width:400px;width:90%;text-align:center;">
+    <div style="font-size:40px;margin-bottom:16px;">📦</div>
+    <h3 style="margin:0 0 8px;font-size:18px;">首次下載語音模型</h3>
+    <p id="model-dl-model-name" style="color:var(--muted);font-size:13px;margin:0 0 20px;"></p>
+    <div style="background:var(--surface);border-radius:999px;height:6px;overflow:hidden;margin-bottom:16px;">
+      <div id="model-dl-bar" style="height:100%;background:var(--accent);border-radius:999px;width:0%;transition:width .4s;"></div>
+    </div>
+    <p id="model-dl-status" style="color:var(--muted);font-size:13px;margin:0;">正在下載，請保持網路連線…</p>
+    <p style="color:var(--muted);font-size:11px;margin-top:12px;opacity:0.6;">下載完成後將自動關閉，之後離線也可使用</p>
+  </div>
+</div>
+
 <!-- 停止錄音確認 modal -->
 <div id="stop-confirm-modal" class="modal-overlay" style="z-index:1000;">
   <div class="modal-content" style="max-width:340px; text-align:center; padding:32px 28px;">
@@ -667,6 +706,17 @@ HTML_PAGE = r"""<!DOCTYPE html>
 </div>
 
 <script>
+// ── 錯誤碼對照表（P0-5）──────────────────────────────────────
+const ERROR_MESSAGES = {
+  FFMPEG_MISSING:       'ffmpeg 未安裝。請執行 brew install ffmpeg，或重新執行 setup.sh',
+  MODEL_LOAD_FAILED:    '模型載入失敗。請確認網路連線後重試，或重新執行 setup.sh',
+  LLM_API_ERROR:        'LLM API 呼叫失敗。請至「LLM 設定」確認 API Key 是否正確',
+  NO_AUDIO:             '未收到音訊，請確認麥克風已授權',
+  EMPTY_TRANSCRIPT:     '未偵測到語音內容',
+  BROKEN_PIPE:          '連線中斷，請重新錄音',
+  TRANSCRIPTION_FAILED: '轉錄失敗，請查看側邊欄 log 取得詳細資訊',
+}
+
 // ── State ─────────────────────────────────────────────────────
 let mediaRecorder    = null
 let audioChunks      = []
@@ -993,7 +1043,9 @@ function _initSSE() {
     setBtnState('idle')
     hideProcessingModal()
     if (!d.ok) {
-      if (d.error !== 'empty') setStatus(`❌ ${d.error}`, 'error')
+      const msg = ERROR_MESSAGES[d.error_code] || d.error || '未知錯誤，請查看 log'
+      if (d.error_code !== 'EMPTY_TRANSCRIPT') setStatus(`❌ ${msg}`, 'error')
+      else setStatus('⚠️ 未偵測到語音內容', 'error')
       syncUploadBtn()
       return
     }
@@ -1200,6 +1252,7 @@ async function checkConfig() {
       badge.title = '未配置或連線失敗'
       badge.className = 'badge'
     }
+    _updateLlmKeyStatus(r.has_anthropic_key, r.has_openai_key)
     syncUploadBtn()
   } catch(e) {}
 }
@@ -1646,6 +1699,7 @@ async function saveConfig() {
   const pageId = document.getElementById('notion-page-id').value.trim()
   const statusEl = document.getElementById('config-status')
   statusEl.textContent = '驗證中…'
+  statusEl.style.color = 'var(--muted)'
   try {
     const r = await fetch('/config', {
       method: 'POST',
@@ -1660,6 +1714,96 @@ async function saveConfig() {
   } catch(e) {
     statusEl.textContent = `❌ ${e.message}`
     statusEl.style.color = 'var(--red)'
+  }
+}
+
+async function saveLlmKeys() {
+  const anthropicKey = document.getElementById('anthropic-key').value.trim()
+  const openaiKey    = document.getElementById('openai-key').value.trim()
+  const statusEl     = document.getElementById('llm-save-status')
+
+  if (!anthropicKey && !openaiKey) {
+    statusEl.textContent = '⚠️ 請至少填寫一個 Key'
+    statusEl.style.color = 'var(--yellow, #f59e0b)'
+    return
+  }
+  // 格式簡易驗證
+  if (anthropicKey && !anthropicKey.startsWith('sk-ant-')) {
+    statusEl.textContent = '⚠️ Claude Key 格式不正確（應以 sk-ant- 開頭）'
+    statusEl.style.color = 'var(--red)'
+    return
+  }
+  if (openaiKey && !openaiKey.startsWith('sk-')) {
+    statusEl.textContent = '⚠️ OpenAI Key 格式不正確（應以 sk- 開頭）'
+    statusEl.style.color = 'var(--red)'
+    return
+  }
+
+  statusEl.textContent = '儲存中…'
+  statusEl.style.color = 'var(--muted)'
+  try {
+    const r = await fetch('/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anthropic_key: anthropicKey, openai_key: openaiKey }),
+    })
+    const d = await r.json()
+    if (!r.ok) throw new Error(d.error)
+    document.getElementById('anthropic-key').value = ''
+    document.getElementById('openai-key').value = ''
+    statusEl.textContent = '✅ 已儲存'
+    statusEl.style.color = 'var(--green)'
+    _updateLlmKeyStatus(d.has_anthropic_key, d.has_openai_key)
+    setTimeout(() => { statusEl.textContent = '' }, 3000)
+  } catch(e) {
+    statusEl.textContent = `❌ ${e.message}`
+    statusEl.style.color = 'var(--red)'
+  }
+}
+
+function _updateLlmKeyStatus(hasAnthropic, hasOpenai) {
+  const aEl = document.getElementById('anthropic-key-status')
+  const oEl = document.getElementById('openai-key-status')
+  if (aEl) aEl.textContent = hasAnthropic ? '✓ 已設定' : ''
+  if (oEl) oEl.textContent = hasOpenai    ? '✓ 已設定' : ''
+}
+
+// ── 模型下載偵測（P0-2）──────────────────────────────────────
+let _modelPollTimer = null
+
+async function checkModelReady(modelName) {
+  const overlay = document.getElementById('model-download-overlay')
+  try {
+    const r = await fetch(`/api/model-status?model=${encodeURIComponent(modelName)}`)
+    const d = await r.json()
+    if (d.cached) {
+      overlay.style.display = 'none'
+      if (_modelPollTimer) { clearInterval(_modelPollTimer); _modelPollTimer = null }
+      return true
+    }
+    // 未快取 → 顯示 overlay 並觸發下載
+    document.getElementById('model-dl-model-name').textContent =
+      `模型：${modelName}（首次下載約 100–500 MB，之後離線也可使用）`
+    overlay.style.display = 'flex'
+
+    if (d.state !== 'downloading') {
+      await fetch('/api/warmup-model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelName }),
+      })
+    }
+    // 偽進度動畫（無法取得真實百分比，讓用戶知道在下載）
+    let pct = parseInt(document.getElementById('model-dl-bar').style.width) || 0
+    if (pct < 90) {
+      pct = Math.min(pct + 3, 90)
+      document.getElementById('model-dl-bar').style.width = pct + '%'
+    }
+    document.getElementById('model-dl-status').textContent =
+      d.state === 'error' ? '❌ 下載失敗，請確認網路後重新整理頁面' : '正在下載，請保持網路連線…'
+    return false
+  } catch(e) {
+    return true // 無法連線就不擋錄音
   }
 }
 
@@ -1838,6 +1982,31 @@ function stopWaveform() {
   const ctx = canvas.getContext('2d')
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 }
+
+// ── 頁面初始化 ────────────────────────────────────────────────
+async function _initModelCheck() {
+  const modelName = document.getElementById('model-sel').value
+  const ready = await checkModelReady(modelName)
+  if (!ready) {
+    // 每 3 秒輪詢，直到模型就緒
+    _modelPollTimer = setInterval(async () => {
+      const r = await checkModelReady(modelName)
+      if (r && _modelPollTimer) {
+        clearInterval(_modelPollTimer)
+        _modelPollTimer = null
+      }
+    }, 3000)
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  _initModelCheck()
+  // 切換模型時重新檢查
+  document.getElementById('model-sel').addEventListener('change', () => {
+    if (_modelPollTimer) { clearInterval(_modelPollTimer); _modelPollTimer = null }
+    _initModelCheck()
+  })
+})
 </script>
 </body>
 </html>

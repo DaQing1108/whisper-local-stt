@@ -37,6 +37,30 @@ if [ -f "$PROJECT_DIR/AppIcon.icns" ]; then
   echo "🎨 圖示已加入"
 fi
 
+# ── 打包 ffmpeg（讓 .app 免 Homebrew 依賴）────────────────────
+FFMPEG_BIN_DIR="$RESOURCES_DIR/bin"
+mkdir -p "$FFMPEG_BIN_DIR"
+# 也在專案目錄建立 bin/，讓 Terminal 模式也能找到
+mkdir -p "$PROJECT_DIR/bin"
+
+FFMPEG_SRC=""
+for candidate in "/opt/homebrew/bin/ffmpeg" "/usr/local/bin/ffmpeg" "$(which ffmpeg 2>/dev/null)"; do
+  if [ -x "$candidate" ]; then
+    FFMPEG_SRC="$candidate"
+    break
+  fi
+done
+
+if [ -n "$FFMPEG_SRC" ]; then
+  cp "$FFMPEG_SRC" "$FFMPEG_BIN_DIR/ffmpeg"
+  cp "$FFMPEG_SRC" "$PROJECT_DIR/bin/ffmpeg"
+  chmod +x "$FFMPEG_BIN_DIR/ffmpeg" "$PROJECT_DIR/bin/ffmpeg"
+  echo "🎬 ffmpeg 已打包：$FFMPEG_SRC → bin/ffmpeg"
+else
+  echo "⚠️  未找到 ffmpeg，.app 執行時需要系統已安裝 ffmpeg"
+  echo "   建議執行：brew install ffmpeg"
+fi
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅ 完成！"

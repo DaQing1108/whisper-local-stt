@@ -11,6 +11,11 @@ PROJECT_DIR="__PROJECT_DIR__"
 PORT=5001
 LOG="$PROJECT_DIR/whisper_server.log"
 
+# ── 優先使用打包在 .app 或專案目錄內的 ffmpeg ─────────────────
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_RESOURCES="$(dirname "$SCRIPT_DIR")/Resources/bin"
+export PATH="$APP_RESOURCES:$PROJECT_DIR/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 # ── 若 server 已在執行，直接開啟瀏覽器 ──────────────────────
 if lsof -ti tcp:$PORT &>/dev/null; then
   open "http://localhost:$PORT"

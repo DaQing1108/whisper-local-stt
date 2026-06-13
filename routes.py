@@ -15,7 +15,7 @@ from flask import Blueprint, Response, jsonify, make_response, request, stream_w
 import integrations
 import sse as _sse
 from version import __version__
-from whisper_core import run_whisper
+from whisper_core import TranscriptionError, is_model_cached, run_whisper, warmup_model_async, _warmup_state, _warmup_lock
 
 bp = Blueprint("main", __name__)
 
@@ -58,6 +58,24 @@ _EXT_MAP = {
 @bp.route("/api/version")
 def api_version():
     return jsonify({"version": __version__})
+
+
+# ── P0-2: 模型下載狀態 ────────────────────────────────────────
+
+@bp.route("/api/model-status")
+def model_status():
+    model_name = request.args.get("model", "small")
+    cached = is_model_cached(model_name)
+    with _warmup_lock:
+        state = _warmup_state.get(model_name, "cached" if cached else "unknown")
+    return jsonify(cached=cached, state=state, model=model_name)
+
+
+@bp.route("/api/warmup-model", methods=["POST"])
+def warmup_model_route():
+    model_name = (request.json or {}).get("model", "small")
+    warmup_model_async(model_name)
+    return jsonify(status="started", model=model_name)
 
 
 @bp.route("/")
@@ -155,18 +173,23 @@ def transcribe():
                     extra_terms=extra_terms,
                 )
             except BrokenPipeError:
-                _sse.broadcast("status", {"msg": "⚠️ 轉錄中斷（Broken pipe），請重試"})
-                _sse.broadcast("done",   {"ok": False, "error": "broken_pipe"})
+                _sse.broadcast("status", {"msg": "⚠️ 轉錄中斷，請重試"})
+                _sse.broadcast("done",   {"ok": False, "error_code": "BROKEN_PIPE", "error": "broken_pipe"})
+                return
+            except TranscriptionError as e:
+                logging.error("[Whisper] 轉錄錯誤 %s: %s", e.code, e)
+                _sse.broadcast("status", {"msg": f"❌ 轉錄失敗"})
+                _sse.broadcast("done",   {"ok": False, "error_code": e.code, "error": str(e)})
                 return
             except Exception as e:
                 logging.error("[Whisper] 轉錄失敗\n%s", traceback.format_exc())
-                _sse.broadcast("status", {"msg": f"❌ 轉錄失敗：{e}"})
-                _sse.broadcast("done",   {"ok": False, "error": str(e)})
+                _sse.broadcast("status", {"msg": f"❌ 轉錄失敗"})
+                _sse.broadcast("done",   {"ok": False, "error_code": "TRANSCRIPTION_FAILED", "error": str(e)})
                 return
 
             if not text:
                 _sse.broadcast("status", {"msg": "⚠️ 沒有偵測到語音內容"})
-                _sse.broadcast("done",   {"ok": False, "error": "empty"})
+                _sse.broadcast("done",   {"ok": False, "error_code": "EMPTY_TRANSCRIPT", "error": "empty"})
                 return
 
             _save_last_transcript({
@@ -266,10 +289,14 @@ def upload_chunk():
                     initial_prompt_override=context or None,
                 )
                 print(f"[Chunk {chunk_index}] 完成 text_len={len(text)} lang={lang}", flush=True)
+            except TranscriptionError as e:
+                logging.error("[Chunk %d] 轉錄錯誤 %s: %s", chunk_index, e.code, e)
+                _sse.broadcast("status", {"msg": f"❌ 第 {chunk_index + 1} 段轉錄失敗"})
+                _sse.broadcast("done",   {"ok": False, "error_code": e.code, "error": str(e)})
+                text, lang = "", "?"
             except Exception as e:
                 logging.error("[Chunk %d] 轉錄失敗\n%s", chunk_index, traceback.format_exc())
-                print(f"[Chunk {chunk_index}] 失敗: {traceback.format_exc()}", flush=True)
-                _sse.broadcast("status", {"msg": f"❌ 第 {chunk_index + 1} 段轉錄失敗：{e}"})
+                _sse.broadcast("status", {"msg": f"❌ 第 {chunk_index + 1} 段轉錄失敗"})
                 text, lang = "", "?"
 
             with _chunk_sessions_lock:
@@ -342,7 +369,7 @@ def _finish_session(session_id: str) -> None:
     print(f"[Session {session_id[:8]}] total={total} chunks={len(texts)} full_text_len={len(full_text)}", flush=True)
     if not full_text:
         _sse.broadcast("status", {"msg": "⚠️ 沒有偵測到語音內容"})
-        _sse.broadcast("done",   {"ok": False, "error": "empty"})
+        _sse.broadcast("done",   {"ok": False, "error_code": "EMPTY_TRANSCRIPT", "error": "empty"})
         return
 
     from llm_post import has_llm_key, llm_punctuate
@@ -432,14 +459,12 @@ def get_config():
             notion = Client(auth=token)
             page   = notion.pages.retrieve(page_id=page_id)
             props  = page.get("properties", {})
-            # 嘗試各種可能的標題屬性名稱
             title_prop = None
             for key in ("title", "Name", "名稱", "標題"):
                 if key in props:
                     title_prop = props[key]
                     break
             if title_prop is None:
-                # 找第一個 type=title 的屬性
                 for v in props.values():
                     if isinstance(v, dict) and v.get("type") == "title":
                         title_prop = v
@@ -450,8 +475,13 @@ def get_config():
                     label = tl[0]["plain_text"]
         except Exception as e:
             logging.warning("[Config] Notion 標題抓取失敗：%s", e)
-            # ready 維持 True，只是 label 用縮短 ID
-    return jsonify(ready=ready, page_label=label, page_id=page_id)
+    return jsonify(
+        ready=ready,
+        page_label=label,
+        page_id=page_id,
+        has_anthropic_key=bool(os.getenv("ANTHROPIC_API_KEY")),
+        has_openai_key=bool(os.getenv("OPENAI_API_KEY")),
+    )
 
 
 @bp.route("/config", methods=["POST"])
@@ -459,19 +489,24 @@ def save_config():
     data    = request.json or {}
     token   = data.get("token", "").strip()
     page_id = data.get("page_id", "").strip()
-    if not token or not page_id:
-        return jsonify(error="請填寫 Token 與頁面 ID"), 400
+    anthropic_key = data.get("anthropic_key", "").strip()
+    openai_key    = data.get("openai_key", "").strip()
 
-    try:
-        from notion_client import Client
-        notion = Client(auth=token)
-        page   = notion.pages.retrieve(page_id=page_id)
-        props  = page.get("properties", {})
-        tp     = props.get("title", props.get("Name", {}))
-        tl     = tp.get("title", [])
-        label  = tl[0]["plain_text"] if tl else page_id
-    except Exception as e:
-        return jsonify(error=f"連線失敗：{e}"), 400
+    label = ""
+    if token and page_id:
+        try:
+            from notion_client import Client
+            notion = Client(auth=token)
+            page   = notion.pages.retrieve(page_id=page_id)
+            props  = page.get("properties", {})
+            tp     = props.get("title", props.get("Name", {}))
+            tl     = tp.get("title", [])
+            label  = tl[0]["plain_text"] if tl else page_id
+        except Exception as e:
+            return jsonify(error=f"Notion 連線失敗：{e}"), 400
+    elif token or page_id:
+        # 只填一個的情況
+        return jsonify(error="請同時填寫 Token 與頁面 ID"), 400
 
     # 局部更新 .env（保留其他已有的 key）
     env_path = Path(".env")
@@ -482,16 +517,31 @@ def save_config():
             if raw and not raw.startswith("#") and "=" in raw:
                 k, _, v = raw.partition("=")
                 existing[k.strip()] = v.strip()
-    existing["NOTION_TOKEN"]   = token
-    existing["NOTION_PAGE_ID"] = page_id
+
+    if token:
+        existing["NOTION_TOKEN"]   = token
+        os.environ["NOTION_TOKEN"] = token
+    if page_id:
+        existing["NOTION_PAGE_ID"]   = page_id
+        os.environ["NOTION_PAGE_ID"] = page_id
+    if anthropic_key:
+        existing["ANTHROPIC_API_KEY"]   = anthropic_key
+        os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+    if openai_key:
+        existing["OPENAI_API_KEY"]   = openai_key
+        os.environ["OPENAI_API_KEY"] = openai_key
+
     env_path.write_text(
         "\n".join(f"{k}={v}" for k, v in existing.items()) + "\n",
         encoding="utf-8",
     )
-    os.environ["NOTION_TOKEN"]   = token
-    os.environ["NOTION_PAGE_ID"] = page_id
 
-    return jsonify(ok=True, page_label=label)
+    return jsonify(
+        ok=True,
+        page_label=label or page_id,
+        has_anthropic_key=bool(existing.get("ANTHROPIC_API_KEY")),
+        has_openai_key=bool(existing.get("OPENAI_API_KEY")),
+    )
 
 
 @bp.route("/api/last_transcript", methods=["GET"])

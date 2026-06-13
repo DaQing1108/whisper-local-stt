@@ -12,6 +12,13 @@ import wave
 from pathlib import Path
 from typing import Optional
 
+
+class TranscriptionError(Exception):
+    """帶有 error_code 的轉錄錯誤，routes.py 可直接取用 code 推送結構化 SSE。"""
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
 from llm_post import has_llm_key, llm_punctuate
 from sse import broadcast
 
@@ -24,14 +31,20 @@ def _get_ffmpeg() -> str:
     global _FFMPEG
     if _FFMPEG:
         return _FFMPEG
-    for candidate in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "ffmpeg"):
+    # 優先找打包在專案目錄 bin/ 內的 ffmpeg（build_app.sh 會複製過來）
+    _bundled = Path(__file__).parent / "bin" / "ffmpeg"
+    candidates = [str(_bundled), "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "ffmpeg"]
+    for candidate in candidates:
         try:
             subprocess.run([candidate, "-version"], capture_output=True, check=True)
             _FFMPEG = candidate
             return candidate
         except (FileNotFoundError, subprocess.CalledProcessError):
             continue
-    raise FileNotFoundError("找不到 ffmpeg，請執行：brew install ffmpeg")
+    raise TranscriptionError(
+        "FFMPEG_MISSING",
+        "找不到 ffmpeg。請在終端機執行：brew install ffmpeg，或重新執行 setup.sh",
+    )
 
 # ── mlx-whisper 可用性偵測 ────────────────────────────────────
 # PyInstaller frozen context: Metal/MLX causes C-level crashes inside the app sandbox.
@@ -55,6 +68,54 @@ MLX_REPOS: dict[str, str] = {
 
 _fw_cache: dict = {}
 _fw_cache_lock = threading.Lock()
+
+# 模型暖機狀態：routes.py 的 /api/model-status 讀取
+_warmup_state: dict[str, str] = {}  # model_name → "cached" | "downloading" | "error"
+_warmup_lock = threading.Lock()
+
+# faster-whisper 使用的 HuggingFace repo 名稱
+_FW_REPOS: dict[str, str] = {
+    "tiny":    "Systran/faster-whisper-tiny",
+    "base":    "Systran/faster-whisper-base",
+    "small":   "Systran/faster-whisper-small",
+    "medium":  "Systran/faster-whisper-medium",
+    "large":   "Systran/faster-whisper-large-v3",
+    "large-v2": "Systran/faster-whisper-large-v2",
+}
+
+
+def is_model_cached(model_name: str) -> bool:
+    """檢查 faster-whisper 模型是否已在本地快取，不觸發下載。"""
+    hf_cache = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface" / "hub"))
+    repo = _FW_REPOS.get(model_name, f"Systran/faster-whisper-{model_name}")
+    dir_name = "models--" + repo.replace("/", "--")
+    # 快取目錄存在且有 snapshots 子目錄即視為已下載
+    return (hf_cache / dir_name / "snapshots").exists()
+
+
+def warmup_model_async(model_name: str) -> None:
+    """在背景執行緒中下載並載入模型，狀態寫入 _warmup_state。"""
+    with _warmup_lock:
+        if _warmup_state.get(model_name) in ("downloading", "cached"):
+            return
+        _warmup_state[model_name] = "downloading"
+
+    def _do():
+        try:
+            from faster_whisper import WhisperModel
+            with _fw_cache_lock:
+                if model_name not in _fw_cache:
+                    logging.info("[Whisper] 下載/載入模型：%s", model_name)
+                    _fw_cache[model_name] = WhisperModel(model_name, device="cpu", compute_type="int8")
+            with _warmup_lock:
+                _warmup_state[model_name] = "cached"
+            logging.info("[Whisper] 模型就緒：%s", model_name)
+        except Exception as e:
+            logging.error("[Whisper] 模型載入失敗：%s", e)
+            with _warmup_lock:
+                _warmup_state[model_name] = "error"
+
+    threading.Thread(target=_do, daemon=True).start()
 
 
 def preload_default_model() -> None:
