@@ -52,6 +52,7 @@ for candidate in "/opt/homebrew/bin/ffmpeg" "/usr/local/bin/ffmpeg" "$(which ffm
 done
 
 if [ -n "$FFMPEG_SRC" ]; then
+  rm -f "$FFMPEG_BIN_DIR/ffmpeg" "$PROJECT_DIR/bin/ffmpeg"
   cp "$FFMPEG_SRC" "$FFMPEG_BIN_DIR/ffmpeg"
   cp "$FFMPEG_SRC" "$PROJECT_DIR/bin/ffmpeg"
   chmod +x "$FFMPEG_BIN_DIR/ffmpeg" "$PROJECT_DIR/bin/ffmpeg"
