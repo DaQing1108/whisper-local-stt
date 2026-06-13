@@ -1,4 +1,4 @@
-# 🎙️ Whisper 本地語音轉文字系統 v1.4.0
+# 🎙️ Whisper 本地語音轉文字系統 v1.5.0
 
 利用 OpenAI Whisper 開源模型在本地端**免費**進行語音轉文字，支援長達 180 分鐘的會議錄音，並可一鍵上傳至 Notion 或 Obsidian。
 
@@ -10,7 +10,7 @@
 
 - macOS 12+ / Linux（Windows 未測試）
 - Python 3.9+
-- ffmpeg（`brew install ffmpeg`）
+- ffmpeg（已內建於 .app bundle；Terminal 模式請執行 `brew install ffmpeg`）
 - 麥克風（錄音功能）
 
 ---
@@ -28,14 +28,13 @@ bash start.sh
 
 然後開啟瀏覽器：**http://localhost:5001**
 
-### 方式二：原生 macOS App
+### 方式二：原生 macOS App（推薦）
 
 ```bash
-pip install pywebview pyinstaller
-pyinstaller gui.spec
+bash build_app.sh
 ```
 
-產生的 `dist/Whisper AI 會議記錄.app` 可拖到 Applications，雙擊即開，無需 Terminal。
+產生的 `Whisper STT.app` 可拖到 Applications，雙擊即開，無需 Terminal，**已內建 ffmpeg 無需 Homebrew**。
 
 > 首次開啟 macOS 可能跳「無法驗證開發者」，至**系統設定 → 隱私權與安全性**點「仍要開啟」一次即可。
 
@@ -59,6 +58,10 @@ pyinstaller gui.spec
 | 📓 Obsidian 存檔 | 自動產生含 Dataview YAML frontmatter 的 .md 檔 |
 | 🤖 LLM 標點精修 | 轉錄後自動以 Claude / OpenAI 精修標點與同音詞糾錯 |
 | 🛡️ 意外防護 | 錄音誤按確認 modal、SSE 斷線自動重連、頁面關閉警告、跨分頁互斥鎖 |
+| 📦 ffmpeg 內建 | .app bundle 已內建 ffmpeg binary，無需 Homebrew，開箱即用 |
+| ⬇️ 模型下載提示 | 首次使用未快取模型時顯示下載進度 overlay，不再無聲等待 |
+| 🔑 LLM Key 設定 | UI 內直接設定 Claude / OpenAI API Key，無需手動編輯 .env |
+| 🇹🇼 中文錯誤說明 | 所有錯誤狀態附帶繁體中文說明與操作建議 |
 | 💤 防休眠 | 錄音中啟用 WakeLock，防止 macOS 螢幕休眠中斷錄音 |
 | 🖥️ 原生 App | pywebview 包裝，可打包為 macOS .app 無需 Terminal |
 
@@ -171,6 +174,9 @@ Whisper/
 ├── listen.py        # 麥克風即時轉錄工具
 ├── setup.sh         # 一鍵安裝腳本
 ├── start.sh         # 一鍵啟動腳本
+├── build_app.sh     # .app bundle 打包腳本（含 ffmpeg bundling）
+├── launcher.sh      # .app 內部啟動腳本（由 build_app.sh 嵌入）
+├── bin/ffmpeg       # 打包的 ffmpeg binary（build_app.sh 複製）
 └── .env.example     # 環境變數範本
 ```
 
@@ -183,8 +189,8 @@ Whisper/
 | `NOTION_TOKEN` | 選填 | Notion Integration Token |
 | `NOTION_PAGE_ID` | 選填 | Notion 目標頁面 ID |
 | `OBSIDIAN_MEETING_PATH` | 選填 | Obsidian Vault 存檔路徑 |
-| `ANTHROPIC_API_KEY` | 選填 | Claude LLM 標點後處理 |
-| `OPENAI_API_KEY` | 選填 | OpenAI LLM 標點後處理 |
+| `ANTHROPIC_API_KEY` | 選填 | Claude LLM 標點後處理（可在 UI「LLM 設定」直接設定） |
+| `OPENAI_API_KEY` | 選填 | OpenAI LLM 標點後處理（可在 UI「LLM 設定」直接設定） |
 | `PORT` | 選填 | 伺服器 port（預設 5001）|
 
 ---
