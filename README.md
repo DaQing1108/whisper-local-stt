@@ -231,6 +231,10 @@ python3 listen.py
 - 修復只有 Gemini API Key 時標點後處理靜默失效的問題
 - 移除未使用的 `preload_default_model` 函式
 
+**App 封裝**
+- PyInstaller 原生 macOS App（WKWebView 視窗），關閉視窗自動停止 server
+- 分發 ZIP 維持輕量 shell-script bundle，適合有 Python 環境的用戶
+
 ### v1.4.0
 
 - 即時模式（15 秒分段）、WebM 修正、音訊播放器穩定性

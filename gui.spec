@@ -66,12 +66,12 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='Whisper AI 會議記錄.app',
-    icon=None,         # 換成 icon.icns 路徑可自訂圖示
+    icon='AppIcon.icns' if Path(SPECPATH, 'AppIcon.icns').exists() else None,
     bundle_identifier='com.via.whisper-ai',
     info_plist={
         'NSMicrophoneUsageDescription': 'Whisper AI 需要麥克風進行會議錄音',
-        'CFBundleShortVersionString':   '1.3.0',
-        'CFBundleName':                 'Whisper AI 會議記錄',
+        'CFBundleShortVersionString':   '1.5.0',
+        'CFBundleName':                 'Whisper STT',
         'LSMinimumSystemVersion':       '12.0',
         'NSHighResolutionCapable':      True,
     },
