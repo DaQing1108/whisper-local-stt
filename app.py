@@ -57,6 +57,7 @@ warnings.filterwarnings('ignore')
 
 # ── Flask app ─────────────────────────────────────────────────
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024 * 1024  # 1 GB
 
 # 注入 HTML 後再註冊 Blueprint（routes.py 依賴 HTML_PAGE）
 from ui import HTML_PAGE

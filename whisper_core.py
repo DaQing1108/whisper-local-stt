@@ -118,20 +118,6 @@ def warmup_model_async(model_name: str) -> None:
     threading.Thread(target=_do, daemon=True).start()
 
 
-def preload_default_model() -> None:
-    """起動時にバックグラウンドでデフォルトモデルをロード。
-    録音停止→転写時のメモリスパイクを防ぎ WKWebView content process のクラッシュを回避する。"""
-    model_name = "small"
-    try:
-        from faster_whisper import WhisperModel
-        with _fw_cache_lock:
-            if model_name not in _fw_cache:
-                print(f"[Whisper] preloading {model_name} model…", file=__import__('sys').stderr, flush=True)
-                _fw_cache[model_name] = WhisperModel(model_name, device="cpu", compute_type="int8")
-                print(f"[Whisper] model ready", file=__import__('sys').stderr, flush=True)
-    except Exception as e:
-        print(f"[Whisper] preload failed: {e}", file=__import__('sys').stderr, flush=True)
-
 CHUNK_SECONDS = 30 * 60  # 30 分鐘一段
 
 # ── 領域 initial_prompt ───────────────────────────────────────

@@ -68,6 +68,7 @@ def _start_flask() -> None:
     import routes
 
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024 * 1024  # 1 GB
     routes.HTML_PAGE = HTML_PAGE
     app.register_blueprint(routes.bp)
 

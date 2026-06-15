@@ -8,6 +8,7 @@
   GPT-4o-mini   ≈ NT$0.05
 未設定任何 key 時靜默跳過。
 """
+# NOTE: provider 優先順序須與 integrations._call_llm 保持一致
 from __future__ import annotations
 
 import logging
@@ -26,8 +27,9 @@ _LLM_PUNCT_PROMPT = """\
 """
 
 _LLM_PROVIDERS = [
-    ("claude", "ANTHROPIC_API_KEY"),
-    ("openai", "OPENAI_API_KEY"),
+    ("claude",  "ANTHROPIC_API_KEY"),
+    ("gemini",  "GEMINI_API_KEY"),
+    ("openai",  "OPENAI_API_KEY"),
 ]
 
 
@@ -66,6 +68,24 @@ def _llm_call_chunk(chunk: str, provider: str, api_key: str, extra_terms: str = 
         )
         with _req.urlopen(req, timeout=60) as resp:
             return _json.loads(resp.read())["content"][0]["text"]
+
+    elif provider == "gemini":
+        body = _json.dumps({
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"parts": [{"text": chunk}]}],
+        }).encode()
+        for model in ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"):
+            try:
+                req = _req.Request(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                )
+                with _req.urlopen(req, timeout=60) as resp:
+                    return _json.loads(resp.read())["candidates"][0]["content"]["parts"][0]["text"]
+            except Exception:
+                continue
+        raise RuntimeError("所有 Gemini 模型均不可用")
 
     else:  # openai
         payload = _json.dumps({

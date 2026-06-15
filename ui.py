@@ -501,7 +501,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <div class="flex-col">
           <label>語言</label>
           <select id="lang-sel">
-            <option value="auto">自動偵測</option>
+            <option value="auto">繁體中文優先</option>
             <option value="zh" selected>中文</option>
             <option value="en">英文</option>
             <option value="ja">日文</option>

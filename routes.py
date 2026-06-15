@@ -293,7 +293,9 @@ def upload_chunk():
                 logging.error("[Chunk %d] 轉錄錯誤 %s: %s", chunk_index, e.code, e)
                 _sse.broadcast("status", {"msg": f"❌ 第 {chunk_index + 1} 段轉錄失敗"})
                 _sse.broadcast("done",   {"ok": False, "error_code": e.code, "error": str(e)})
-                text, lang = "", "?"
+                with _chunk_sessions_lock:
+                    _chunk_sessions.pop(session_id, None)
+                return
             except Exception as e:
                 logging.error("[Chunk %d] 轉錄失敗\n%s", chunk_index, traceback.format_exc())
                 _sse.broadcast("status", {"msg": f"❌ 第 {chunk_index + 1} 段轉錄失敗"})

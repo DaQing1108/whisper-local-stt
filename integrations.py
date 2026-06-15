@@ -118,7 +118,7 @@ def _trigger_meeting_notes_async(fpath: Path) -> None:
             logging.warning("[MeetingNotes] 異常：%s", e)
             broadcast("status", {"msg": f"❌ 會議記錄整理異常：{e}"})
 
-    threading.Thread(target=run, daemon=False).start()
+    threading.Thread(target=run, daemon=True).start()
 
 
 def save_to_obsidian(text: str, lang: str, meta: dict | None = None) -> str:
