@@ -213,6 +213,30 @@ python3 listen.py
 
 ---
 
+## 版本記錄
+
+### v1.5.0（目前版本）
+
+**新功能**
+- ffmpeg 內建於 .app bundle，無需 Homebrew
+- 首次使用未快取模型時顯示下載進度 overlay
+- UI 直接設定 Claude / OpenAI API Key
+- 所有錯誤狀態附帶繁體中文說明
+
+**修復**（v1.5.0 patch）
+- 分段錄音（live mode）chunk 失敗後，不再送出第二個成功事件覆蓋錯誤提示
+- 加入 1 GB 上傳上限，防止超長錄音意外耗盡記憶體
+- 關閉 app 視窗後不再卡等 LLM 整理會議記錄（最長 300 秒）
+- 語言選單「自動偵測」更名為「繁體中文優先」，如實反映實際行為
+- 修復只有 Gemini API Key 時標點後處理靜默失效的問題
+- 移除未使用的 `preload_default_model` 函式
+
+### v1.4.0
+
+- 即時模式（15 秒分段）、WebM 修正、音訊播放器穩定性
+
+---
+
 ## License
 
 MIT
