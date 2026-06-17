@@ -88,9 +88,36 @@ def _wait_for_server(timeout: int = 15) -> bool:
     return False
 
 
+def _patch_wkwebview_media_permission() -> None:
+    """Inject WKUIDelegate method to auto-grant microphone access in WKWebView.
+
+    pywebview's cocoa backend does not implement
+    webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:
+    so getUserMedia() always fails. This patch adds the method via objc runtime.
+    """
+    try:
+        import objc
+        from Foundation import NSObject
+        from WebKit import WKWebView  # type: ignore
+
+        # The selector was introduced in macOS 12.0
+        sel = b"webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:"
+
+        def _grant_media(_self, webview, origin, frame, capture_type, handler):
+            # WKPermissionDecisionGrant = 1 (allow microphone / camera)
+            handler(1)
+
+        objc.classAddMethod(WKWebView, sel, _grant_media)
+    except Exception as exc:
+        # pyobjc not available or macOS < 12 — silently skip
+        import logging
+        logging.warning("[gui] WKWebView media patch failed: %s", exc)
+
+
 def main() -> None:
     import webview
 
+    _patch_wkwebview_media_permission()
     _free_port()
 
     # Flask 在 daemon 執行緒跑，視窗關掉後自動結束
@@ -112,7 +139,13 @@ def main() -> None:
         confirm_close= True,
     )
 
-    webview.start(debug=False, http_server=False)
+    webview.start(
+        debug        = False,
+        http_server  = False,
+        # 讓 WKWebView 自動允許麥克風存取（不彈出系統授權 prompt）
+        settings     = {"ALLOW_DOWNLOADS": False},
+        private_mode = False,   # 保留 cookie/permission 狀態，避免每次重問
+    )
 
 
 if __name__ == "__main__":

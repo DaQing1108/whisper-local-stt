@@ -67,7 +67,7 @@ coll = COLLECT(
 
 app = BUNDLE(
     coll,
-    name='Whisper AI 會議記錄.app',
+    name='Whisper STT.app',
     icon='AppIcon.icns' if Path(SPECPATH, 'AppIcon.icns').exists() else None,
     bundle_identifier='com.via.whisper-ai',
     info_plist={
