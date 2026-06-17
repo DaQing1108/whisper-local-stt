@@ -645,9 +645,14 @@ def system_audio_stop():
         if sess:
             chunks = sess.get("chunks", {})
             full_text = "\n".join(chunks[i] for i in sorted(chunks) if chunks[i]).strip()
+            lang = sess.get("language", "zh")
             if full_text:
-                _sse.broadcast("transcript", {"text": full_text, "language": sess.get("language", "zh")})
-            _sse.broadcast("done", {"ok": True})
+                ts = datetime.now().strftime("%H:%M:%S")
+                _save_last_transcript({"text": full_text, "language": lang, "time": ts, "segments": []})
+                _sse.broadcast("transcript", {"text": full_text, "language": lang, "time": ts, "segments": []})
+                _sse.broadcast("done", {"ok": True, "text": full_text, "language": lang, "obsidian_file": ""})
+            else:
+                _sse.broadcast("done", {"ok": False, "error_code": "EMPTY_TRANSCRIPT", "error": "empty"})
             with _chunk_sessions_lock:
                 _chunk_sessions.pop(session_id, None)
 

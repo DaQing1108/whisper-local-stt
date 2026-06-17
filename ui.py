@@ -1057,6 +1057,12 @@ function _initSSE() {
     }
     lastText = d.text
     lastLang = d.language
+    // Fallback: if transcript event was missed, display result from done event
+    const box = document.getElementById('transcript-box')
+    if (d.text && box && box.querySelectorAll('.transcript-entry').length === 0) {
+      const now = new Date().toTimeString().slice(0,8)
+      addTranscript(d.text, d.language || '?', now)
+    }
     syncUploadBtn()
     setStatus('✅ 轉錄完成', 'ok')
     if (notionEnabled && notionReady) {

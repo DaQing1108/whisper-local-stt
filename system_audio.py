@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 import struct
 import subprocess
 import threading
@@ -31,6 +32,18 @@ def _find_binary() -> Path | None:
         if p.exists() and p.is_file():
             return p
     return None
+
+
+_SILENCE_RMS_THRESHOLD = 100  # int16 RMS < 100 ≈ -68 dBFS → treat as silence
+
+
+def _is_silence(pcm: bytes) -> bool:
+    """Return True if the PCM chunk is effectively silent."""
+    if len(pcm) < 2:
+        return True
+    samples = struct.unpack(f"<{len(pcm) // 2}h", pcm)
+    rms = math.sqrt(sum(s * s for s in samples) / len(samples))
+    return rms < _SILENCE_RMS_THRESHOLD
 
 
 def _pcm_to_wav(pcm: bytes) -> bytes:
@@ -139,6 +152,9 @@ class SystemAudioCapture:
             idx = self._chunk_index
             self._chunk_index += 1
         try:
+            if _is_silence(pcm):
+                logging.info("[SystemAudio] chunk %d skipped (silence)", idx)
+                return
             wav = _pcm_to_wav(pcm)
             self._on_chunk(wav, idx)
         except Exception as exc:
