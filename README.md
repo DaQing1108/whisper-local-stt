@@ -1,4 +1,4 @@
-# 🎙️ Whisper 本地語音轉文字系統 v1.5.0
+# 🎙️ Whisper 本地語音轉文字系統 v1.6.0
 
 利用 OpenAI Whisper 開源模型在本地端**免費**進行語音轉文字，支援長達 180 分鐘的會議錄音，並可一鍵上傳至 Notion 或 Obsidian。
 
@@ -8,7 +8,7 @@
 
 ## 系統需求
 
-- macOS 12+ / Linux（Windows 未測試）
+- macOS 12+（系統音訊模式需 macOS 12.3+）
 - Python 3.9+
 - ffmpeg（已內建於 .app bundle；Terminal 模式請執行 `brew install ffmpeg`）
 - 麥克風（錄音功能）
@@ -46,6 +46,7 @@ bash build_app.sh
 |------|------|
 | 🎤 即時錄音 | 瀏覽器直接錄音，附即時波形視覺化（Web Audio API） |
 | ⚡ 即時模式 | 每 15 秒自動切段，邊錄邊看轉錄結果（最低延遲） |
+| 🖥️ 系統音訊模式 | 擷取電腦全部聲音（Teams / Zoom 對方聲音、YouTube 等），無需麥克風 |
 | 📂 上傳音檔 | 支援 .m4a / .mp3 / .mp4 / .webm / .wav / .ogg / .flac 等格式，Drag & Drop |
 | 🤖 模型選擇 | tiny / base / small / medium（越大越準確，速度越慢）|
 | 🌍 語言設定 | 自動偵測，或手動指定 zh / en / ja 等 |
@@ -69,18 +70,29 @@ bash build_app.sh
 
 ## 錄音模式
 
-| 模式 | 分段間隔 | 適合場景 |
-|------|---------|---------|
-| 高品質（標準） | 10 分鐘 | 一般會議，錄完後整合輸出 |
-| 即時（15 秒延遲） | 15 秒 | 即時逐字顯示，適合演講、直播逐字稿 |
+| 模式 | 說明 | 適合場景 |
+|------|------|---------|
+| 高品質（標準） | 錄完後整合輸出 | 自己說話的會議、備忘錄 |
+| 即時（15 秒延遲） | 邊錄邊顯示 | 演講、直播逐字稿 |
+| 系統音訊（會議） | 擷取電腦喇叭輸出 | Teams / Zoom 對方聲音、YouTube 影片 |
 
-兩種模式都支援最長 180 分鐘錄音，分段架構確保記憶體不隨錄音時間成長。
+---
+
+## 系統音訊（會議）模式
+
+透過 macOS **ScreenCaptureKit** 擷取電腦所有音訊輸出，包含 Teams / Zoom 對方聲音、YouTube、任何 App 播放聲音，每 15 秒自動切段轉錄。
+
+**首次使用需授予螢幕錄製權限：**
+系統設定 → 隱私與安全性 → 螢幕錄製 → 開啟 Whisper STT
+
+> **注意**：此模式擷取的是電腦喇叭輸出，**不包含麥克風輸入**。
+> 若要轉錄自己說的話，請使用「標準模式」。
 
 ---
 
 ## LLM 標點後處理（可選）
 
-轉錄完成後，自動呼叫 LLM 精修標點符號並糾正同音錯字（如「拜登套斯」→「Bag & Pulse」）。
+轉錄完成後，自動呼叫 LLM 精修標點符號並糾正同音錯字。
 
 在 `.env` 設定任一 API Key 即可自動啟用（依優先順序）：
 
@@ -105,8 +117,6 @@ OPENAI_API_KEY=sk-xxxx           # GPT-4o-mini      ≈ NT$0.05/場
 
 ## Notion 整合設定（可選）
 
-不設定 Notion 仍可正常使用所有轉錄功能。
-
 1. 至 [notion.so/my-integrations](https://www.notion.so/my-integrations) 建立一個 Integration
 2. 將目標頁面分享給該 Integration（頁面右上角 → 連線）
 3. 編輯 `.env`：
@@ -116,8 +126,6 @@ NOTION_TOKEN=secret_xxxx
 NOTION_PAGE_ID=你的頁面ID
 ```
 
-> 頁面 ID 取得方式：在 Notion 頁面 URL 中，`notion.so/` 後面那串 32 位數字即是。
-
 ---
 
 ## Obsidian 整合設定（可選）
@@ -126,33 +134,24 @@ NOTION_PAGE_ID=你的頁面ID
 OBSIDIAN_MEETING_PATH=/Users/yourname/ObsidianVault/Meetings
 ```
 
-點擊「🟣 存入 Obsidian」後，系統自動在指定資料夾產生**兩個檔案**：
-
-| 檔案 | 說明 |
-|------|------|
-| `YYYY-MM-DD HH:MM 逐字稿前20字.md` | 原始逐字稿，含完整 YAML frontmatter |
-| `YYYY-MM-DD HH:MM 逐字稿前20字_會議記錄.md` | LLM 自動整理的結構化會議記錄（摘要、決策、行動事項） |
-
 ---
 
 ## 系統架構
 
 ```
 瀏覽器 → waitress (WSGI, 16 threads)
-    ├── GET /events             ← SSE 長連線，即時推送轉錄進度
-    ├── POST /api/upload-chunk  ← 分段上傳（標準 10min / 即時 15s）
-    │       ├── 每段獨立轉錄 → chunk_done SSE
-    │       └── 最後一段完成 → 合併全文 → LLM → transcript SSE
-    └── POST /transcribe        ← 單檔上傳（相容舊接口）
-              ├── ffmpeg：任意格式 → 16kHz mono WAV
-              ├── subprocess → mlx-whisper (Apple Neural Engine)
-              │               或 faster-whisper + VAD (CPU fallback)
-              └── LLM 後處理 → 標點精修 + 同音詞糾錯
+    ├── GET /events                    ← SSE 長連線，即時推送轉錄進度
+    ├── POST /api/upload-chunk         ← 麥克風分段上傳（標準 10min / 即時 15s）
+    ├── POST /api/system-audio/start   ← 啟動系統音訊擷取（ScreenCaptureKit）
+    ├── POST /api/system-audio/stop    ← 停止擷取，合併全文推送結果
+    └── POST /transcribe               ← 單檔上傳
+
+系統音訊管線：
+    ScreenCaptureKit → system_audio_capture (Swift binary)
+        → stdout (raw PCM 16kHz mono int16)
+        → system_audio.py (15s 分段 + 靜音偵測)
+        → Whisper 轉錄 → SSE chunk_done
 ```
-
-**記憶體隔離**：mlx-whisper 在獨立 system python3 subprocess 執行，轉錄完畢自動釋放，WKWebView 不受記憶體壓力影響。
-
-**分段錄音**：JS 端每隔設定時間自動 flush 音訊 blob，確保任意長度會議的記憶體佔用固定。
 
 ---
 
@@ -160,84 +159,64 @@ OBSIDIAN_MEETING_PATH=/Users/yourname/ObsidianVault/Meetings
 
 ```
 Whisper/
-├── app.py           # 入口點：Flask app、Broken pipe patch、__main__
-├── gui.py           # 原生 macOS App 入口（pywebview + Waitress）
-├── gui.spec         # PyInstaller 打包設定（產生 .app）
-├── routes.py        # 所有 Flask 路由（/、/events、/transcribe、/upload、/config、/api/*）
-├── whisper_core.py  # 轉錄引擎（mlx-whisper subprocess + faster-whisper fallback）
-├── llm_post.py      # LLM 標點後處理（Claude / OpenAI 自動選擇）
-├── integrations.py  # Obsidian 存檔 + LLM 自動整理會議記錄
-├── sse.py           # SSE 廣播狀態與轉錄排隊 semaphore
-├── ui.py            # 內嵌前端 HTML（Glassmorphism UI，含意外處理機制）
-├── version.py       # 版本號集中管理
-├── transcribe.py    # CLI 批次轉錄工具
-├── listen.py        # 麥克風即時轉錄工具
-├── setup.sh         # 一鍵安裝腳本
-├── start.sh         # 一鍵啟動腳本
-├── build_app.sh     # .app bundle 打包腳本（含 ffmpeg bundling）
-├── launcher.sh      # .app 內部啟動腳本（由 build_app.sh 嵌入）
-├── bin/ffmpeg       # 打包的 ffmpeg binary（build_app.sh 複製）
-└── .env.example     # 環境變數範本
+├── gui.py                        # 原生 macOS App 入口（pywebview + Waitress）
+├── gui.spec                      # PyInstaller 打包設定
+├── routes.py                     # 所有 Flask 路由
+├── whisper_core.py               # 轉錄引擎（mlx-whisper + faster-whisper fallback）
+├── llm_post.py                   # LLM 標點後處理
+├── system_audio.py               # 系統音訊擷取管理
+├── system_audio_capture.swift    # ScreenCaptureKit 擷取程式
+├── integrations.py               # Obsidian / Notion 整合
+├── sse.py                        # SSE 廣播
+├── ui.py                         # 前端 HTML
+├── version.py                    # 版本號
+├── build_app.sh                  # .app 打包腳本
+├── tools/entitlements.plist      # codesign 授權（screen-capture）
+├── bin/ffmpeg                    # 打包的 ffmpeg binary
+└── bin/system_audio_capture      # 編譯好的 Swift binary
 ```
 
 ---
 
-## 環境變數總覽（.env）
+## 環境變數（.env）
 
-| 變數 | 必要 | 說明 |
-|------|------|------|
-| `NOTION_TOKEN` | 選填 | Notion Integration Token |
-| `NOTION_PAGE_ID` | 選填 | Notion 目標頁面 ID |
-| `OBSIDIAN_MEETING_PATH` | 選填 | Obsidian Vault 存檔路徑 |
-| `ANTHROPIC_API_KEY` | 選填 | Claude LLM 標點後處理（可在 UI「LLM 設定」直接設定） |
-| `OPENAI_API_KEY` | 選填 | OpenAI LLM 標點後處理（可在 UI「LLM 設定」直接設定） |
-| `PORT` | 選填 | 伺服器 port（預設 5001）|
+| 變數 | 說明 |
+|------|------|
+| `NOTION_TOKEN` | Notion Integration Token |
+| `NOTION_PAGE_ID` | Notion 目標頁面 ID |
+| `OBSIDIAN_MEETING_PATH` | Obsidian Vault 存檔路徑 |
+| `ANTHROPIC_API_KEY` | Claude API Key（可在 UI 設定） |
+| `OPENAI_API_KEY` | OpenAI API Key（可在 UI 設定） |
+| `PORT` | 伺服器 port（預設 5001）|
 
----
-
-## CLI 使用方式
-
-```bash
-# 轉錄音檔
-python3 transcribe.py 會議錄音.m4a
-
-# 指定模型與語言
-python3 transcribe.py 會議錄音.m4a --model medium --language zh
-
-# 轉錄並上傳 Notion
-python3 transcribe.py 會議錄音.m4a --upload
-
-# 即時麥克風轉錄
-python3 listen.py
-```
+> `.env` 儲存於 `~/Library/Application Support/WhisperSTT/`，重新打包不會清除。
 
 ---
 
 ## 版本記錄
 
-### v1.5.0（目前版本）
+### v1.6.0（目前版本）
 
 **新功能**
-- ffmpeg 內建於 .app bundle，無需 Homebrew
-- 首次使用未快取模型時顯示下載進度 overlay
-- UI 直接設定 Claude / OpenAI API Key
-- 所有錯誤狀態附帶繁體中文說明
+- 🖥️ **系統音訊（會議）模式**：透過 ScreenCaptureKit 擷取電腦全部聲音輸出（Teams / Zoom 對方聲音、YouTube 等），無需麥克風，每 15 秒自動切段轉錄
+- 靜音自動偵測（RMS threshold），跳過無聲片段防止 Whisper 幻覺
 
-**修復**（v1.5.0 patch）
-- 分段錄音（live mode）chunk 失敗後，不再送出第二個成功事件覆蓋錯誤提示
-- 加入 1 GB 上傳上限，防止超長錄音意外耗盡記憶體
-- 關閉 app 視窗後不再卡等 LLM 整理會議記錄（最長 300 秒）
-- 語言選單「自動偵測」更名為「繁體中文優先」，如實反映實際行為
-- 修復只有 Gemini API Key 時標點後處理靜默失效的問題
-- 移除未使用的 `preload_default_model` 函式
+**修復**
+- `done` SSE 事件加入 `text` fallback，修復 `transcript` 事件遺漏時 UI 不顯示結果
+- 系統音訊 stop 端點補齊 `time`、`segments` 欄位
+- `.env` 改存 `~/Library/Application Support/WhisperSTT/`，重新打包不清除 API Key
+- LLM key 格式驗證，拒絕 fake key，避免 60 秒 timeout
 
-**App 封裝**
-- PyInstaller 原生 macOS App（WKWebView 視窗），關閉視窗自動停止 server
-- 分發 ZIP 維持輕量 shell-script bundle，適合有 Python 環境的用戶
+### v1.5.0
+
+- ffmpeg 內建於 .app bundle
+- 首次使用顯示模型下載進度
+- UI 直接設定 LLM API Key
+- 中文錯誤說明
 
 ### v1.4.0
 
-- 即時模式（15 秒分段）、WebM 修正、音訊播放器穩定性
+- 即時模式（15 秒分段）、WebM 修正、音訊播放器
 
 ---
 
