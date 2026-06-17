@@ -71,10 +71,11 @@ app = BUNDLE(
     icon='AppIcon.icns' if Path(SPECPATH, 'AppIcon.icns').exists() else None,
     bundle_identifier='com.via.whisper-ai',
     info_plist={
-        'NSMicrophoneUsageDescription': 'Whisper AI 需要麥克風進行會議錄音',
-        'CFBundleShortVersionString':   '1.5.0',
-        'CFBundleName':                 'Whisper STT',
-        'LSMinimumSystemVersion':       '12.0',
-        'NSHighResolutionCapable':      True,
+        'NSMicrophoneUsageDescription':   'Whisper STT 需要麥克風進行會議錄音',
+        'NSScreenCaptureUsageDescription': 'Whisper STT 需要螢幕錄製權限以擷取系統音訊（Teams / Zoom 等會議聲音）',
+        'CFBundleShortVersionString':     '1.5.0',
+        'CFBundleName':                   'Whisper STT',
+        'LSMinimumSystemVersion':         '12.0',
+        'NSHighResolutionCapable':        True,
     },
 )

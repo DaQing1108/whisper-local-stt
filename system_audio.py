@@ -113,6 +113,7 @@ class SystemAudioCapture:
             return
 
         try:
+            print(f"[SystemAudio] read_loop started, binary={_find_binary()}", flush=True)
             while self._running and proc.poll() is None:
                 data = proc.stdout.read(8192)
                 if not data:
@@ -150,10 +151,9 @@ class SystemAudioCapture:
         try:
             for line in proc.stderr:
                 text = line.decode(errors="replace").rstrip()
+                print(f"[SystemAudio] {text}", flush=True)
                 if text.startswith("ERROR:"):
                     logging.error("[SystemAudio] swift: %s", text)
-                else:
-                    logging.info("[SystemAudio] swift: %s", text)
         except Exception:
             pass
 
