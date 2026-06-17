@@ -33,8 +33,25 @@ _LLM_PROVIDERS = [
 ]
 
 
+_KEY_MIN_LEN = {"claude": 20, "gemini": 20, "openai": 20}
+
+
+def _is_valid_key(provider: str, key: str) -> bool:
+    """Reject obviously fake keys (test placeholders, too short)."""
+    if not key or len(key) < _KEY_MIN_LEN.get(provider, 20):
+        return False
+    lower = key.lower()
+    for placeholder in ("test", "fake", "dummy", "example", "your_key", "xxx", "abc"):
+        if placeholder in lower:
+            return False
+    return True
+
+
 def has_llm_key() -> bool:
-    return any(os.environ.get(env) for _, env in _LLM_PROVIDERS)
+    return any(
+        _is_valid_key(p, os.environ.get(env, ""))
+        for p, env in _LLM_PROVIDERS
+    )
 
 
 def _llm_call_chunk(chunk: str, provider: str, api_key: str, extra_terms: str = "") -> str:
@@ -115,7 +132,7 @@ def llm_punctuate(text: str, extra_terms: str = "") -> str:
 
     for provider, env_var in _LLM_PROVIDERS:
         api_key = os.environ.get(env_var, "")
-        if api_key:
+        if _is_valid_key(provider, api_key):
             break
     else:
         return text
