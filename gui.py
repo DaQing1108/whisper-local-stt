@@ -142,9 +142,7 @@ def main() -> None:
     webview.start(
         debug        = False,
         http_server  = False,
-        # 讓 WKWebView 自動允許麥克風存取（不彈出系統授權 prompt）
-        settings     = {"ALLOW_DOWNLOADS": False},
-        private_mode = False,   # 保留 cookie/permission 狀態，避免每次重問
+        private_mode = False,  # 保留 cookie/permission 狀態，避免每次重問
     )
 
 
