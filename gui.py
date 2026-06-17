@@ -19,20 +19,34 @@ os.chdir(_APP_DIR)
 if _APP_DIR not in sys.path:
     sys.path.insert(0, _APP_DIR)
 
+# 使用者資料目錄（rebuild 不會清除）
+_USER_DATA_DIR = os.path.join(
+    os.path.expanduser("~"), "Library", "Application Support", "WhisperSTT"
+)
+os.makedirs(_USER_DATA_DIR, exist_ok=True)
+# 讓 routes.py 的 Path(".env") 指向使用者資料目錄
+os.chdir(_USER_DATA_DIR)
+# 但 Python import 仍需要 _APP_DIR
+if _APP_DIR not in sys.path:
+    sys.path.insert(0, _APP_DIR)
+
 # 確保 Homebrew ffmpeg 在 PATH（.app 環境不繼承 shell PATH）
 os.environ["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "")
 
-# 將 stderr 導向 log 檔，方便排查 .app 崩潰原因
+# 將 stderr 導向 log 檔（存在使用者目錄，方便排查）
 import logging
+_LOG_FILE = os.path.join(_USER_DATA_DIR, "whisper_app.log")
 logging.basicConfig(
-    filename=os.path.join(_APP_DIR, "whisper_app.log"),
+    filename=_LOG_FILE,
     level=logging.WARNING,
     format="%(asctime)s %(levelname)s %(message)s",
 )
-sys.stderr = open(os.path.join(_APP_DIR, "whisper_app.log"), "a")
+sys.stderr = open(_LOG_FILE, "a")
 
 from dotenv import load_dotenv
-load_dotenv()
+# 優先載入使用者目錄的 .env，再 fallback 到 bundle 內
+load_dotenv(os.path.join(_USER_DATA_DIR, ".env"))
+load_dotenv(os.path.join(_APP_DIR, ".env"))
 
 from version import __version__
 
