@@ -519,9 +519,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         </div>
         <div class="flex-col">
           <label>轉錄模式</label>
-          <select id="mode-sel">
+          <select id="mode-sel" onchange="onModeChange()">
             <option value="standard" selected>標準（高品質）</option>
             <option value="live">即時（15 秒延遲）</option>
+            <option value="system">🖥️ 系統音訊（會議）</option>
           </select>
         </div>
         
@@ -622,6 +623,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <span class="btn-label" id="btn-label">點擊開始錄音</span>
           <span id="timer"></span>
         </button>
+      </div>
+      <!-- 系統音訊模式說明（平常隱藏） -->
+      <div id="system-audio-hint" style="display:none; margin-top:12px; padding:10px 14px; border-radius:8px; background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.3); font-size:13px; color:var(--muted); line-height:1.6;">
+        🖥️ <strong>系統音訊模式</strong>：擷取電腦全部聲音（麥克風 + Teams / Zoom 等 App 播放聲）<br>
+        首次使用需在「系統設定 → 隱私權 → 螢幕錄製」授予 App 權限。
       </div>
       <div id="status-bar" style="margin-top:20px; justify-content:center; background: transparent;">等待錄音…</div>
     </div>
@@ -1274,8 +1280,78 @@ function toggleObsidian() {
   lbl.textContent = obsidianEnabled ? '開啟' : '關閉'
 }
 
+// ── Mode change ───────────────────────────────────────────────
+function onModeChange() {
+  const mode = document.getElementById('mode-sel').value
+  const hint = document.getElementById('system-audio-hint')
+  const icon = document.getElementById('btn-icon')
+  const lbl  = document.getElementById('btn-label')
+  if (mode === 'system') {
+    hint.style.display = 'block'
+    icon.textContent = '🖥️'
+    lbl.textContent  = '點擊開始擷取系統音訊'
+  } else {
+    hint.style.display = 'none'
+    icon.textContent = '🎤'
+    lbl.textContent  = '點擊開始錄音'
+  }
+}
+
+// ── System Audio ──────────────────────────────────────────────
+let _sysAudioSessionId = null
+
+async function startSystemAudio() {
+  const model    = document.getElementById('model-sel').value
+  const language = document.getElementById('lang-sel').value
+  const domain   = document.getElementById('domain-sel').value
+  const extra    = document.getElementById('extra-terms').value
+  const resp = await fetch('/api/system-audio/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ model, language, domain, extra_terms: extra })
+  })
+  const data = await resp.json()
+  if (!resp.ok) {
+    setStatus('❌ 系統音訊啟動失敗：' + (data.error || resp.status), 'error')
+    return false
+  }
+  _sysAudioSessionId = data.session_id
+  return true
+}
+
+async function stopSystemAudio() {
+  if (!_sysAudioSessionId) return
+  await fetch('/api/system-audio/stop', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ session_id: _sysAudioSessionId })
+  })
+  _sysAudioSessionId = null
+}
+
 // ── Record ────────────────────────────────────────────────────
 async function toggleRecord() {
+  const mode = document.getElementById('mode-sel').value
+
+  // System audio mode: simple toggle without mic / modal
+  if (mode === 'system') {
+    if (isRecording) {
+      isRecording = false
+      stopTimer()
+      setRecordingUI(false)
+      setStatus('⏳ 正在整合轉錄結果…')
+      await stopSystemAudio()
+    } else {
+      const ok = await startSystemAudio()
+      if (!ok) return
+      isRecording = true
+      startTimer()
+      setRecordingUI(true)
+      setStatus('🔴 擷取系統音訊中（每 15 秒自動轉錄）…')
+    }
+    return
+  }
+
   if (isRecording) {
     // 錄音不足 3 秒 → 直接取消，不送出
     if (timerSec < 3) {

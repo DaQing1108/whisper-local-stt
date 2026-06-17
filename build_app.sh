@@ -62,6 +62,40 @@ else
   echo "   建議執行：brew install ffmpeg"
 fi
 
+
+# ── 編譯 system_audio_capture（ScreenCaptureKit 系統音訊擷取）────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🎙️ 編譯 system_audio_capture（系統音訊擷取）…"
+SWIFT_SRC="$PROJECT_DIR/system_audio_capture.swift"
+SWIFT_BIN="$PROJECT_DIR/bin/system_audio_capture"
+ENTITLEMENTS="$PROJECT_DIR/tools/entitlements.plist"
+
+if [ ! -f "$SWIFT_SRC" ]; then
+  echo "⚠️  system_audio_capture.swift 不存在，跳過"
+elif ! command -v swiftc &>/dev/null; then
+  echo "⚠️  swiftc 未找到（需安裝 Xcode Command Line Tools），跳過"
+else
+  swiftc "$SWIFT_SRC" -o "$SWIFT_BIN" \
+    -framework ScreenCaptureKit \
+    -framework AVFoundation \
+    -framework CoreMedia 2>&1
+
+  if [ $? -eq 0 ]; then
+    chmod +x "$SWIFT_BIN"
+    if [ -f "$ENTITLEMENTS" ]; then
+      codesign --sign - --entitlements "$ENTITLEMENTS" --force "$SWIFT_BIN"
+      echo "🔏 已簽章：$SWIFT_BIN"
+    fi
+    # 複製進 app bundle 的 Resources/bin/
+    cp "$SWIFT_BIN" "$FFMPEG_BIN_DIR/system_audio_capture"
+    chmod +x "$FFMPEG_BIN_DIR/system_audio_capture"
+    echo "✅ system_audio_capture 編譯完成並打包進 .app"
+  else
+    echo "❌ system_audio_capture 編譯失敗，系統音訊功能將無法使用"
+  fi
+fi
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅ 完成！"

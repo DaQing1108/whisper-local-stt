@@ -546,6 +546,114 @@ def save_config():
     )
 
 
+@bp.route("/api/system-audio/start", methods=["POST"])
+def system_audio_start():
+    """啟動 ScreenCaptureKit 系統音訊即時轉錄（擷取所有系統聲音，含 Teams 等 App）。"""
+    import system_audio as _sa
+
+    if _sa.get_capture() and _sa.get_capture().is_running:
+        return jsonify(error="系統音訊擷取已在運行中"), 409
+
+    data = request.json or {}
+    model_name  = data.get("model", "small")
+    language    = data.get("language", "auto")
+    domain      = data.get("domain", "general")
+    extra_terms = data.get("extra_terms", "")
+    session_id  = data.get("session_id", f"sysaudio_{int(__import__('time').time())}")
+
+    # Register session so _finish_session works
+    with _chunk_sessions_lock:
+        _chunk_sessions[session_id] = {
+            "chunks":       {},
+            "langs":        {},
+            "total":        None,
+            "done_count":   0,
+            "model":        model_name,
+            "language":     language,
+            "domain":       domain,
+            "extra_terms":  extra_terms,
+            "save_obsidian": False,
+            "live_mode":    True,
+        }
+
+    def _on_chunk(wav_bytes: bytes, chunk_index: int) -> None:
+        def _worker():
+            domain_label = {"media": "媒體", "medical": "醫療", "legal": "法律",
+                            "tech": "科技", "general": "通用"}.get(domain, domain)
+            if not _sse._transcribe_sem.acquire(blocking=False):
+                _sse._transcribe_sem.acquire()
+            try:
+                _sse.broadcast("status", {"msg": f"⏳ 轉錄系統音訊 第 {chunk_index + 1} 段…"})
+                with _chunk_sessions_lock:
+                    sess = _chunk_sessions.get(session_id, {})
+                    prev = sess.get("chunks", {}).get(chunk_index - 1, "")
+                context = prev[-100:].strip() if prev else ""
+                try:
+                    from whisper_core import transcribe_audio as _transcribe_audio
+                    text, lang, _ = _transcribe_audio(
+                        wav_bytes, ".wav", model_name, language,
+                        domain=domain, extra_terms=extra_terms,
+                        initial_prompt_override=context or None,
+                    )
+                except Exception as exc:
+                    logging.error("[SysAudio chunk %d] 轉錄失敗: %s", chunk_index, exc)
+                    text, lang = "", "?"
+
+                with _chunk_sessions_lock:
+                    sess = _chunk_sessions.get(session_id, {})
+                    if sess:
+                        sess["chunks"][chunk_index] = text
+                        sess["langs"][chunk_index]  = lang
+                        sess["done_count"] += 1
+
+                _sse.broadcast("chunk_done", {
+                    "session_id":  session_id,
+                    "chunk_index": chunk_index,
+                    "chunk_total": "?",
+                    "text":        text,
+                    "language":    lang,
+                    "live_mode":   True,
+                })
+            finally:
+                _sse._transcribe_sem.release()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    try:
+        _sa.start_capture(_on_chunk)
+    except RuntimeError as e:
+        with _chunk_sessions_lock:
+            _chunk_sessions.pop(session_id, None)
+        return jsonify(error=str(e)), 503
+
+    return jsonify(ok=True, session_id=session_id)
+
+
+@bp.route("/api/system-audio/stop", methods=["POST"])
+def system_audio_stop():
+    """停止系統音訊擷取，合併全文推送最終結果。"""
+    import system_audio as _sa
+
+    data = request.json or {}
+    session_id = data.get("session_id", "")
+
+    _sa.stop_capture()
+
+    if session_id:
+        with _chunk_sessions_lock:
+            sess = _chunk_sessions.get(session_id)
+        if sess:
+            chunks = sess.get("chunks", {})
+            full_text = "\n".join(chunks[i] for i in sorted(chunks) if chunks[i]).strip()
+            if full_text:
+                _sse.broadcast("transcript", {"text": full_text, "language": sess.get("language", "zh")})
+            _sse.broadcast("done", {"ok": True})
+            with _chunk_sessions_lock:
+                _chunk_sessions.pop(session_id, None)
+
+    return jsonify(ok=True)
+
+
 @bp.route("/api/last_transcript", methods=["GET"])
 def last_transcript():
     if _last_transcript:
