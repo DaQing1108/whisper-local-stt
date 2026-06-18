@@ -548,10 +548,12 @@ def save_config():
 
 @bp.route("/api/system-audio/start", methods=["POST"])
 def system_audio_start():
-    """啟動 ScreenCaptureKit 系統音訊即時轉錄（擷取所有系統聲音，含 Teams 等 App）。"""
+    """啟動 ScreenCaptureKit 系統音訊即時轉錄（in-process pyobjc，TCC 屬於主 app）。"""
     import system_audio as _sa
+    import system_audio_sc as _sc
 
-    if _sa.get_capture() and _sa.get_capture().is_running:
+    if (_sa.get_capture() and _sa.get_capture().is_running) or \
+       (_sc.get_sc_capture() and _sc.get_sc_capture().is_running):
         return jsonify(error="系統音訊擷取已在運行中"), 409
 
     data = request.json or {}
@@ -559,6 +561,7 @@ def system_audio_start():
     language    = data.get("language", "auto")
     domain      = data.get("domain", "general")
     extra_terms = data.get("extra_terms", "")
+    with_mic    = data.get("with_mic", False)
     session_id  = data.get("session_id", f"sysaudio_{int(__import__('time').time())}")
 
     # Register session so _finish_session works
@@ -619,8 +622,20 @@ def system_audio_start():
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _on_tcc_error(error_code: str) -> None:
+        _sse.broadcast("done", {
+            "ok": False,
+            "error_code": error_code,
+            "error": "螢幕錄製權限未授予",
+        })
+        with _chunk_sessions_lock:
+            _chunk_sessions.pop(session_id, None)
+
     try:
-        _sa.start_capture(_on_chunk)
+        if with_mic:
+            _sa.start_mixed_capture(_on_chunk)
+        else:
+            _sa.start_capture(_on_chunk, on_error=_on_tcc_error)
     except RuntimeError as e:
         with _chunk_sessions_lock:
             _chunk_sessions.pop(session_id, None)
@@ -638,6 +653,7 @@ def system_audio_stop():
     session_id = data.get("session_id", "")
 
     _sa.stop_capture()
+    _sa.stop_mixed_capture()
 
     if session_id:
         with _chunk_sessions_lock:
