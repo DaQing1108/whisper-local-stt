@@ -4,7 +4,7 @@
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="Whisper AI 會議記錄"
+APP_NAME="Whisper STT"
 DIST_APP="$PROJECT_DIR/dist/$APP_NAME.app"
 INSTALL_APP="/Applications/$APP_NAME.app"
 PORT=5001
