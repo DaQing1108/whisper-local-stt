@@ -121,6 +121,31 @@ def _trigger_meeting_notes_async(fpath: Path) -> None:
     threading.Thread(target=run, daemon=True).start()
 
 
+def build_notion_blocks(text: str, lang: str) -> list[dict]:
+    """組裝 Notion API block 物件列表（divider → heading → callout → paragraphs）。"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    blocks: list[dict] = [
+        {"object": "block", "type": "divider", "divider": {}},
+        {"object": "block", "type": "heading_2",
+         "heading_2": {"rich_text": [{"type": "text",
+                                      "text": {"content": f"🎙️ 即時轉錄｜{now}"}}]}},
+        {"object": "block", "type": "callout",
+         "callout": {
+             "rich_text": [{"type": "text",
+                            "text": {"content": f"偵測語言：{lang}  ｜  {now}"}}],
+             "icon": {"type": "emoji", "emoji": "🎤"},
+             "color": "purple_background",
+         }},
+    ]
+    for line in text.split("\n"):
+        line = line.strip()
+        if line:
+            blocks.append({"object": "block", "type": "paragraph",
+                           "paragraph": {"rich_text": [{"type": "text",
+                                                        "text": {"content": line}}]}})
+    return blocks
+
+
 def save_to_obsidian(text: str, lang: str, meta: dict | None = None) -> str:
     """把轉錄文字存成 Obsidian .md 檔，回傳檔案路徑；失敗回傳空字串。"""
     if not _OBSIDIAN_PATH or not text.strip():

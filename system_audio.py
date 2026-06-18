@@ -32,7 +32,9 @@ def _find_binary() -> Path | None:
     ]
     for p in candidates:
         if p.exists() and p.is_file():
+            logging.debug("[SystemAudio] binary found: %s", p)
             return p
+    logging.warning("[SystemAudio] binary not found, searched: %s", [str(c) for c in candidates])
     return None
 
 
@@ -112,6 +114,7 @@ class SystemAudioCapture:
             except Exception:
                 try:
                     self._proc.kill()
+                    self._proc.wait()
                 except Exception:
                     pass
             self._proc = None
@@ -130,7 +133,7 @@ class SystemAudioCapture:
             return
 
         try:
-            print(f"[SystemAudio] read_loop started, binary={_find_binary()}", flush=True)
+            logging.debug("[SystemAudio] read_loop started, binary=%s", _find_binary())
             while self._running and proc.poll() is None:
                 data = proc.stdout.read(8192)
                 if not data:
@@ -172,7 +175,7 @@ class SystemAudioCapture:
         try:
             for line in proc.stderr:
                 text = line.decode(errors="replace").rstrip()
-                print(f"[SystemAudio] {text}", flush=True)
+                logging.debug("[SystemAudio] %s", text)
                 if text.startswith("ERROR:"):
                     logging.error("[SystemAudio] swift: %s", text)
                     if not _tcc_reported and ("-3801" in text or "declined TCCs" in text):

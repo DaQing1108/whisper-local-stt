@@ -18,6 +18,9 @@ a = Analysis(
         ('.env.example',   '.') if (project_dir / '.env.example').exists() else ('gui.py', '.'),
         # bin/ 目錄（ffmpeg + system_audio_capture）
         ('bin',            'bin'),
+        # 前端資源（ui.py 組裝器在執行期讀取）
+        ('templates',      'templates'),
+        ('static',         'static'),
     ],
     hiddenimports=[
         'webview',

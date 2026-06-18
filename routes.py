@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import threading
+import time as _time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,7 @@ from flask import Blueprint, Response, jsonify, make_response, request, stream_w
 
 import integrations
 import sse as _sse
+from transcribe_common import DOMAIN_LABELS, is_hallucination as _is_hallucination
 from version import __version__
 from whisper_core import TranscriptionError, is_model_cached, run_whisper, warmup_model_async, _warmup_state, _warmup_lock
 
@@ -21,34 +23,6 @@ bp = Blueprint("main", __name__)
 
 # HTML_PAGE 由 app.py 在建立 Blueprint 後注入
 HTML_PAGE: str = ""
-
-
-def _is_hallucination(text: str) -> bool:
-    """Detect Whisper repetition hallucination (e.g. '我們可以看到' × 100).
-
-    Returns True when a single phrase repeats enough times to dominate the text.
-    """
-    if not text or len(text) < 20:
-        return False
-    words = text.split()
-    if not words:
-        return False
-    # Count occurrences of the most common word/phrase
-    from collections import Counter
-    counts = Counter(words)
-    most_common, freq = counts.most_common(1)[0]
-    # If one token accounts for >60% of all tokens AND appears >15 times → hallucination
-    if freq > 15 and freq / len(words) > 0.6:
-        logging.warning("[Hallucination] chunk rejected: '%s' repeated %d/%d times", most_common, freq, len(words))
-        return True
-    # Also check character-level: repeated short substring dominating the text
-    for length in range(4, min(20, len(text) // 4)):
-        phrase = text[:length]
-        count = text.count(phrase)
-        if count > 10 and count * length > len(text) * 0.6:
-            logging.warning("[Hallucination] chunk rejected: '%s' repeats %d times", phrase, count)
-            return True
-    return False
 
 # 最後一次轉錄結果 — 記憶體 + 磁碟雙重持久化
 _LAST_RESULT_FILE = Path(".last_result.json")
@@ -171,8 +145,7 @@ def transcribe():
     audio_bytes = audio.read()
 
     def _worker():
-        domain_label = {"media": "媒體", "medical": "醫療", "legal": "法律",
-                        "tech": "科技", "general": "通用"}.get(domain, domain)
+        domain_label = DOMAIN_LABELS.get(domain, domain)
 
         if not _sse._transcribe_sem.acquire(blocking=False):
             _sse.broadcast("status", {"msg": "⏳ 系統正在處理另一份音檔，請稍候排隊…"})
@@ -250,6 +223,49 @@ def transcribe():
 # ── Chunked recording session state ──────────────────────────────
 _chunk_sessions: dict[str, dict] = {}
 _chunk_sessions_lock = threading.Lock()
+_SESSION_TTL = 300  # seconds — abandon sessions from disconnected clients
+
+
+def _chunk_prev_context(session_id: str, chunk_index: int) -> str:
+    """Lock-safe lookup of the previous chunk tail for use as Whisper initial_prompt."""
+    with _chunk_sessions_lock:
+        sess = _chunk_sessions.get(session_id)
+        prev = sess["chunks"].get(chunk_index - 1, "") if sess else ""
+    return prev[-100:].strip() if prev else ""
+
+
+def _chunk_session_update(session_id: str, chunk_index: int, text: str, lang: str) -> dict | None:
+    """Write completed chunk into session. Returns a snapshot dict or None if session is gone."""
+    with _chunk_sessions_lock:
+        sess = _chunk_sessions.get(session_id)
+        if not sess:
+            return None
+        sess["chunks"][chunk_index] = text
+        sess["langs"][chunk_index]  = lang
+        sess["done_count"] += 1
+        sess["last_active"] = _time.time()
+        return {
+            "total":     sess["total"],
+            "done":      sess["done_count"],
+            "live_mode": sess.get("live_mode", False),
+            "all_done":  sess["total"] is not None and sess["done_count"] >= sess["total"],
+        }
+
+
+def _session_ttl_cleaner() -> None:
+    """Background thread: evict sessions idle longer than _SESSION_TTL seconds."""
+    while True:
+        _time.sleep(60)
+        cutoff = _time.time() - _SESSION_TTL
+        with _chunk_sessions_lock:
+            stale = [sid for sid, s in _chunk_sessions.items()
+                     if s.get("last_active", 0) < cutoff]
+            for sid in stale:
+                del _chunk_sessions[sid]
+                logging.warning("[Session] TTL evicted stale session %s", sid[:8])
+
+
+threading.Thread(target=_session_ttl_cleaner, daemon=True).start()
 
 
 @bp.route("/api/upload-chunk", methods=["POST"])
@@ -276,24 +292,24 @@ def upload_chunk():
     with _chunk_sessions_lock:
         if session_id not in _chunk_sessions:
             _chunk_sessions[session_id] = {
-                "chunks":       {},   # chunk_index → text
-                "langs":        {},   # chunk_index → lang
-                "total":        None, # set when is_last received
-                "done_count":   0,
-                "model":        model_name,
-                "language":     language,
-                "domain":       domain,
-                "extra_terms":  extra_terms,
+                "chunks":        {},
+                "langs":         {},
+                "total":         None,
+                "done_count":    0,
+                "last_active":   _time.time(),
+                "model":         model_name,
+                "language":      language,
+                "domain":        domain,
+                "extra_terms":   extra_terms,
                 "save_obsidian": save_obsidian,
-                "live_mode":    live_mode,
+                "live_mode":     live_mode,
             }
         sess = _chunk_sessions[session_id]
         if is_last:
             sess["total"] = chunk_index + 1
 
     def _worker():
-        domain_label = {"media": "媒體", "medical": "醫療", "legal": "法律",
-                        "tech": "科技", "general": "通用"}.get(domain, domain)
+        domain_label = DOMAIN_LABELS.get(domain, domain)
 
         if not _sse._transcribe_sem.acquire(blocking=False):
             _sse._transcribe_sem.acquire()
@@ -303,20 +319,17 @@ def upload_chunk():
                 "msg": f"⏳ 轉錄第 {chunk_index + 1} 段（模型：{model_name}，領域：{domain_label}）…"
             })
 
-            # 取前一段結尾當 initial_prompt 增加連貫性
-            with _chunk_sessions_lock:
-                prev_text = sess["chunks"].get(chunk_index - 1, "")
-            context = prev_text[-100:].strip() if prev_text else ""
+            context = _chunk_prev_context(session_id, chunk_index)
 
             try:
                 from whisper_core import transcribe_audio as _transcribe_audio
-                print(f"[Chunk {chunk_index}] 開始轉錄 bytes={len(audio_bytes)} ext={ext}", flush=True)
+                logging.debug("[Chunk %d] 開始轉錄 bytes=%d ext=%s", chunk_index, len(audio_bytes), ext)
                 text, lang, info = _transcribe_audio(
                     audio_bytes, ext, model_name, language,
                     domain=domain, extra_terms=extra_terms,
                     initial_prompt_override=context or None,
                 )
-                print(f"[Chunk {chunk_index}] 完成 text_len={len(text)} lang={lang}", flush=True)
+                logging.debug("[Chunk %d] 完成 text_len=%d lang=%s", chunk_index, len(text), lang)
             except TranscriptionError as e:
                 logging.error("[Chunk %d] 轉錄錯誤 %s: %s", chunk_index, e.code, e)
                 _sse.broadcast("status", {"msg": f"❌ 第 {chunk_index + 1} 段轉錄失敗"})
@@ -332,24 +345,20 @@ def upload_chunk():
             if _is_hallucination(text):
                 text = ""
 
-            with _chunk_sessions_lock:
-                sess["chunks"][chunk_index] = text
-                sess["langs"][chunk_index]  = lang
-                sess["done_count"] += 1
-                total      = sess["total"]
-                done_count = sess["done_count"]
-                all_done   = (total is not None and done_count >= total)
+            snap = _chunk_session_update(session_id, chunk_index, text, lang)
+            if snap is None:
+                return  # session already cleaned up
 
             _sse.broadcast("chunk_done", {
                 "session_id":  session_id,
                 "chunk_index": chunk_index,
-                "chunk_total": total or "?",
+                "chunk_total": snap["total"] or "?",
                 "text":        text,
                 "language":    lang,
-                "live_mode":   sess.get("live_mode", False),
+                "live_mode":   snap["live_mode"],
             })
 
-            if all_done:
+            if snap["all_done"]:
                 _finish_session(session_id)
 
         finally:
@@ -399,7 +408,7 @@ def _finish_session(session_id: str) -> None:
     lang  = next((l for l in langs if l not in ("?", "")), "?")
 
     full_text = "\n".join(t for t in texts if t).strip()
-    print(f"[Session {session_id[:8]}] total={total} chunks={len(texts)} full_text_len={len(full_text)}", flush=True)
+    logging.info("[Session %s] total=%d chunks=%d full_text_len=%d", session_id[:8], total, len(texts), len(full_text))
     if not full_text:
         _sse.broadcast("status", {"msg": "⚠️ 沒有偵測到語音內容"})
         _sse.broadcast("done",   {"ok": False, "error_code": "EMPTY_TRANSCRIPT", "error": "empty"})
@@ -452,27 +461,8 @@ def upload():
 
     try:
         from notion_client import Client
-        notion = Client(auth=token)
-        now    = datetime.now().strftime("%Y-%m-%d %H:%M")
-        blocks = [
-            {"object": "block", "type": "divider", "divider": {}},
-            {"object": "block", "type": "heading_2",
-             "heading_2": {"rich_text": [{"type": "text",
-                                           "text": {"content": f"🎙️ 即時轉錄｜{now}"}}]}},
-            {"object": "block", "type": "callout",
-             "callout": {
-                 "rich_text": [{"type": "text",
-                                 "text": {"content": f"偵測語言：{lang}  ｜  {now}"}}],
-                 "icon": {"type": "emoji", "emoji": "🎤"},
-                 "color": "purple_background",
-             }},
-        ]
-        for line in text.split("\n"):
-            line = line.strip()
-            if line:
-                blocks.append({"object": "block", "type": "paragraph",
-                                "paragraph": {"rich_text": [{"type": "text",
-                                                               "text": {"content": line}}]}})
+        notion  = Client(auth=token)
+        blocks  = integrations.build_notion_blocks(text, lang)
         for i in range(0, len(blocks), 100):
             notion.blocks.children.append(block_id=page_id, children=blocks[i:i+100])
         return jsonify(ok=True, blocks=len(blocks))
@@ -598,30 +588,27 @@ def system_audio_start():
     # Register session so _finish_session works
     with _chunk_sessions_lock:
         _chunk_sessions[session_id] = {
-            "chunks":       {},
-            "langs":        {},
-            "total":        None,
-            "done_count":   0,
-            "model":        model_name,
-            "language":     language,
-            "domain":       domain,
-            "extra_terms":  extra_terms,
+            "chunks":        {},
+            "langs":         {},
+            "total":         None,
+            "done_count":    0,
+            "last_active":   _time.time(),
+            "model":         model_name,
+            "language":      language,
+            "domain":        domain,
+            "extra_terms":   extra_terms,
             "save_obsidian": False,
-            "live_mode":    True,
+            "live_mode":     True,
         }
 
     def _on_chunk(wav_bytes: bytes, chunk_index: int) -> None:
         def _worker():
-            domain_label = {"media": "媒體", "medical": "醫療", "legal": "法律",
-                            "tech": "科技", "general": "通用"}.get(domain, domain)
+            domain_label = DOMAIN_LABELS.get(domain, domain)
             if not _sse._transcribe_sem.acquire(blocking=False):
                 _sse._transcribe_sem.acquire()
             try:
                 _sse.broadcast("status", {"msg": f"⏳ 轉錄系統音訊 第 {chunk_index + 1} 段…"})
-                with _chunk_sessions_lock:
-                    sess = _chunk_sessions.get(session_id, {})
-                    prev = sess.get("chunks", {}).get(chunk_index - 1, "")
-                context = prev[-100:].strip() if prev else ""
+                context = _chunk_prev_context(session_id, chunk_index)
                 try:
                     from whisper_core import transcribe_audio as _transcribe_audio
                     text, lang, _ = _transcribe_audio(
@@ -636,12 +623,9 @@ def system_audio_start():
                 if _is_hallucination(text):
                     text = ""
 
-                with _chunk_sessions_lock:
-                    sess = _chunk_sessions.get(session_id, {})
-                    if sess:
-                        sess["chunks"][chunk_index] = text
-                        sess["langs"][chunk_index]  = lang
-                        sess["done_count"] += 1
+                snap = _chunk_session_update(session_id, chunk_index, text, lang)
+                if snap is None:
+                    return  # session already cleaned up
 
                 _sse.broadcast("chunk_done", {
                     "session_id":  session_id,
@@ -697,16 +681,16 @@ def system_audio_stop():
             while _time.time() < deadline:
                 with _chunk_sessions_lock:
                     sess = _chunk_sessions.get(session_id)
-                if sess is None:
-                    return
-                done = sess.get("done_count", 0)
+                    if sess is None:
+                        return
+                    done = sess.get("done_count", 0)
                 _time.sleep(1)
                 with _chunk_sessions_lock:
                     sess = _chunk_sessions.get(session_id)
-                if sess is None:
-                    return
-                if sess.get("done_count", 0) == done:
-                    break  # no new chunks arrived in the last second → workers done
+                    if sess is None:
+                        return
+                    if sess.get("done_count", 0) == done:
+                        break  # no new chunks arrived in the last second → workers done
 
             with _chunk_sessions_lock:
                 sess = _chunk_sessions.pop(session_id, None)

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Whisper 語音轉文字</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
+<style>
+/* __APP_CSS__ */</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">🎙️</span>
+  <h1>Whisper 語音轉文字</h1>
+  <span id="app-version" style="font-size:11px;opacity:.45;margin-right:auto;margin-left:6px;"></span>
+  <span class="badge" id="notion-badge" title="未連線"><span class="status-dot"></span><span id="notion-badge-text">Notion 未連線</span></span>
+</header>
+
+<main class="dashboard-layout">
+
+  <!-- Left Sidebar: Settings -->
+  <aside class="sidebar">
+    <div class="card">
+      <div class="card-title">⚙️ 錄音設定</div>
+      <div class="settings-form">
+        <div class="flex-col">
+          <label>模型</label>
+          <select id="model-sel">
+            <option value="tiny">tiny（最快）</option>
+            <option value="base">base</option>
+            <option value="small" selected>small（推薦）</option>
+            <option value="medium">medium（最準）</option>
+          </select>
+        </div>
+        <div class="flex-col">
+          <label>語言</label>
+          <select id="lang-sel">
+            <option value="auto">繁體中文優先</option>
+            <option value="zh" selected>中文</option>
+            <option value="en">英文</option>
+            <option value="ja">日文</option>
+          </select>
+        </div>
+        <div class="flex-col">
+          <label>領域</label>
+          <select id="domain-sel">
+            <option value="general">通用</option>
+            <option value="media">媒體／廣電</option>
+            <option value="tech">科技</option>
+            <option value="medical">醫療</option>
+            <option value="legal">法律</option>
+          </select>
+        </div>
+        <div class="flex-col">
+          <label>轉錄模式</label>
+          <select id="mode-sel" onchange="onModeChange()">
+            <option value="standard" selected>標準（高品質）</option>
+            <option value="live">即時（15 秒延遲）</option>
+            <option value="system">🖥️ 系統音訊（會議）</option>
+          </select>
+        </div>
+        
+        <div class="flex-col">
+          <label>自訂專有名詞庫 <span style="color:var(--muted);font-size:11px">（按 Enter 新增）</span></label>
+          <!-- Input area where active tags go -->
+          <div class="tag-input-box" onclick="document.getElementById('tag-input-field').focus()">
+            <div id="active-tags-container" style="display:contents"></div>
+            <input id="tag-input-field" type="text" placeholder="輸入專有名詞...">
+          </div>
+          <!-- Hidden input for form submission -->
+          <input type="hidden" id="extra-terms">
+
+          <!-- Saved Dictionary Area -->
+          <div class="saved-dict">
+            <div class="saved-dict-header" onclick="toggleSavedDict()">
+              <span id="saved-dict-title">📌 常用詞庫 (點擊展開) <span style="font-size:10px;margin-left:4px">▶</span></span>
+              <button class="btn" style="padding:2px 6px;font-size:10px;background:transparent;border-color:transparent" onclick="clearVocabLibrary(event)" title="還原預設詞庫">↺ 重設</button>
+            </div>
+            <div id="vocab-tags-container" class="dict-chips-container" style="display:none; transition: all 0.3s ease;">
+              <!-- Saved tags dynamically generated here -->
+            </div>
+          </div>
+        </div>
+
+        <div style="height:1px; background:var(--border); margin: 8px 0;"></div>
+
+        <div class="flex-col" style="flex-direction:row; align-items:center; justify-content:space-between">
+          <label>自動上傳 Notion</label>
+          <div class="toggle-row">
+            <span id="notion-toggle-label" style="font-size:13px;color:var(--muted)">關閉</span>
+            <button class="toggle" id="notion-toggle" onclick="toggleNotion()"></button>
+          </div>
+        </div>
+        <div class="flex-col" style="flex-direction:row; align-items:center; justify-content:space-between">
+          <label>存入 Obsidian</label>
+          <div class="toggle-row">
+            <span id="obsidian-toggle-label" style="font-size:13px;color:var(--muted)">關閉</span>
+            <button class="toggle" id="obsidian-toggle" onclick="toggleObsidian()"></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notion 設定 card -->
+    <div class="card" id="settings-card" style="margin-top: 24px;">
+      <div class="card-title">Notion 設定</div>
+      <div class="settings-grid">
+        <div class="field full">
+          <label>Integration Token (secret_xxx)</label>
+          <input type="password" id="notion-token" placeholder="secret_xxxxxxxxxxxxxxxx">
+        </div>
+        <div class="field full">
+          <label>目標頁面 ID（URL 最後 32 碼）</label>
+          <input type="text" id="notion-page-id" placeholder="37a280a95f76810b90d0e6cad40786fa">
+        </div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+        <button class="btn primary" onclick="saveConfig()">驗證並儲存</button>
+        <span id="config-status" style="font-size:13px;color:var(--muted)"></span>
+      </div>
+    </div>
+
+    <!-- LLM API Key 設定 card（P0-4）-->
+    <div class="card" id="llm-settings-card" style="margin-top: 16px;">
+      <div class="card-title">LLM 設定 <span style="font-size:11px;font-weight:normal;color:var(--muted);margin-left:6px;">（選填，用於標點後處理）</span></div>
+      <div class="settings-grid">
+        <div class="field full">
+          <label style="display:flex;justify-content:space-between;align-items:center;">
+            <span>Claude API Key <span style="color:var(--green);font-size:11px;" id="anthropic-key-status"></span></span>
+            <a href="https://console.anthropic.com/" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;">取得 Key ↗</a>
+          </label>
+          <input type="password" id="anthropic-key" placeholder="sk-ant-api03-…" autocomplete="new-password">
+        </div>
+        <div class="field full">
+          <label style="display:flex;justify-content:space-between;align-items:center;">
+            <span>OpenAI API Key <span style="color:var(--green);font-size:11px;" id="openai-key-status"></span></span>
+            <a href="https://platform.openai.com/api-keys" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;">取得 Key ↗</a>
+          </label>
+          <input type="password" id="openai-key" placeholder="sk-…" autocomplete="new-password">
+        </div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+        <button class="btn primary" onclick="saveLlmKeys()">儲存 API Key</button>
+        <span id="llm-save-status" style="font-size:13px;color:var(--muted)"></span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Right Workspace: Recording and Transcripts -->
+  <section class="workspace" style="display:flex; flex-direction:column; gap:24px;">
+    <!-- 核心錄音區塊 -->
+    <div class="card" style="padding: 32px;">
+      <div class="record-area">
+        <canvas id="waveform" style="position:absolute; bottom:0; left:0; right:0; opacity:0.6; height:100%; border-radius:var(--radius); pointer-events:none; z-index:1; mix-blend-mode:screen;"></canvas>
+        <button id="record-btn" onclick="toggleRecord()" style="z-index:2;">
+          <span class="btn-icon" id="btn-icon">🎤</span>
+          <span class="btn-label" id="btn-label">點擊開始錄音</span>
+          <span id="timer"></span>
+        </button>
+      </div>
+      <!-- 系統音訊模式說明（平常隱藏） -->
+      <div id="system-audio-hint" style="display:none; margin-top:12px; padding:10px 14px; border-radius:8px; background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.3); font-size:13px; color:var(--muted); line-height:1.6;">
+        🖥️ <strong>系統音訊模式</strong>：擷取電腦系統音訊（Teams / Zoom 等 App 播放聲）<br>
+        首次使用需在「系統設定 → 隱私權 → 螢幕錄製」授予 App 權限。
+        <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+            <input type="checkbox" id="mix-mic-toggle" style="width:15px; height:15px; cursor:pointer; accent-color:var(--accent);">
+            <span>同時錄製麥克風（混音模式）</span>
+          </label>
+        </div>
+      </div>
+      <div id="status-bar" style="margin-top:20px; justify-content:center; background: transparent;">等待錄音…</div>
+    </div>
+
+    <!-- 轉錄結果 card -->
+    <div class="card">
+      <div class="card-title" style="display:flex; justify-content:space-between;">
+        <span>📝 轉錄結果</span>
+        <span style="font-size:11px; color:var(--muted); font-weight:normal; text-transform:none;">(點擊內文可直接修改)</span>
+      </div>
+      <div id="transcript-box" contenteditable="true" spellcheck="false" style="outline:none;"></div>
+      <audio id="local-audio-player" controls style="display:none; width:100%; margin-top:10px; height:32px; border-radius:8px; opacity:0.8;"></audio>
+      <div class="actions" style="margin-top:14px">
+        <button class="btn primary" id="upload-btn" onclick="uploadToNotion()" disabled>
+          📤 上傳至 Notion
+        </button>
+        <button class="btn" onclick="copyTranscript()">📋 複製</button>
+        <div class="export-wrap" style="position:relative;display:inline-block;">
+          <button class="btn" id="export-btn" onclick="toggleExportMenu()" disabled>⬇️ 匯出</button>
+          <div id="export-menu" style="display:none;position:absolute;bottom:110%;left:0;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:6px;min-width:140px;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,.3);">
+            <div class="export-item" onclick="exportAs('txt')">📄 純文字 .txt</div>
+            <div class="export-item" onclick="exportAs('srt')">🎬 字幕 .srt</div>
+            <div class="export-item" onclick="exportAs('md')">📝 Markdown .md</div>
+          </div>
+        </div>
+        <button class="btn" id="obsidian-btn" onclick="saveToObsidian()" disabled>🟣 存入 Obsidian</button>
+        <button class="btn" onclick="clearTranscript()">🗑 清除</button>
+        <button class="btn" id="history-btn" onclick="toggleHistory()" style="margin-left:auto;">🕓 歷史</button>
+      </div>
+    </div>
+
+    <!-- 歷史記錄面板 -->
+    <div id="history-panel" style="display:none;" class="card">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>🕓 轉錄歷史</span>
+        <button class="btn" onclick="clearHistory()" style="padding:2px 8px;font-size:11px;">清除全部</button>
+      </div>
+      <div id="history-list" style="max-height:300px;overflow-y:auto;"></div>
+    </div>
+  </section>
+
+</main>
+<div id="toast-container"></div>
+
+<!-- 處理進度 Modal -->
+<div id="processing-modal" class="modal-overlay">
+  <div class="modal-content">
+    <div class="modal-header">
+      <div class="spinner-glow"></div>
+      <h3 style="flex:1">AI 雲端語音分析中 <span id="modal-timer" class="modal-timer-badge">00:00</span></h3>
+      <button class="btn" style="padding:6px 12px; font-size:12px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; color:var(--muted); cursor:pointer;" onclick="hideProcessingModal()">隱藏背景</button>
+    </div>
+    <div id="processing-logs" class="modal-logs"></div>
+  </div>
+</div>
+
+<!-- 模型下載 overlay（P0-2）-->
+<div id="model-download-overlay" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.75);backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;">
+  <div style="background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:36px 40px;max-width:400px;width:90%;text-align:center;">
+    <div style="font-size:40px;margin-bottom:16px;">📦</div>
+    <h3 style="margin:0 0 8px;font-size:18px;">首次下載語音模型</h3>
+    <p id="model-dl-model-name" style="color:var(--muted);font-size:13px;margin:0 0 20px;"></p>
+    <div style="background:var(--surface);border-radius:999px;height:6px;overflow:hidden;margin-bottom:16px;">
+      <div id="model-dl-bar" style="height:100%;background:var(--accent);border-radius:999px;width:0%;transition:width .4s;"></div>
+    </div>
+    <p id="model-dl-status" style="color:var(--muted);font-size:13px;margin:0;">正在下載，請保持網路連線…</p>
+    <p style="color:var(--muted);font-size:11px;margin-top:12px;opacity:0.6;">下載完成後將自動關閉，之後離線也可使用</p>
+  </div>
+</div>
+
+<!-- 停止錄音確認 modal -->
+<div id="stop-confirm-modal" class="modal-overlay" style="z-index:1000;">
+  <div class="modal-content" style="max-width:340px; text-align:center; padding:32px 28px;">
+    <div style="font-size:36px; margin-bottom:12px;">⏹️</div>
+    <h3 style="margin:0 0 8px; font-size:17px;">停止並轉錄？</h3>
+    <p id="stop-confirm-duration" style="color:var(--muted); font-size:13px; margin:0 0 24px;"></p>
+    <div style="display:flex; gap:10px; justify-content:center;">
+      <button class="btn" onclick="confirmStop(false)" style="flex:1; padding:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.15); border-radius:12px;">繼續錄音</button>
+      <button class="btn primary" onclick="confirmStop(true)" style="flex:1; padding:10px; border-radius:12px;">停止轉錄</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// __APP_JS__</script>
+</body>
+</html>
