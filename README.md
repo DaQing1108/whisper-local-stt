@@ -1,4 +1,4 @@
-# 🎙️ Whisper 本地語音轉文字系統 v1.6.1
+# 🎙️ Whisper 本地語音轉文字系統 v1.6.2
 
 利用 OpenAI Whisper 開源模型在本地端**免費**進行語音轉文字，支援長達 180 分鐘的會議錄音，並可一鍵上傳至 Notion 或 Obsidian。
 
@@ -197,7 +197,14 @@ Whisper/
 
 ## 版本記錄
 
-### v1.6.1（目前版本）
+### v1.6.2（目前版本）
+
+**修復**
+- 📝 **Obsidian 存入內容修正**：`saveToObsidian()` 改用 `.transcript-text` 元素取得純文字，修復先前 `innerText` 連時間標籤（`10:30:45｜zh`）一起存入的問題
+- ⏱️ **Stop race condition 修復**：系統音訊停止時改為背景等待所有 chunk worker 完成（最多 30 秒），修復最後幾段逐字稿漏掉的問題
+- 🛡️ **Whisper 幻覺過濾**：新增 `_is_hallucination()` 偵測「我們可以看到」× 100 等重複幻覺輸出，自動丟棄避免污染逐字稿與 Obsidian 存檔
+
+### v1.6.1
 
 **修復**
 - 🎙️ **混音模式修復**：`MixedAudioCapture` 改為計時器驅動（每 15 秒），修復麥克風聲音積在 buffer 無法送出的問題（原設計須等系統音訊有聲才觸發）

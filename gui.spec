@@ -77,7 +77,7 @@ app = BUNDLE(
     info_plist={
         'NSMicrophoneUsageDescription':   'Whisper STT 需要麥克風進行會議錄音',
         'NSScreenCaptureUsageDescription': 'Whisper STT 需要螢幕錄製權限以擷取系統音訊（Teams / Zoom 等會議聲音）',
-        'CFBundleShortVersionString':     '1.6.1',
+        'CFBundleShortVersionString':     '1.6.2',
         'CFBundleName':                   'Whisper STT',
         'LSMinimumSystemVersion':         '12.0',
         'NSHighResolutionCapable':        True,

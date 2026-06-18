@@ -22,6 +22,34 @@ bp = Blueprint("main", __name__)
 # HTML_PAGE 由 app.py 在建立 Blueprint 後注入
 HTML_PAGE: str = ""
 
+
+def _is_hallucination(text: str) -> bool:
+    """Detect Whisper repetition hallucination (e.g. '我們可以看到' × 100).
+
+    Returns True when a single phrase repeats enough times to dominate the text.
+    """
+    if not text or len(text) < 20:
+        return False
+    words = text.split()
+    if not words:
+        return False
+    # Count occurrences of the most common word/phrase
+    from collections import Counter
+    counts = Counter(words)
+    most_common, freq = counts.most_common(1)[0]
+    # If one token accounts for >60% of all tokens AND appears >15 times → hallucination
+    if freq > 15 and freq / len(words) > 0.6:
+        logging.warning("[Hallucination] chunk rejected: '%s' repeated %d/%d times", most_common, freq, len(words))
+        return True
+    # Also check character-level: repeated short substring dominating the text
+    for length in range(4, min(20, len(text) // 4)):
+        phrase = text[:length]
+        count = text.count(phrase)
+        if count > 10 and count * length > len(text) * 0.6:
+            logging.warning("[Hallucination] chunk rejected: '%s' repeats %d times", phrase, count)
+            return True
+    return False
+
 # 最後一次轉錄結果 — 記憶體 + 磁碟雙重持久化
 _LAST_RESULT_FILE = Path(".last_result.json")
 _last_transcript: dict | None = None
@@ -300,6 +328,9 @@ def upload_chunk():
                 logging.error("[Chunk %d] 轉錄失敗\n%s", chunk_index, traceback.format_exc())
                 _sse.broadcast("status", {"msg": f"❌ 第 {chunk_index + 1} 段轉錄失敗"})
                 text, lang = "", "?"
+
+            if _is_hallucination(text):
+                text = ""
 
             with _chunk_sessions_lock:
                 sess["chunks"][chunk_index] = text
@@ -602,6 +633,9 @@ def system_audio_start():
                     logging.error("[SysAudio chunk %d] 轉錄失敗: %s", chunk_index, exc)
                     text, lang = "", "?"
 
+                if _is_hallucination(text):
+                    text = ""
+
                 with _chunk_sessions_lock:
                     sess = _chunk_sessions.get(session_id, {})
                     if sess:
@@ -648,6 +682,7 @@ def system_audio_start():
 def system_audio_stop():
     """停止系統音訊擷取，合併全文推送最終結果。"""
     import system_audio as _sa
+    import time as _time
 
     data = request.json or {}
     session_id = data.get("session_id", "")
@@ -656,9 +691,27 @@ def system_audio_stop():
     _sa.stop_mixed_capture()
 
     if session_id:
-        with _chunk_sessions_lock:
-            sess = _chunk_sessions.get(session_id)
-        if sess:
+        def _finalize():
+            # Wait for in-flight transcription workers to finish (up to 30 s)
+            deadline = _time.time() + 30
+            while _time.time() < deadline:
+                with _chunk_sessions_lock:
+                    sess = _chunk_sessions.get(session_id)
+                if sess is None:
+                    return
+                done = sess.get("done_count", 0)
+                _time.sleep(1)
+                with _chunk_sessions_lock:
+                    sess = _chunk_sessions.get(session_id)
+                if sess is None:
+                    return
+                if sess.get("done_count", 0) == done:
+                    break  # no new chunks arrived in the last second → workers done
+
+            with _chunk_sessions_lock:
+                sess = _chunk_sessions.pop(session_id, None)
+            if not sess:
+                return
             chunks = sess.get("chunks", {})
             full_text = "\n".join(chunks[i] for i in sorted(chunks) if chunks[i]).strip()
             lang = sess.get("language", "zh")
@@ -669,8 +722,8 @@ def system_audio_stop():
                 _sse.broadcast("done", {"ok": True, "text": full_text, "language": lang, "obsidian_file": ""})
             else:
                 _sse.broadcast("done", {"ok": False, "error_code": "EMPTY_TRANSCRIPT", "error": "empty"})
-            with _chunk_sessions_lock:
-                _chunk_sessions.pop(session_id, None)
+
+        threading.Thread(target=_finalize, daemon=True).start()
 
     return jsonify(ok=True)
 

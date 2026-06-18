@@ -626,8 +626,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
       </div>
       <!-- 系統音訊模式說明（平常隱藏） -->
       <div id="system-audio-hint" style="display:none; margin-top:12px; padding:10px 14px; border-radius:8px; background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.3); font-size:13px; color:var(--muted); line-height:1.6;">
-        🖥️ <strong>系統音訊模式</strong>：擷取電腦全部聲音（麥克風 + Teams / Zoom 等 App 播放聲）<br>
+        🖥️ <strong>系統音訊模式</strong>：擷取電腦系統音訊（Teams / Zoom 等 App 播放聲）<br>
         首次使用需在「系統設定 → 隱私權 → 螢幕錄製」授予 App 權限。
+        <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+            <input type="checkbox" id="mix-mic-toggle" style="width:15px; height:15px; cursor:pointer; accent-color:var(--accent);">
+            <span>同時錄製麥克風（混音模式）</span>
+          </label>
+        </div>
       </div>
       <div id="status-bar" style="margin-top:20px; justify-content:center; background: transparent;">等待錄音…</div>
     </div>
@@ -714,13 +720,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <script>
 // ── 錯誤碼對照表（P0-5）──────────────────────────────────────
 const ERROR_MESSAGES = {
-  FFMPEG_MISSING:       'ffmpeg 未安裝。請執行 brew install ffmpeg，或重新執行 setup.sh',
-  MODEL_LOAD_FAILED:    '模型載入失敗。請確認網路連線後重試，或重新執行 setup.sh',
-  LLM_API_ERROR:        'LLM API 呼叫失敗。請至「LLM 設定」確認 API Key 是否正確',
-  NO_AUDIO:             '未收到音訊，請確認麥克風已授權',
-  EMPTY_TRANSCRIPT:     '未偵測到語音內容',
-  BROKEN_PIPE:          '連線中斷，請重新錄音',
-  TRANSCRIPTION_FAILED: '轉錄失敗，請查看側邊欄 log 取得詳細資訊',
+  FFMPEG_MISSING:          'ffmpeg 未安裝。請執行 brew install ffmpeg，或重新執行 setup.sh',
+  MODEL_LOAD_FAILED:       '模型載入失敗。請確認網路連線後重試，或重新執行 setup.sh',
+  LLM_API_ERROR:           'LLM API 呼叫失敗。請至「LLM 設定」確認 API Key 是否正確',
+  NO_AUDIO:                '未收到音訊，請確認麥克風已授權',
+  EMPTY_TRANSCRIPT:        '未偵測到語音內容',
+  BROKEN_PIPE:             '連線中斷，請重新錄音',
+  TRANSCRIPTION_FAILED:    '轉錄失敗，請查看側邊欄 log 取得詳細資訊',
+  SCREEN_RECORDING_DENIED: '⚠️ 螢幕錄製權限未授予 — 請前往「系統設定 → 隱私權與安全性 → 螢幕錄製」手動加入 Whisper STT，然後重新開啟 App',
 }
 
 // ── State ─────────────────────────────────────────────────────
@@ -1050,8 +1057,9 @@ function _initSSE() {
     hideProcessingModal()
     if (!d.ok) {
       const msg = ERROR_MESSAGES[d.error_code] || d.error || '未知錯誤，請查看 log'
-      if (d.error_code !== 'EMPTY_TRANSCRIPT') setStatus(`❌ ${msg}`, 'error')
-      else setStatus('⚠️ 未偵測到語音內容', 'error')
+      if (d.error_code === 'EMPTY_TRANSCRIPT') setStatus('⚠️ 未偵測到語音內容', 'error')
+      else if (d.error_code === 'SCREEN_RECORDING_DENIED') setStatus(msg, 'error')
+      else setStatus(`❌ ${msg}`, 'error')
       syncUploadBtn()
       return
     }
@@ -1311,10 +1319,11 @@ async function startSystemAudio() {
   const language = document.getElementById('lang-sel').value
   const domain   = document.getElementById('domain-sel').value
   const extra    = document.getElementById('extra-terms').value
+  const withMic  = document.getElementById('mix-mic-toggle')?.checked ?? false
   const resp = await fetch('/api/system-audio/start', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ model, language, domain, extra_terms: extra })
+    body: JSON.stringify({ model, language, domain, extra_terms: extra, with_mic: withMic })
   })
   const data = await resp.json()
   if (!resp.ok) {
@@ -1666,7 +1675,9 @@ function _syncExportBtn() {
 }
 
 async function saveToObsidian() {
-  const text = document.getElementById('transcript-box').innerText.trim()
+  // Use only .transcript-text elements to exclude timestamp/language labels
+  const entries = Array.from(document.getElementById('transcript-box').querySelectorAll('.transcript-text'))
+  const text = entries.length ? entries.map(el => el.textContent).join('\n').trim() : lastText.trim()
   if (!text) return
 
   const btn = document.getElementById('obsidian-btn')
