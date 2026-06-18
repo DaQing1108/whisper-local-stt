@@ -197,7 +197,47 @@ Whisper/
 
 ## 版本記錄
 
-### v1.6.2（目前版本）
+### v1.6.3（目前版本）
+
+**程式碼品質健檢與重構**
+
+本版本針對 v1.6 累積的技術債進行全面健檢，修復 3 項高優先問題、完成 6 項中低優先重構。
+
+**Bug 修復**
+
+- 🔒 **Session 競態條件（Critical）**：`_chunk_sessions` dict 的讀-改-寫分散在多處，多執行緒並行可能造成 KeyError 或資料競爭。新增 `_chunk_prev_context()` 與 `_chunk_session_update()` 兩個 lock-guarded helper，所有 worker 一律透過這兩個函式存取 session 狀態
+- 💀 **Zombie Process（High）**：`system_audio.stop()` 呼叫 `kill()` 後未 `wait()`，Swift 子行程會殘留為 zombie。修復：`terminate()` 加 3 秒 timeout，失敗才 `kill()`，兩條路都補 `wait()`
+- 🔒 **`_finalize()` lock race（High）**：背景等待執行緒讀取 `done_count` 在 lock 外部，若主執行緒同時寫入可能讀到髒資料。修復：`done` 讀取移入 lock 區塊內
+- 🗑️ **Session 記憶體洩漏（Medium）**：系統音訊模式每次錄音在 `_chunk_sessions` 新增 session 但從不清除，長期運行記憶體持續增長。新增 TTL 清除背景執行緒（300 秒逾時自動驅逐），兩個 session 建立點均加入 `"last_active"` 時間戳
+
+**重構**
+
+- 📦 **消除重複常數（DRY）**：3 個檔案各自定義相同的 `domain_label` dict，新增 `transcribe_common.py` 集中定義 `DOMAIN_LABELS` 常數，所有管線統一 import
+- 📦 **消除重複函式（DRY）**：`_is_hallucination()` 分散在多處，移至 `transcribe_common.py` 共用
+- 🏗️ **Notion block 建構邏輯（M3）**：`upload()` 內含 30 行 block 組裝，抽取至 `integrations.build_notion_blocks(text, lang)` 統一管理
+- 🪵 **移除 Production print()（H1）**：所有 `print()` 改為 `logging.debug/info/warning`，方便 log level 控制，不污染 stdout
+- 🪟 **ui.py 拆分（M1）**：2106 行 Python 字串變成維護噩夢（無 IDE 支援、語法高亮失效）。重構為 `templates/index.html` + `static/app.css` + `static/app.js` 三個獨立檔案，`ui.py` 縮減至 15 行組裝程式碼；`gui.spec` 同步加入 `templates/` 與 `static/` bundle 路徑
+- 🔀 **`sign_and_install.sh` 重導向**：舊腳本改為 7 行 wrapper，自動轉導至統一入口 `package.sh`，避免歷史肌肉記憶造成誤用
+
+**異動檔案**
+
+| 檔案 | 說明 |
+|------|------|
+| `routes.py` | 新增 `_chunk_prev_context()`、`_chunk_session_update()`、TTL 清除執行緒；`_finalize()` lock 修正；`print()` → `logging`；Notion block 邏輯移出 |
+| `system_audio.py` | `stop()` zombie fix；`_find_binary()` debug log；`print()` → `logging` |
+| `transcribe_common.py` | 新檔案：`DOMAIN_LABELS` 常數 + `is_hallucination()` 共用函式 |
+| `integrations.py` | 新增 `build_notion_blocks(text, lang)` |
+| `ui.py` | 縮減至 15 行組裝程式碼 |
+| `templates/index.html` | 新檔案：HTML 骨架（259 行） |
+| `static/app.css` | 新檔案：CSS 樣式（463 行） |
+| `static/app.js` | 新檔案：JavaScript 邏輯（1382 行） |
+| `sign_and_install.sh` | 改為 7 行重導向 wrapper |
+| `gui.spec` | 加入 `templates/`、`static/` bundle 路徑；版本號 `1.6.2` → `1.6.3` |
+| `version.py` | 版本號 `1.6.2` → `1.6.3` |
+
+---
+
+### v1.6.2
 
 **修復**
 - 📝 **Obsidian 存入內容修正**：`saveToObsidian()` 改用 `.transcript-text` 元素取得純文字，修復先前 `innerText` 連時間標籤（`10:30:45｜zh`）一起存入的問題
