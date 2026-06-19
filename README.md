@@ -1,4 +1,4 @@
-# 🎙️ Whisper 本地語音轉文字系統 v1.6.3
+# 🎙️ Whisper 本地語音轉文字系統 v1.6.4
 
 利用 OpenAI Whisper 開源模型在本地端**免費**進行語音轉文字，支援長達 180 分鐘的會議錄音，並可一鍵上傳至 Notion 或 Obsidian。
 
@@ -197,7 +197,19 @@ Whisper/
 
 ## 版本記錄
 
-### v1.6.3（目前版本）
+### v1.6.4（目前版本）
+
+**v1.6.4 Patch**（2026-06-19）
+
+升版自 v1.6.3，修復 chunk-based 架構延伸問題，新增完整測試覆蓋與 Claude Code 開發工具整合。
+
+**新增**
+- 測試套件 `tests/`（61 unit tests 全部通過）
+- `Makefile` 快捷指令（`make test` / `make server` / `make package`）
+- Stop Hook：Claude Code session 結束自動執行 unit tests
+- `/test` skill：Claude Code 互動式測試執行與分析
+
+### v1.6.3
 
 **v1.6.3 延伸 Bug 修復**（2026-06-19）
 
