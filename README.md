@@ -226,7 +226,23 @@ tests/manual_checklist.md          # TCC 權限 + 真實語音（5-10 分鐘）
 
 執行 unit tests：
 ```bash
-python3 -m pytest tests/unit/ -v
+make test              # unit tests（61 個，~30s，不需要 server）
+make test-integration  # integration tests（需要 make server）
+make test-e2e          # Playwright UI 自動化
+make test-accuracy     # CER 回歸（release 前）
+make server            # 啟動測試用 server（WHISPER_TEST=1）
+```
+
+**Claude Code 整合（Stop Hook + /test Skill）**
+
+新增 `.claude/settings.json` Stop Hook：每次 Claude Code session 結束前自動跑 unit tests，通過顯示 ✅，失敗顯示 ❌。
+
+新增 `.claude/skills/test.md` skill：在 Claude Code session 中輸入 `/test` 手動觸發，Claude 看得到結果並可直接分析失敗並修復。
+
+```
+/test                  → unit tests（預設）
+/test integration      → integration tests
+/test all              → unit + integration
 ```
 
 ---

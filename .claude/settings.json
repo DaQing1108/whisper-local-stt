@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/daqingliao/Documents/AI-Workspace/1P_Projects/Whisper && make test 2>&1 | tail -5 && echo '{\"systemMessage\": \"✅ Unit tests passed\"}' || echo '{\"systemMessage\": \"❌ Unit tests failed — run make test to see details\"}'",
+            "timeout": 60,
+            "statusMessage": "Running unit tests before session end..."
+          }
+        ]
+      }
+    ]
+  }
+}
