@@ -1,4 +1,4 @@
-# 🎙️ Whisper 本地語音轉文字系統 v1.6.2
+# 🎙️ Whisper 本地語音轉文字系統 v1.6.3
 
 利用 OpenAI Whisper 開源模型在本地端**免費**進行語音轉文字，支援長達 180 分鐘的會議錄音，並可一鍵上傳至 Notion 或 Obsidian。
 
@@ -198,6 +198,38 @@ Whisper/
 ## 版本記錄
 
 ### v1.6.3（目前版本）
+
+**v1.6.3 延伸 Bug 修復**（2026-06-19）
+
+v1.6.3 重構導入 chunk-based 架構後，測試中發現三個未被覆蓋的跨路徑問題：
+
+| # | 問題 | 原因 | 修法 |
+|---|------|------|------|
+| 1 | 系統音訊錄音結束後，Obsidian **未自動存檔** | `system_audio_start()` session 寫死 `save_obsidian: False`；`_finalize()` 從不呼叫 `save_to_obsidian()`；前端啟動時未傳 `save_obsidian` 欄位 | 三處同步修正：前端傳參、session 讀參、`_finalize()` 存檔邏輯 |
+| 2 | 轉錄後 **永遠卡在 LLM 處理中** | chunk-based 錄音每段各自呼叫 `llm_punctuate()`，28 段 × 最長 60 秒 = 長達 28 分鐘 | 各 chunk 轉錄加 `skip_llm=True`，LLM 僅在全文合併後呼叫一次 |
+| 3 | LLM API 掛起時無 hard timeout | `urlopen(timeout=60)` 只保護 socket，連線建立後若 API 不送資料仍會無限阻塞 | `llm_punctuate()` 整體包進 daemon thread，**30 秒**總 timeout；逾時靜默回傳原始文字 |
+
+**新增測試套件**
+
+新增 `tests/` 目錄，共 61 個 unit tests，全部通過：
+
+```
+tests/unit/test_hallucination.py   # is_hallucination() 幻覺偵測邊界條件
+tests/unit/test_prompts.py         # build_prompt() × domain / extra_terms
+tests/unit/test_llm_post.py        # LLM timeout、key 驗證、meta-response 防護
+tests/unit/test_notion_blocks.py   # build_notion_blocks() 格式結構
+tests/integration/                 # 需要 WHISPER_TEST=1 server（inject endpoint）
+tests/e2e/                         # Playwright UI 自動化
+tests/accuracy/                    # CER 字元錯誤率回歸（release 前執行）
+tests/manual_checklist.md          # TCC 權限 + 真實語音（5-10 分鐘）
+```
+
+執行 unit tests：
+```bash
+python3 -m pytest tests/unit/ -v
+```
+
+---
 
 **程式碼品質健檢與重構**
 

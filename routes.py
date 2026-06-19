@@ -328,6 +328,7 @@ def upload_chunk():
                     audio_bytes, ext, model_name, language,
                     domain=domain, extra_terms=extra_terms,
                     initial_prompt_override=context or None,
+                    skip_llm=True,  # LLM 在 _finish_session 全文合併後統一處理
                 )
                 logging.debug("[Chunk %d] 完成 text_len=%d lang=%s", chunk_index, len(text), lang)
             except TranscriptionError as e:
@@ -597,7 +598,7 @@ def system_audio_start():
             "language":      language,
             "domain":        domain,
             "extra_terms":   extra_terms,
-            "save_obsidian": False,
+            "save_obsidian": data.get("save_obsidian", False),
             "live_mode":     True,
         }
 
@@ -615,6 +616,7 @@ def system_audio_start():
                         wav_bytes, ".wav", model_name, language,
                         domain=domain, extra_terms=extra_terms,
                         initial_prompt_override=context or None,
+                        skip_llm=True,  # LLM 在 stop 後全文合併統一處理
                     )
                 except Exception as exc:
                     logging.error("[SysAudio chunk %d] 轉錄失敗: %s", chunk_index, exc)
@@ -703,13 +705,82 @@ def system_audio_stop():
                 ts = datetime.now().strftime("%H:%M:%S")
                 _save_last_transcript({"text": full_text, "language": lang, "time": ts, "segments": []})
                 _sse.broadcast("transcript", {"text": full_text, "language": lang, "time": ts, "segments": []})
-                _sse.broadcast("done", {"ok": True, "text": full_text, "language": lang, "obsidian_file": ""})
+                obsidian_file = ""
+                if sess.get("save_obsidian") and integrations._OBSIDIAN_PATH:
+                    info = {"time": ts}
+                    obsidian_file = integrations.save_to_obsidian(full_text, lang, info)
+                    if obsidian_file:
+                        _sse.broadcast("status", {"msg": f"✅ 已存入 Obsidian：{Path(obsidian_file).name}"})
+                _sse.broadcast("done", {"ok": True, "text": full_text, "language": lang, "obsidian_file": obsidian_file})
             else:
                 _sse.broadcast("done", {"ok": False, "error_code": "EMPTY_TRANSCRIPT", "error": "empty"})
 
         threading.Thread(target=_finalize, daemon=True).start()
 
     return jsonify(ok=True)
+
+
+@bp.route("/api/health")
+def health():
+    return jsonify(ok=True, version=__version__)
+
+
+@bp.route("/api/test/inject-chunk", methods=["POST"])
+def test_inject_chunk():
+    """測試專用：直接注入 WAV bytes 模擬麥克風／系統音訊 chunk，繞過硬體。
+    僅在 Flask debug 模式或 WHISPER_TEST=1 時啟用。
+    """
+    import os as _os
+    from flask import current_app
+    if not (current_app.debug or _os.environ.get("WHISPER_TEST") == "1"):
+        return jsonify(error="只在 debug/test 模式下可用"), 403
+
+    session_id = request.form.get("session_id", f"test_{int(_time.time())}")
+    chunk_index = int(request.form.get("chunk_index", 0))
+    wav_file = request.files.get("wav")
+    if not wav_file:
+        return jsonify(error="缺少 wav 檔案"), 400
+
+    wav_bytes = wav_file.read()
+    with _chunk_sessions_lock:
+        if session_id not in _chunk_sessions:
+            _chunk_sessions[session_id] = {
+                "chunks": {}, "langs": {}, "total": None,
+                "done_count": 0, "last_active": _time.time(),
+                "model": request.form.get("model", "small"),
+                "language": request.form.get("language", "zh"),
+                "domain": request.form.get("domain", "general"),
+                "extra_terms": request.form.get("extra_terms", ""),
+                "save_obsidian": request.form.get("save_obsidian", "false") == "true",
+                "live_mode": False,
+            }
+
+    def _worker():
+        try:
+            from whisper_core import transcribe_audio as _ta
+            sess = _chunk_sessions.get(session_id, {})
+            text, lang, _ = _ta(
+                wav_bytes, ".wav",
+                sess.get("model", "small"),
+                sess.get("language", "zh"),
+                domain=sess.get("domain", "general"),
+                extra_terms=sess.get("extra_terms", ""),
+                skip_llm=True,
+            )
+            if _is_hallucination(text):
+                text = ""
+            _chunk_session_update(session_id, chunk_index, text, lang)
+            _sse.broadcast("chunk_done", {
+                "session_id": session_id,
+                "chunk_index": chunk_index,
+                "text": text,
+                "language": lang,
+            })
+        except Exception as exc:
+            logging.error("[test_inject_chunk] 失敗: %s", exc)
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify(ok=True, session_id=session_id, chunk_index=chunk_index)
 
 
 @bp.route("/api/last_transcript", methods=["GET"])

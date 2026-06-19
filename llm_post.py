@@ -83,7 +83,7 @@ def _llm_call_chunk(chunk: str, provider: str, api_key: str, extra_terms: str = 
                 "anthropic-version": "2023-06-01",
             },
         )
-        with _req.urlopen(req, timeout=60) as resp:
+        with _req.urlopen(req, timeout=20) as resp:
             return _json.loads(resp.read())["content"][0]["text"]
 
     elif provider == "gemini":
@@ -98,7 +98,7 @@ def _llm_call_chunk(chunk: str, provider: str, api_key: str, extra_terms: str = 
                     data=body,
                     headers={"Content-Type": "application/json"},
                 )
-                with _req.urlopen(req, timeout=60) as resp:
+                with _req.urlopen(req, timeout=20) as resp:
                     return _json.loads(resp.read())["candidates"][0]["content"]["parts"][0]["text"]
             except Exception:
                 continue
@@ -121,13 +121,45 @@ def _llm_call_chunk(chunk: str, provider: str, api_key: str, extra_terms: str = 
                 "Authorization": f"Bearer {api_key}",
             },
         )
-        with _req.urlopen(req, timeout=60) as resp:
+        with _req.urlopen(req, timeout=20) as resp:
             return _json.loads(resp.read())["choices"][0]["message"]["content"]
 
 
+_LLM_TOTAL_TIMEOUT = 30  # 整體 LLM 後處理上限（秒）
+
+
+def _llm_punctuate_inner(text: str, extra_terms: str, provider: str, api_key: str) -> str:
+    MAX_CHARS = 1500
+    lines = text.split("\n")
+    chunks: list[str] = []
+    buf: list[str] = []
+    buf_len = 0
+    for line in lines:
+        if buf_len + len(line) > MAX_CHARS and buf:
+            chunks.append("\n".join(buf))
+            buf, buf_len = [], 0
+        buf.append(line)
+        buf_len += len(line)
+    if buf:
+        chunks.append("\n".join(buf))
+
+    results = [_llm_call_chunk(c, provider, api_key, extra_terms) for c in chunks]
+    refined = "\n".join(results)
+
+    if len(refined) > len(text) * 3:
+        logging.warning("[LLM:%s] 回傳疑似 meta-response（%d → %d 字），改用原始輸出",
+                        provider, len(text), len(refined))
+        return text
+
+    logging.info("[LLM:%s] 標點後處理完成（%d → %d 字）", provider, len(text), len(refined))
+    return refined
+
+
 def llm_punctuate(text: str, extra_terms: str = "") -> str:
-    """自動選擇可用的 LLM provider 精修標點與同音詞糾錯。失敗時回傳原文。"""
-    if len(text.strip()) < 10:  # 少於 10 字無意義，跳過 LLM
+    """自動選擇可用的 LLM provider 精修標點與同音詞糾錯。失敗或逾時時回傳原文。"""
+    import threading
+
+    if len(text.strip()) < 10:
         return text
 
     for provider, env_var in _LLM_PROVIDERS:
@@ -137,33 +169,23 @@ def llm_punctuate(text: str, extra_terms: str = "") -> str:
     else:
         return text
 
-    try:
-        MAX_CHARS = 1500
-        lines = text.split("\n")
-        chunks: list[str] = []
-        buf: list[str] = []
-        buf_len = 0
-        for line in lines:
-            if buf_len + len(line) > MAX_CHARS and buf:
-                chunks.append("\n".join(buf))
-                buf, buf_len = [], 0
-            buf.append(line)
-            buf_len += len(line)
-        if buf:
-            chunks.append("\n".join(buf))
+    result_box: list[str] = []
+    error_box:  list[Exception] = []
 
-        results = [_llm_call_chunk(c, provider, api_key, extra_terms) for c in chunks]
-        refined = "\n".join(results)
+    def _worker():
+        try:
+            result_box.append(_llm_punctuate_inner(text, extra_terms, provider, api_key))
+        except Exception as e:
+            error_box.append(e)
 
-        # 防護：若 LLM 回傳明顯是 meta-response（比輸入長超過 3 倍），回傳原文
-        if len(refined) > len(text) * 3:
-            logging.warning("[LLM:%s] 回傳疑似 meta-response（%d → %d 字），改用原始輸出",
-                            provider, len(text), len(refined))
-            return text
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(timeout=_LLM_TOTAL_TIMEOUT)
 
-        logging.info("[LLM:%s] 標點後處理完成（%d → %d 字）", provider, len(text), len(refined))
-        return refined
-
-    except Exception as e:
-        logging.warning("[LLM:%s] 標點後處理失敗，使用原始輸出：%s", provider, e)
+    if t.is_alive():
+        logging.warning("[LLM:%s] 標點後處理超過 %ds，使用原始輸出", provider, _LLM_TOTAL_TIMEOUT)
         return text
+    if error_box:
+        logging.warning("[LLM:%s] 標點後處理失敗，使用原始輸出：%s", provider, error_box[0])
+        return text
+    return result_box[0] if result_box else text

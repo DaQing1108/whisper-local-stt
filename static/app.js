@@ -603,7 +603,7 @@ async function startSystemAudio() {
   const resp = await fetch('/api/system-audio/start', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ model, language, domain, extra_terms: extra, with_mic: withMic })
+    body: JSON.stringify({ model, language, domain, extra_terms: extra, with_mic: withMic, save_obsidian: obsidianEnabled })
   })
   const data = await resp.json()
   if (!resp.ok) {
