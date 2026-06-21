@@ -347,6 +347,7 @@ def upload_chunk():
 
             if _is_hallucination(text):
                 text = ""
+                info = {}  # discard hallucinated segments too
 
             with _chunk_sessions_lock:
                 sess = _chunk_sessions.get(session_id)
@@ -648,6 +649,7 @@ def system_audio_start():
 
                 if _is_hallucination(text):
                     text = ""
+                    chunk_info = {}  # discard hallucinated segments too
 
                 sys_audio_chunk_sec = 15
                 offset = chunk_index * sys_audio_chunk_sec
