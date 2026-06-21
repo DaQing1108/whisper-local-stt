@@ -169,6 +169,17 @@ def save_to_obsidian(text: str, lang: str, meta: dict | None = None) -> str:
             s = int(duration_sec % 60)
             duration_formatted = f"{m:02d}:{s:02d}"
 
+        segments = meta.get("segments") or []
+        if segments:
+            lines = []
+            for seg in segments:
+                t = int(seg.get("start", 0))
+                ts = f"[{t // 60:02d}:{t % 60:02d}]"
+                lines.append(f"{ts} {seg['text'].strip()}")
+            transcript_body = "\n".join(lines)
+        else:
+            transcript_body = text
+
         md = f"""---
 date: {date_str}
 time: "{time_str}"
@@ -188,7 +199,7 @@ tags:
 
 ## 逐字稿
 
-{text}
+{transcript_body}
 """
         fpath.write_text(md, encoding="utf-8")
         logging.info("[Obsidian] 已存檔：%s", fpath)

@@ -292,17 +292,19 @@ def upload_chunk():
     with _chunk_sessions_lock:
         if session_id not in _chunk_sessions:
             _chunk_sessions[session_id] = {
-                "chunks":        {},
-                "langs":         {},
-                "total":         None,
-                "done_count":    0,
-                "last_active":   _time.time(),
-                "model":         model_name,
-                "language":      language,
-                "domain":        domain,
-                "extra_terms":   extra_terms,
-                "save_obsidian": save_obsidian,
-                "live_mode":     live_mode,
+                "chunks":           {},
+                "langs":            {},
+                "total":            None,
+                "done_count":       0,
+                "last_active":      _time.time(),
+                "model":            model_name,
+                "language":         language,
+                "domain":           domain,
+                "extra_terms":      extra_terms,
+                "save_obsidian":    save_obsidian,
+                "live_mode":        live_mode,
+                "segments_by_chunk": {},
+                "chunk_durations":   {},
             }
         sess = _chunk_sessions[session_id]
         if is_last:
@@ -341,10 +343,16 @@ def upload_chunk():
             except Exception as e:
                 logging.error("[Chunk %d] 轉錄失敗\n%s", chunk_index, traceback.format_exc())
                 _sse.broadcast("status", {"msg": f"❌ 第 {chunk_index + 1} 段轉錄失敗"})
-                text, lang = "", "?"
+                text, lang, info = "", "?", {}
 
             if _is_hallucination(text):
                 text = ""
+
+            with _chunk_sessions_lock:
+                sess = _chunk_sessions.get(session_id)
+                if sess is not None:
+                    sess["segments_by_chunk"][chunk_index] = info.get("segments", [])
+                    sess["chunk_durations"][chunk_index] = info.get("duration_seconds", 0)
 
             snap = _chunk_session_update(session_id, chunk_index, text, lang)
             if snap is None:
@@ -420,8 +428,23 @@ def _finish_session(session_id: str) -> None:
         _sse.broadcast("status", {"msg": "⏳ 全文合併完畢，正在啟動 LLM 進行語意糾錯與標點處理…"})
     full_text = llm_punctuate(full_text, sess.get("extra_terms", ""))
 
+    segments_by_chunk = sess.get("segments_by_chunk", {})
+    chunk_durations   = sess.get("chunk_durations", {})
+    all_segments: list[dict] = []
+    cumulative = 0.0
+    for i in sorted(segments_by_chunk):
+        offset = cumulative
+        for seg in segments_by_chunk[i]:
+            all_segments.append({
+                "text":  seg["text"],
+                "start": seg["start"] + offset,
+                "end":   seg["end"] + offset,
+            })
+        cumulative += chunk_durations.get(i, 0)
+
     info = {"model": sess["model"], "domain": sess["domain"],
-            "extra_terms": sess["extra_terms"], "duration_seconds": 0}
+            "extra_terms": sess["extra_terms"], "duration_seconds": cumulative,
+            "segments": all_segments}
 
     _save_last_transcript({
         "text":     full_text,
@@ -589,17 +612,18 @@ def system_audio_start():
     # Register session so _finish_session works
     with _chunk_sessions_lock:
         _chunk_sessions[session_id] = {
-            "chunks":        {},
-            "langs":         {},
-            "total":         None,
-            "done_count":    0,
-            "last_active":   _time.time(),
-            "model":         model_name,
-            "language":      language,
-            "domain":        domain,
-            "extra_terms":   extra_terms,
-            "save_obsidian": data.get("save_obsidian", False),
-            "live_mode":     True,
+            "chunks":            {},
+            "langs":             {},
+            "total":             None,
+            "done_count":        0,
+            "last_active":       _time.time(),
+            "model":             model_name,
+            "language":          language,
+            "domain":            domain,
+            "extra_terms":       extra_terms,
+            "save_obsidian":     data.get("save_obsidian", False),
+            "live_mode":         True,
+            "segments_by_chunk": {},
         }
 
     def _on_chunk(wav_bytes: bytes, chunk_index: int) -> None:
@@ -612,7 +636,7 @@ def system_audio_start():
                 context = _chunk_prev_context(session_id, chunk_index)
                 try:
                     from whisper_core import transcribe_audio as _transcribe_audio
-                    text, lang, _ = _transcribe_audio(
+                    text, lang, chunk_info = _transcribe_audio(
                         wav_bytes, ".wav", model_name, language,
                         domain=domain, extra_terms=extra_terms,
                         initial_prompt_override=context or None,
@@ -620,10 +644,20 @@ def system_audio_start():
                     )
                 except Exception as exc:
                     logging.error("[SysAudio chunk %d] 轉錄失敗: %s", chunk_index, exc)
-                    text, lang = "", "?"
+                    text, lang, chunk_info = "", "?", {}
 
                 if _is_hallucination(text):
                     text = ""
+
+                sys_audio_chunk_sec = 15
+                offset = chunk_index * sys_audio_chunk_sec
+                with _chunk_sessions_lock:
+                    sess = _chunk_sessions.get(session_id)
+                    if sess is not None:
+                        sess["segments_by_chunk"][chunk_index] = [
+                            {"text": s["text"], "start": s["start"] + offset, "end": s["end"] + offset}
+                            for s in chunk_info.get("segments", [])
+                        ]
 
                 snap = _chunk_session_update(session_id, chunk_index, text, lang)
                 if snap is None:
@@ -707,7 +741,18 @@ def system_audio_stop():
                 _sse.broadcast("transcript", {"text": full_text, "language": lang, "time": ts, "segments": []})
                 obsidian_file = ""
                 if sess.get("save_obsidian") and integrations._OBSIDIAN_PATH:
-                    info = {"time": ts}
+                    segments_by_chunk = sess.get("segments_by_chunk", {})
+                    sys_segments = [
+                        seg
+                        for i in sorted(segments_by_chunk)
+                        for seg in segments_by_chunk[i]
+                    ]
+                    info = {
+                        "time":     ts,
+                        "model":    sess.get("model", "unknown"),
+                        "domain":   sess.get("domain", "general"),
+                        "segments": sys_segments,
+                    }
                     obsidian_file = integrations.save_to_obsidian(full_text, lang, info)
                     if obsidian_file:
                         _sse.broadcast("status", {"msg": f"✅ 已存入 Obsidian：{Path(obsidian_file).name}"})

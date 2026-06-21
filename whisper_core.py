@@ -487,6 +487,7 @@ def run_whisper(
             result    = _transcribe_file(tmp_wav, model_name, opts)
             full_text = _strip_prompt_echo(result.get("text", "").strip(), prompt)
             lang      = result.get("language", "?")
+            info["segments"] = result.get("segments", [])
             if not kwargs.get("skip_llm") and has_llm_key():
                 broadcast("status", {"msg": "⏳ 語音辨識完畢，正在啟動 LLM 進行語意糾錯與標點處理..."})
                 full_text = llm_punctuate(full_text, extra_terms)
@@ -496,6 +497,7 @@ def run_whisper(
         chunk_frames = int(CHUNK_SECONDS * framerate)
         n_chunks     = math.ceil(total_frames / chunk_frames)
         texts: list[str] = []
+        all_segments: list[dict] = []
         lang = "?"
 
         with wave.open(tmp_wav, 'rb') as wf:
@@ -512,12 +514,20 @@ def run_whisper(
                     seg_text = _strip_prompt_echo(result.get("text", "").strip(), prompt)
                     lang     = result.get("language", lang)
                     texts.append(seg_text)
+                    offset = i * CHUNK_SECONDS
+                    for seg in result.get("segments", []):
+                        all_segments.append({
+                            "text":  seg["text"],
+                            "start": seg["start"] + offset,
+                            "end":   seg["end"] + offset,
+                        })
                 finally:
                     Path(chunk_path).unlink(missing_ok=True)
                 if progress_cb:
                     progress_cb(i + 1, n_chunks, seg_text)
 
         full_text = "\n".join(texts)
+        info["segments"] = all_segments
         if not kwargs.get("skip_llm") and has_llm_key():
             broadcast("status", {"msg": "⏳ 全文轉錄完畢，正在啟動 LLM 進行語意糾錯與標點處理..."})
             full_text = llm_punctuate(full_text, extra_terms)
