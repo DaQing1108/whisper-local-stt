@@ -203,11 +203,12 @@ Whisper/
 
 系統音訊擷取穩定性全面修復。
 
-| # | 修復 | 根因 |
+| # | 修復／新增 | 說明 |
 |---|------|------|
 | 1 | **系統音訊 YouTube/瀏覽器音訊擷取** | `SCContentFilter` 改用 `including: content.applications`，確保 Chrome Helper（背景 process，無可見視窗）的音訊也被包含 |
 | 2 | **TCC 螢幕錄製授權跨 rebuild 失效** | 主 app bundle 改用 "WhisperSTT Local" 穩定證書簽名（原為 ad-hoc，每次 rebuild hash 改變 → macOS 視為新 app → 授權失效） |
 | 3 | **CLAUDE.md 技術約束文件** | 記錄三條 NEVER 規則 + 症狀診斷樹，防止跨 session 重蹈覆轍 |
+| 4 | **轉錄模式逐字稿含時間戳** _(補記自 v1.6.4)_ | 上傳音檔、麥克風錄音、系統音訊三條路徑均以 `[MM:SS]` 格式存入 Obsidian 逐字稿 |
 
 > **TCC 授權說明**：升級此版本後需重新授權一次（系統設定 → 隱私權與安全性 → 螢幕錄製 → Whisper STT 開啟）。往後每次 rebuild 無需再次授權。
 
