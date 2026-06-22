@@ -51,12 +51,12 @@ if [ ! -d "$DIST_APP" ]; then
 fi
 echo "   ✅ 打包完成"
 
-# ── 步驟 3：ad-hoc 簽章（Gatekeeper bypass）────────────────
+# ── 步驟 3：穩定簽章（TCC 身份跨 rebuild 不變）────────────────
 echo ""
-echo "✍️  [3/6] ad-hoc 簽章…"
+echo "✍️  [3/6] 穩定簽章（WhisperSTT Local）…"
 xattr -cr "$DIST_APP" 2>/dev/null || true
-codesign -s - --deep --force --no-strict "$DIST_APP" 2>&1 | grep -v "^$" || true
-echo "   ✅ ad-hoc 簽章完成"
+codesign --sign "$CERT" --deep --force --no-strict "$DIST_APP" 2>&1 | grep -v "^$" || true
+echo "   ✅ 穩定簽章完成"
 
 # ── 步驟 4：安裝到 /Applications ─────────────────────────────
 echo ""

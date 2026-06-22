@@ -25,7 +25,6 @@ class AudioStreamer: NSObject, SCStreamOutput, SCStreamDelegate {
     private let outputHandle = FileHandle.standardOutput
 
     func start() async throws {
-        // onScreenWindowsOnly:false ensures background processes (browser audio renderers) are included
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         guard !content.displays.isEmpty else {
             fputs("ERROR:no_display\n", stderr)
@@ -41,9 +40,6 @@ class AudioStreamer: NSObject, SCStreamOutput, SCStreamDelegate {
         config.height = 2
         config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
 
-        // includingApplications with ALL apps captures audio from background helpers
-        // (e.g. com.google.Chrome.helper) that have no visible window on the display.
-        // The previous excludingApplications:[] filter missed those processes.
         let filter = SCContentFilter(
             display: content.displays[0],
             including: content.applications,

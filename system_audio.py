@@ -47,6 +47,7 @@ def _is_silence(pcm: bytes) -> bool:
         return True
     samples = struct.unpack(f"<{len(pcm) // 2}h", pcm)
     rms = math.sqrt(sum(s * s for s in samples) / len(samples))
+    logging.info("[SystemAudio] chunk RMS=%.1f (threshold=%d)", rms, _SILENCE_RMS_THRESHOLD)
     return rms < _SILENCE_RMS_THRESHOLD
 
 
