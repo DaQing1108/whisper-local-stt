@@ -1,13 +1,18 @@
-# 🎙️ Whisper 本地語音轉文字系統 v1.6.6
+# 🎙️ Whisper 本地語音轉文字系統 v1.6.7
 
 ## Current State
-Last checkpoint: 2026-06-24 10:30
-Phase: v1.6.6 — 模型升級
-Working: large-v3 預設模型運作正常，系統音訊模式可用，TCC 授權流程正常
-Next action: 繼續日常使用，觀察 large-v3 轉錄品質
+Last checkpoint: 2026-06-25 今日
+Phase: v1.6.7 — VAD 優化 + Hallucination 偵測
+Working: VAD silence threshold=500、timestamp-only hallucination 過濾、unit tests 16/16、.app 系統音訊正常
+Next action: 日常使用觀察過濾效果
 Blockers: none
 
 ## Checkpoint History
+### 2026-06-25｜v1.6.7 VAD 優化 + Hallucination 偵測
+- Completed: VAD silence threshold 調為 500、新增 timestamp-only phantom 偵測、版號升至 v1.6.7
+- State: unit tests 16/16 全綠，.app 系統音訊轉錄正常
+- Next: 日常使用觀察 hallucination 過濾效果
+
 ### 2026-06-24 10:30｜v1.6.6 模型升級
 - Completed: 新增 large-v3 選項並設為預設、加入 condition_on_previous_text=False 防止時間戳循環、版號升至 v1.6.6、重新打包 .app
 - State: large-v3 預設模型正常，系統音訊模式 TCC 授權正常
