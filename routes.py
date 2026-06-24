@@ -66,7 +66,7 @@ def api_version():
 
 @bp.route("/api/model-status")
 def model_status():
-    model_name = request.args.get("model", "small")
+    model_name = request.args.get("model", "large")
     cached = is_model_cached(model_name)
     with _warmup_lock:
         state = _warmup_state.get(model_name, "cached" if cached else "unknown")
@@ -75,7 +75,7 @@ def model_status():
 
 @bp.route("/api/warmup-model", methods=["POST"])
 def warmup_model_route():
-    model_name = (request.json or {}).get("model", "small")
+    model_name = (request.json or {}).get("model", "large")
     warmup_model_async(model_name)
     return jsonify(status="started", model=model_name)
 
@@ -125,7 +125,7 @@ def transcribe():
     if not audio:
         return jsonify(error="沒有收到音訊"), 400
 
-    model_name    = request.form.get("model", "small")
+    model_name    = request.form.get("model", "large")
     language      = request.form.get("language", "auto")
     domain        = request.form.get("domain", "general")
     extra_terms   = request.form.get("extra_terms", "")
@@ -279,7 +279,7 @@ def upload_chunk():
     session_id  = request.form.get("session_id", "unknown")
     chunk_index = int(request.form.get("chunk_index", 0))
     is_last     = request.form.get("is_last", "false").lower() == "true"
-    model_name  = request.form.get("model", "small")
+    model_name  = request.form.get("model", "large")
     language    = request.form.get("language", "auto")
     domain      = request.form.get("domain", "general")
     extra_terms = request.form.get("extra_terms", "")
@@ -603,7 +603,7 @@ def system_audio_start():
         return jsonify(error="系統音訊擷取已在運行中"), 409
 
     data = request.json or {}
-    model_name  = data.get("model", "small")
+    model_name  = data.get("model", "large")
     language    = data.get("language", "auto")
     domain      = data.get("domain", "general")
     extra_terms = data.get("extra_terms", "")
@@ -794,7 +794,7 @@ def test_inject_chunk():
             _chunk_sessions[session_id] = {
                 "chunks": {}, "langs": {}, "total": None,
                 "done_count": 0, "last_active": _time.time(),
-                "model": request.form.get("model", "small"),
+                "model": request.form.get("model", "large"),
                 "language": request.form.get("language", "zh"),
                 "domain": request.form.get("domain", "general"),
                 "extra_terms": request.form.get("extra_terms", ""),
@@ -808,7 +808,7 @@ def test_inject_chunk():
             sess = _chunk_sessions.get(session_id, {})
             text, lang, _ = _ta(
                 wav_bytes, ".wav",
-                sess.get("model", "small"),
+                sess.get("model", "large"),
                 sess.get("language", "zh"),
                 domain=sess.get("domain", "general"),
                 extra_terms=sess.get("extra_terms", ""),

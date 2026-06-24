@@ -187,7 +187,7 @@ repo           = sys.argv[2]
 language       = sys.argv[3] if sys.argv[3] != '__auto__' else None
 initial_prompt = sys.argv[4] if len(sys.argv) > 4 else ''
 
-kwargs = {}
+kwargs = {'condition_on_previous_text': False}
 if language:
     kwargs['language'] = language
 if initial_prompt:
@@ -255,7 +255,7 @@ def _transcribe_mlx_inprocess(
     # Safe to call mlx_whisper directly since Metal already initialized at import time.
     import mlx_whisper
     repo   = MLX_REPOS.get(model_name, MLX_REPOS["small"])
-    kwargs: dict = {}
+    kwargs: dict = {"condition_on_previous_text": False}
     if language:
         kwargs["language"] = language
     if initial_prompt:

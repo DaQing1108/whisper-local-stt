@@ -1,4 +1,17 @@
-# 🎙️ Whisper 本地語音轉文字系統 v1.6.5
+# 🎙️ Whisper 本地語音轉文字系統 v1.6.6
+
+## Current State
+Last checkpoint: 2026-06-24 10:30
+Phase: v1.6.6 — 模型升級
+Working: large-v3 預設模型運作正常，系統音訊模式可用，TCC 授權流程正常
+Next action: 繼續日常使用，觀察 large-v3 轉錄品質
+Blockers: none
+
+## Checkpoint History
+### 2026-06-24 10:30｜v1.6.6 模型升級
+- Completed: 新增 large-v3 選項並設為預設、加入 condition_on_previous_text=False 防止時間戳循環、版號升至 v1.6.6、重新打包 .app
+- State: large-v3 預設模型正常，系統音訊模式 TCC 授權正常
+- Next: 日常使用觀察轉錄品質
 
 利用 OpenAI Whisper 開源模型在本地端**免費**進行語音轉文字，支援長達 180 分鐘的會議錄音，並可一鍵上傳至 Notion 或 Obsidian。
 
