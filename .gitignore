@@ -30,3 +30,4 @@ dist/
 *.app/
 __pycache__/
 *.spec.bak
+.loop-state-*.md

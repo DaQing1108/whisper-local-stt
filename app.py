@@ -74,4 +74,4 @@ if __name__ == "__main__":
     from waitress import serve
     port = int(_os.environ.get("PORT", 5001))
     print(f"🚀 Whisper STT v{__version__} 啟動中… 開啟 http://localhost:{port}")
-    serve(app, host="0.0.0.0", port=port, threads=16)
+    serve(app, host="127.0.0.1", port=port, threads=16)

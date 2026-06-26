@@ -55,7 +55,10 @@ echo "   ✅ 打包完成"
 echo ""
 echo "✍️  [3/6] 穩定簽章（WhisperSTT Local）…"
 xattr -cr "$DIST_APP" 2>/dev/null || true
-codesign --sign "$CERT" --deep --force --no-strict "$DIST_APP" 2>&1 | grep -v "^$" || true
+if ! codesign --sign "$CERT" --deep --force --no-strict "$DIST_APP" 2>&1 | grep -v "^$"; then
+  echo "   ❌ 簽章失敗：憑證 '$CERT' 可能不存在或已過期"
+  exit 1
+fi
 echo "   ✅ 穩定簽章完成"
 
 # ── 步驟 4：安裝到 /Applications ─────────────────────────────
@@ -73,9 +76,12 @@ for HELPER in "Contents/Resources/bin/system_audio_capture" \
               "Contents/Frameworks/bin/system_audio_capture"; do
   HP="$INSTALL_APP/$HELPER"
   if [ -f "$HP" ]; then
-    codesign --force --sign "$CERT" \
+    if ! codesign --force --sign "$CERT" \
       --identifier "com.via.whisper-ai.audio-helper" \
-      "$HP" 2>&1 | grep -v "^$" || true
+      "$HP" 2>&1 | grep -v "^$"; then
+      echo "   ❌ Helper 簽章失敗：$HP"
+      exit 1
+    fi
     echo "   ✅ $HELPER"
     TCC_SIGNED=$((TCC_SIGNED + 1))
   fi

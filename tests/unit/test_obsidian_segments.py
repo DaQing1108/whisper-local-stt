@@ -10,8 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
 def _setup_obsidian_path(tmp_path: str):
-    import integrations
-    integrations._OBSIDIAN_PATH = tmp_path
+    os.environ["OBSIDIAN_MEETING_PATH"] = tmp_path
 
 
 def _call_save(text, lang="zh", meta=None):

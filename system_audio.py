@@ -38,7 +38,7 @@ def _find_binary() -> Path | None:
     return None
 
 
-_SILENCE_RMS_THRESHOLD = 100  # int16 RMS < 100 ≈ -68 dBFS → treat as silence
+_SILENCE_RMS_THRESHOLD = 500  # int16 RMS < 500 ≈ -36 dBFS → treat as silence/ambient noise
 
 
 def _is_silence(pcm: bytes) -> bool:
@@ -184,7 +184,7 @@ class SystemAudioCapture:
                         if self._on_error:
                             self._on_error("SCREEN_RECORDING_DENIED")
         except Exception:
-            pass
+            logging.error("[SystemAudio] _stderr_loop 意外終止", exc_info=True)
 
 
 # Module-level singleton (one capture session at a time)

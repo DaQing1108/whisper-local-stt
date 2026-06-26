@@ -28,6 +28,8 @@ def _load_meeting_notes_prompt() -> str:
     return text.strip()
 
 
+_LLM_TIMEOUT = 60  # 每次 API 呼叫最長等待秒數
+
 def _call_llm(system_prompt: str, user_message: str) -> str:
     """依可用的 API key 自動選擇 LLM，回傳整理結果。"""
     import urllib.request, json
@@ -49,7 +51,7 @@ def _call_llm(system_prompt: str, user_message: str) -> str:
             headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with urllib.request.urlopen(req, timeout=_LLM_TIMEOUT) as resp:
             return json.loads(resp.read())["content"][0]["text"]
 
     if gemini_key:
@@ -65,7 +67,7 @@ def _call_llm(system_prompt: str, user_message: str) -> str:
                     data=body,
                     headers={"content-type": "application/json"},
                 )
-                with urllib.request.urlopen(req, timeout=300) as resp:
+                with urllib.request.urlopen(req, timeout=_LLM_TIMEOUT) as resp:
                     data = json.loads(resp.read())
                 logging.info("[MeetingNotes] Gemini model=%s", model)
                 return data["candidates"][0]["content"]["parts"][0]["text"]
@@ -148,10 +150,11 @@ def build_notion_blocks(text: str, lang: str) -> list[dict]:
 
 def save_to_obsidian(text: str, lang: str, meta: dict | None = None) -> str:
     """把轉錄文字存成 Obsidian .md 檔，回傳檔案路徑；失敗回傳空字串。"""
-    if not _OBSIDIAN_PATH or not text.strip():
+    obsidian_path = os.environ.get("OBSIDIAN_MEETING_PATH", "")
+    if not obsidian_path or not text.strip():
         return ""
     try:
-        vault_dir = Path(_OBSIDIAN_PATH)
+        vault_dir = Path(obsidian_path)
         vault_dir.mkdir(parents=True, exist_ok=True)
 
         now      = datetime.now()

@@ -34,8 +34,9 @@ def _load_last_transcript() -> None:
     if _LAST_RESULT_FILE.exists():
         try:
             _last_transcript = json.loads(_LAST_RESULT_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning("[cache] .last_result.json 損毀，已刪除：%s", e)
+            _LAST_RESULT_FILE.unlink(missing_ok=True)
 
 
 def _save_last_transcript(data: dict) -> None:
@@ -203,7 +204,7 @@ def transcribe():
             _sse.broadcast("transcript", _last_transcript)
 
             obsidian_file = ""
-            if save_obsidian and integrations._OBSIDIAN_PATH:
+            if save_obsidian and os.environ.get("OBSIDIAN_MEETING_PATH"):
                 _sse.broadcast("status", {"msg": "💾 存入 Obsidian Vault…"})
                 obsidian_file = integrations.save_to_obsidian(text, lang, info)
                 if obsidian_file:
@@ -343,7 +344,10 @@ def upload_chunk():
             except Exception as e:
                 logging.error("[Chunk %d] 轉錄失敗\n%s", chunk_index, traceback.format_exc())
                 _sse.broadcast("status", {"msg": f"❌ 第 {chunk_index + 1} 段轉錄失敗"})
-                text, lang, info = "", "?", {}
+                _sse.broadcast("done",   {"ok": False, "error": str(e)})
+                with _chunk_sessions_lock:
+                    _chunk_sessions.pop(session_id, None)
+                return
 
             if _is_hallucination(text):
                 text = ""
@@ -457,7 +461,7 @@ def _finish_session(session_id: str) -> None:
     _sse.broadcast("transcript", _last_transcript)
 
     obsidian_file = ""
-    if sess.get("save_obsidian") and integrations._OBSIDIAN_PATH:
+    if sess.get("save_obsidian") and os.environ.get("OBSIDIAN_MEETING_PATH"):
         _sse.broadcast("status", {"msg": "💾 存入 Obsidian Vault…"})
         obsidian_file = integrations.save_to_obsidian(full_text, lang, info)
         if obsidian_file:
@@ -556,6 +560,9 @@ def save_config():
         # 只填一個的情況
         return jsonify(error="請同時填寫 Token 與頁面 ID"), 400
 
+    def _sanitize(val: str) -> str:
+        return val[:512].replace("\n", "").replace("\r", "").replace("\0", "")
+
     # 局部更新 .env（保留其他已有的 key）
     env_path = Path(".env")
     existing: dict[str, str] = {}
@@ -567,17 +574,17 @@ def save_config():
                 existing[k.strip()] = v.strip()
 
     if token:
-        existing["NOTION_TOKEN"]   = token
-        os.environ["NOTION_TOKEN"] = token
+        existing["NOTION_TOKEN"]   = _sanitize(token)
+        os.environ["NOTION_TOKEN"] = _sanitize(token)
     if page_id:
-        existing["NOTION_PAGE_ID"]   = page_id
-        os.environ["NOTION_PAGE_ID"] = page_id
+        existing["NOTION_PAGE_ID"]   = _sanitize(page_id)
+        os.environ["NOTION_PAGE_ID"] = _sanitize(page_id)
     if anthropic_key:
-        existing["ANTHROPIC_API_KEY"]   = anthropic_key
-        os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+        existing["ANTHROPIC_API_KEY"]   = _sanitize(anthropic_key)
+        os.environ["ANTHROPIC_API_KEY"] = _sanitize(anthropic_key)
     if openai_key:
-        existing["OPENAI_API_KEY"]   = openai_key
-        os.environ["OPENAI_API_KEY"] = openai_key
+        existing["OPENAI_API_KEY"]   = _sanitize(openai_key)
+        os.environ["OPENAI_API_KEY"] = _sanitize(openai_key)
 
     env_path.write_text(
         "\n".join(f"{k}={v}" for k, v in existing.items()) + "\n",
@@ -611,12 +618,15 @@ def system_audio_start():
     session_id  = data.get("session_id", f"sysaudio_{int(__import__('time').time())}")
 
     # Register session so _finish_session works
+    _workers_done = threading.Event()
     with _chunk_sessions_lock:
         _chunk_sessions[session_id] = {
             "chunks":            {},
             "langs":             {},
             "total":             None,
             "done_count":        0,
+            "pending_workers":   0,
+            "_workers_done":     _workers_done,
             "last_active":       _time.time(),
             "model":             model_name,
             "language":          language,
@@ -628,6 +638,11 @@ def system_audio_start():
         }
 
     def _on_chunk(wav_bytes: bytes, chunk_index: int) -> None:
+        with _chunk_sessions_lock:
+            sess = _chunk_sessions.get(session_id)
+            if sess is not None:
+                sess["pending_workers"] += 1
+
         def _worker():
             domain_label = DOMAIN_LABELS.get(domain, domain)
             if not _sse._transcribe_sem.acquire(blocking=False):
@@ -675,6 +690,12 @@ def system_audio_start():
                 })
             finally:
                 _sse._transcribe_sem.release()
+                with _chunk_sessions_lock:
+                    sess = _chunk_sessions.get(session_id)
+                    if sess is not None:
+                        sess["pending_workers"] -= 1
+                        if sess["pending_workers"] <= 0:
+                            sess["_workers_done"].set()
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -713,22 +734,15 @@ def system_audio_stop():
     _sa.stop_mixed_capture()
 
     if session_id:
+        # 取出 session 的 workers_done Event（由 _on_chunk worker 在完成時 set）
+        with _chunk_sessions_lock:
+            sess_ref = _chunk_sessions.get(session_id)
+            workers_done_event = sess_ref.get("_workers_done") if sess_ref else None
+
         def _finalize():
-            # Wait for in-flight transcription workers to finish (up to 30 s)
-            deadline = _time.time() + 30
-            while _time.time() < deadline:
-                with _chunk_sessions_lock:
-                    sess = _chunk_sessions.get(session_id)
-                    if sess is None:
-                        return
-                    done = sess.get("done_count", 0)
-                _time.sleep(1)
-                with _chunk_sessions_lock:
-                    sess = _chunk_sessions.get(session_id)
-                    if sess is None:
-                        return
-                    if sess.get("done_count", 0) == done:
-                        break  # no new chunks arrived in the last second → workers done
+            # 等待所有 in-flight worker 完成（最多 30 秒），用 Event 取代 sleep 輪詢
+            if workers_done_event is not None:
+                workers_done_event.wait(timeout=30)
 
             with _chunk_sessions_lock:
                 sess = _chunk_sessions.pop(session_id, None)
@@ -742,7 +756,7 @@ def system_audio_stop():
                 _save_last_transcript({"text": full_text, "language": lang, "time": ts, "segments": []})
                 _sse.broadcast("transcript", {"text": full_text, "language": lang, "time": ts, "segments": []})
                 obsidian_file = ""
-                if sess.get("save_obsidian") and integrations._OBSIDIAN_PATH:
+                if sess.get("save_obsidian") and os.environ.get("OBSIDIAN_MEETING_PATH"):
                     segments_by_chunk = sess.get("segments_by_chunk", {})
                     sys_segments = [
                         seg

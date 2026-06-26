@@ -139,7 +139,21 @@ def main() -> None:
     t.start()
 
     if not _wait_for_server():
-        print("❌ 伺服器啟動失敗", file=sys.stderr)
+        logging.error("❌ 伺服器啟動失敗（Flask 未在 15 秒內回應），請確認 port %s 未被佔用", PORT)
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror(
+                "Whisper STT 啟動失敗",
+                f"伺服器未能在 15 秒內啟動。\n\n"
+                f"請確認 port {PORT} 未被其他程式佔用，\n"
+                f"或查看 Console.app 的錯誤記錄。"
+            )
+            root.destroy()
+        except Exception as tk_err:
+            logging.debug("tkinter 錯誤對話框不可用：%s", tk_err)
         sys.exit(1)
 
     window = webview.create_window(
