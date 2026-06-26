@@ -820,23 +820,87 @@ recordArea.addEventListener('drop', e => {
     setStatus('⚠️ 錄音中，無法拖曳檔案', 'error');
     return;
   }
-  
-  const file = e.dataTransfer.files[0];
-  if (file && (file.type.startsWith('audio/') || file.type.startsWith('video/'))) {
-    // 設置播放器
-    const player = document.getElementById('local-audio-player');
-    player.src = URL.createObjectURL(file);
-    player.style.display = 'block';
-    
-    // 直接上傳
-    audioChunks = [file];
-    uploadFileBlob(file, file.name);
-  } else {
+
+  const files = Array.from(e.dataTransfer.files).filter(
+    f => f.type.startsWith('audio/') || f.type.startsWith('video/')
+  );
+  if (files.length === 0) {
     setStatus('❌ 請拖曳音訊或影片檔案', 'error');
+    return;
+  }
+  if (files.length === 1) {
+    const player = document.getElementById('local-audio-player');
+    player.src = URL.createObjectURL(files[0]);
+    player.style.display = 'block';
+    audioChunks = [files[0]];
+    uploadFileBlob(files[0], files[0].name);
+  } else {
+    batchTranscribe(files);
   }
 });
 
+async function batchTranscribe(files) {
+  let failed = 0;
+  setBtnState('processing');
+  for (let i = 0; i < files.length; i++) {
+    setStatus(`📦 批次轉錄 ${i + 1}/${files.length}：${files[i].name}`, 'info');
+    try {
+      await uploadFileBlob(files[i], files[i].name);
+    } catch (_) {
+      failed++;
+    }
+  }
+  setBtnState('idle');
+  syncUploadBtn();
+  if (failed === 0) {
+    setStatus(`✅ 批次完成，共 ${files.length} 個檔案`, 'done');
+  } else {
+    setStatus(`⚠️ 批次完成：${files.length - failed} 成功，${failed} 失敗`, 'error');
+  }
+}
+
 // done 事件已移入 _initSSE()，確保重連後仍有效
+
+// ── Keyboard shortcuts ────────────────────────────────────────
+// Space = 切換錄音；Cmd+U = 開啟檔案選擇；Cmd+S = 存 Notion
+document.addEventListener('keydown', (e) => {
+  const tag = document.activeElement?.tagName?.toLowerCase();
+  const isInput = tag === 'input' || tag === 'textarea' || tag === 'select';
+  if (isInput) return;
+
+  if (e.code === 'Space' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    startStopRecording();
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'u') {
+    e.preventDefault();
+    document.getElementById('file-input')?.click();
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+    e.preventDefault();
+    uploadToNotion();
+  }
+});
+
+// file-input change → 支援批次選擇
+document.getElementById('file-input')?.addEventListener('change', (e) => {
+  const files = Array.from(e.target.files).filter(
+    f => f.type.startsWith('audio/') || f.type.startsWith('video/')
+  );
+  e.target.value = '';
+  if (files.length === 0) return;
+  if (files.length === 1) {
+    const player = document.getElementById('local-audio-player');
+    player.src = URL.createObjectURL(files[0]);
+    player.style.display = 'block';
+    audioChunks = [files[0]];
+    uploadFileBlob(files[0], files[0].name);
+  } else {
+    batchTranscribe(files);
+  }
+});
 
 // ── Upload ────────────────────────────────────────────────────
 async function uploadToNotion() {

@@ -7,6 +7,8 @@ async function _loadConfig() {
     if (d.page_id_preview) document.getElementById('notion-page-id').placeholder = d.page_id_preview
     _setKeyStatus('anthropic-status', d.has_anthropic_key)
     _setKeyStatus('openai-status', d.has_openai_key)
+    const promptEl = document.getElementById('llm-prompt')
+    if (promptEl && d.llm_prompt !== undefined) promptEl.value = d.llm_prompt
     _loadUpdateStatus()
   } catch (_) {}
 }
@@ -85,6 +87,7 @@ async function saveAll() {
     page_id:        document.getElementById('notion-page-id').value.trim(),
     anthropic_key:  document.getElementById('anthropic-key').value.trim(),
     openai_key:     document.getElementById('openai-key').value.trim(),
+    llm_prompt:     document.getElementById('llm-prompt')?.value ?? null,
   }
 
   statusEl.textContent = '儲存中…'

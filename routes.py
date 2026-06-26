@@ -559,6 +559,8 @@ def get_config():
         except Exception as e:
             logging.warning("[Config] Notion 標題抓取失敗：%s", e)
     page_id_preview = (page_id[:8] + "…") if page_id else ""
+    llm_prompt = os.getenv("LLM_CUSTOM_PROMPT", "")
+    llm_prompt_preview = llm_prompt[:50] + "…" if len(llm_prompt) > 50 else llm_prompt
     return jsonify(
         ready=ready,
         page_label=label,
@@ -566,6 +568,8 @@ def get_config():
         has_anthropic_key=bool(os.getenv("ANTHROPIC_API_KEY")),
         has_openai_key=bool(os.getenv("OPENAI_API_KEY")),
         obsidian_path=os.getenv("OBSIDIAN_MEETING_PATH", ""),
+        llm_prompt_preview=llm_prompt_preview,
+        llm_prompt=llm_prompt,
     )
 
 
@@ -616,6 +620,7 @@ def save_config():
     anthropic_key  = data.get("anthropic_key", "").strip()
     openai_key     = data.get("openai_key", "").strip()
     obsidian_path  = data.get("obsidian_path", "").strip()
+    llm_prompt     = data.get("llm_prompt", None)  # None = 未傳入（不更新）
 
     label = ""
     if token and page_id:
@@ -663,6 +668,16 @@ def save_config():
         expanded = os.path.expanduser(_sanitize(obsidian_path))
         existing["OBSIDIAN_MEETING_PATH"]   = expanded
         os.environ["OBSIDIAN_MEETING_PATH"] = expanded
+    if llm_prompt is not None:
+        if not isinstance(llm_prompt, str):
+            return jsonify(error="llm_prompt 必須為字串"), 400
+        cleaned = llm_prompt.strip()[:2000]
+        if cleaned:
+            existing["LLM_CUSTOM_PROMPT"]   = cleaned
+            os.environ["LLM_CUSTOM_PROMPT"] = cleaned
+        else:
+            existing.pop("LLM_CUSTOM_PROMPT", None)
+            os.environ.pop("LLM_CUSTOM_PROMPT", None)
 
     env_path.write_text(
         "\n".join(f"{k}={v}" for k, v in existing.items()) + "\n",

@@ -52,6 +52,13 @@
         <label for="openai-key">OpenAI API Key <span class="key-status" id="openai-status"></span></label>
         <input type="password" id="openai-key" placeholder="sk-…" autocomplete="new-password">
       </div>
+      <div class="field">
+        <label for="llm-prompt">自訂標點 Prompt <span class="optional">（選填，留空使用預設）</span></label>
+        <textarea id="llm-prompt" rows="5" maxlength="2000"
+          placeholder="輸入自訂的 LLM system prompt，用於標點後處理與同音詞糾錯…"
+          style="width:100%;box-sizing:border-box;resize:vertical;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);"></textarea>
+        <span class="field-hint">最多 2000 字元。留空則回復預設繁體中文標點規則。</span>
+      </div>
     </section>
 
     <!-- Updates -->

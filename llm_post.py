@@ -58,7 +58,8 @@ def _llm_call_chunk(chunk: str, provider: str, api_key: str, extra_terms: str = 
     import json as _json
     import urllib.request as _req
 
-    system_prompt = _LLM_PUNCT_PROMPT
+    custom = os.environ.get("LLM_CUSTOM_PROMPT", "").strip()
+    system_prompt = custom[:2000] if custom else _LLM_PUNCT_PROMPT
     if extra_terms:
         system_prompt += (
             f"\n5. 此次會議專有名詞與期望的拼寫包含：{extra_terms}。"
