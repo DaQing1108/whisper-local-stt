@@ -1,13 +1,18 @@
-# 🎙️ Whisper 本地語音轉文字系統 v1.6.8
+# 🎙️ Whisper 本地語音轉文字系統 v2.1.0
 
 ## Current State
-Last checkpoint: 2026-06-26 下午
-Phase: v1.6.8 — 全專案風險稽核修補（14 項）
-Working: Obsidian 存檔修復驗證通過、.env 路徑根治、unit tests 77/77、.app 系統音訊 + Obsidian 存檔正常
-Next action: 日常使用觀察
+Last checkpoint: 2026-06-27 晚
+Phase: v2.1.0 — 批次轉錄、鍵盤快捷鍵、自訂 LLM 模板
+Working: 105/105 tests 通過，8/8 AC 驗收通過，版號升至 v2.1.0，已 push
+Next action: ./package.sh 打包 → 手動 UI 驗證 v2.1 三功能
 Blockers: none
 
 ## Checkpoint History
+### 2026-06-27｜v2.1.0 三功能實作
+- Completed: 批次轉錄（batchTranscribe + 失敗計數）、鍵盤快捷鍵（Space/Cmd+U/Cmd+S + isInput guard）、自訂 LLM 模板（LLM_CUSTOM_PROMPT env var + 偏好設定 textarea），修復 2 個 HIGH issues
+- State: 105/105 tests，版號 v2.1.0（version.py + Info.plist + gui.spec），commit b417ef7
+- Next: ./package.sh → 手動 UI 驗證 → 規劃 v2.2
+
 ### 2026-06-26｜v1.6.8 全專案風險稽核修補
 - Completed: 統一 .env 路徑到 Application Support（根治 Obsidian 消失問題）、page_id 遮蔽、啟動健檢 endpoint、移除 WHISPER_TEST bypass、race condition 修復、LLM timeout、codesign 強化、靜默失敗改 logging
 - State: 77/77 unit tests 全通過，Obsidian 存檔驗證成功，.app 正常
