@@ -14,6 +14,7 @@ from queue import Empty, Queue
 from flask import Blueprint, Response, jsonify, make_response, request, stream_with_context
 
 import integrations
+import sparkle_updater
 import sse as _sse
 from constants import ENV_PATH as _ENV_PATH
 from transcribe_common import DOMAIN_LABELS, is_hallucination as _is_hallucination
@@ -62,6 +63,17 @@ _EXT_MAP = {
 @bp.route("/api/version")
 def api_version():
     return jsonify({"version": __version__})
+
+
+@bp.route("/api/updates/status")
+def updates_status():
+    return jsonify(sparkle_updater.status())
+
+
+@bp.route("/api/updates/check", methods=["POST"])
+def updates_check():
+    result = sparkle_updater.check_for_updates()
+    return jsonify(result), 200 if result.get("ok") else 503
 
 
 # ── P0-2: 模型下載狀態 ────────────────────────────────────────

@@ -41,10 +41,10 @@
 
   <!-- Sparkle 自動更新（正式發版前替換為 GitHub Releases raw appcast URL 與 EdDSA public key） -->
   <key>SUFeedURL</key>
-  <string>https://example.com/whisper-stt/appcast.xml</string>
+  <string>https://github.com/DaQing1108/whisper-local-stt/releases/latest/download/appcast.xml</string>
 
   <key>SUPublicEDKey</key>
-  <string>REPLACE_WITH_SPARKLE_EDDSA_PUBLIC_KEY</string>
+  <string>TqckZdtuk2dvHruKRwDkDgMu2XqRtyH0KhViZxj33lg=</string>
 
   <!-- 麥克風權限（瀏覽器側錄音，此項為保險） -->
   <key>NSMicrophoneUsageDescription</key>

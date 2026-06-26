@@ -7,7 +7,7 @@ from pathlib import Path
 block_cipher = None
 project_dir  = Path(SPECPATH)
 sparkle_framework = project_dir / 'Sparkle.framework'
-sparkle_datas = [(str(sparkle_framework), 'Frameworks/Sparkle.framework')] if sparkle_framework.exists() else []
+sparkle_datas = [(str(sparkle_framework), 'Sparkle.framework')] if sparkle_framework.exists() else []
 
 a = Analysis(
     ['gui.py'],
@@ -38,6 +38,7 @@ a = Analysis(
         'numpy',
         'objc',
         'Foundation',
+        'PyObjCTools.AppHelper',
     ],
     hookspath=[],
     runtime_hooks=[],
@@ -86,7 +87,7 @@ app = BUNDLE(
         'CFBundleName':                   'Whisper STT',
         'LSMinimumSystemVersion':         '12.0',
         'NSHighResolutionCapable':        True,
-        'SUFeedURL':                      'https://example.com/whisper-stt/appcast.xml',
-        'SUPublicEDKey':                  'REPLACE_WITH_SPARKLE_EDDSA_PUBLIC_KEY',
+        'SUFeedURL':                      'https://github.com/DaQing1108/whisper-local-stt/releases/latest/download/appcast.xml',
+        'SUPublicEDKey':                  'TqckZdtuk2dvHruKRwDkDgMu2XqRtyH0KhViZxj33lg=',
     },
 )

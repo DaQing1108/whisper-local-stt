@@ -7,6 +7,7 @@ async function _loadConfig() {
     if (d.page_id_preview) document.getElementById('notion-page-id').placeholder = d.page_id_preview
     _setKeyStatus('anthropic-status', d.has_anthropic_key)
     _setKeyStatus('openai-status', d.has_openai_key)
+    _loadUpdateStatus()
   } catch (_) {}
 }
 
@@ -105,6 +106,41 @@ async function saveAll() {
     }
   } catch (e) {
     _setStatus(statusEl, '✗ 儲存失敗', false)
+  }
+}
+
+async function _loadUpdateStatus() {
+  const statusEl = document.getElementById('updates-status')
+  if (!statusEl) return
+  try {
+    const r = await fetch('/api/updates/status')
+    const d = await r.json()
+    _setStatus(statusEl, d.available ? '✓ Sparkle 已啟用' : `⚠ ${d.error || 'Sparkle 尚未啟用'}`, d.available)
+  } catch (e) {
+    _setStatus(statusEl, '⚠ 無法讀取更新狀態', false)
+  }
+}
+
+async function checkForUpdates() {
+  const statusEl = document.getElementById('updates-status')
+  const btn = document.getElementById('check-updates-btn')
+  btn.disabled = true
+  btn.textContent = '檢查中…'
+  _setStatus(statusEl, '正在開啟 Sparkle…', true)
+
+  try {
+    const r = await fetch('/api/updates/check', { method: 'POST' })
+    const d = await r.json()
+    if (r.ok && d.ok) {
+      _setStatus(statusEl, '✓ 已開啟更新檢查', true)
+    } else {
+      _setStatus(statusEl, `⚠ ${d.error || 'Sparkle 尚未啟用'}`, false)
+    }
+  } catch (e) {
+    _setStatus(statusEl, '⚠ 檢查更新失敗', false)
+  } finally {
+    btn.disabled = false
+    btn.textContent = '檢查更新'
   }
 }
 

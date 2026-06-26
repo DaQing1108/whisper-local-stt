@@ -10,6 +10,7 @@ INSTALL_APP="/Applications/$APP_NAME.app"
 PORT=5001
 CERT="WhisperSTT Local"
 SPARKLE_FRAMEWORK="$PROJECT_DIR/Sparkle.framework"
+DIST_FRAMEWORKS="$DIST_APP/Contents/Frameworks"
 
 cd "$PROJECT_DIR"
 
@@ -30,7 +31,7 @@ fi
 echo "   ✅ 版本一致：v$CODE_VER"
 
 if [ -d "$SPARKLE_FRAMEWORK" ]; then
-  echo "   ✅ Sparkle.framework 已找到，將由 gui.spec 納入打包"
+  echo "   ✅ Sparkle.framework 已找到，將納入 .app/Contents/Frameworks"
 else
   echo "   ⚠️  找不到 Sparkle.framework；自動更新 UI/檢查邏輯待 framework 放入專案根目錄後才會生效"
   echo "      預期位置：$SPARKLE_FRAMEWORK"
@@ -58,6 +59,13 @@ if [ ! -d "$DIST_APP" ]; then
   exit 1
 fi
 echo "   ✅ 打包完成"
+
+if [ -d "$SPARKLE_FRAMEWORK" ]; then
+  mkdir -p "$DIST_FRAMEWORKS"
+  rm -rf "$DIST_FRAMEWORKS/Sparkle.framework"
+  cp -R "$SPARKLE_FRAMEWORK" "$DIST_FRAMEWORKS/"
+  echo "   ✅ Sparkle.framework 已複製到 Contents/Frameworks"
+fi
 
 # ── 步驟 3：穩定簽章（TCC 身份跨 rebuild 不變）────────────────
 echo ""
@@ -115,7 +123,7 @@ if [ "$INSTALLED_VER" != "$CODE_VER" ]; then
 fi
 echo "   ✅ 版本確認：v$INSTALLED_VER"
 
-NESTED=$(find "$INSTALL_APP" -name "*.app" -mindepth 2 2>/dev/null | head -1)
+NESTED=$(find "$INSTALL_APP" -name "*.app" -mindepth 2 ! -path "*/Sparkle.framework/*" 2>/dev/null | head -1)
 if [ -n "$NESTED" ]; then
   echo "   ❌ 發現巢狀 .app：$NESTED"
   exit 1

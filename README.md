@@ -379,11 +379,11 @@ make server            # 啟動測試用 server（WHISPER_TEST=1）
 **v1 決策**
 
 - appcast 託管：GitHub Releases + raw `appcast.xml` URL
-- Sparkle framework 來源：手動下載固定版本，放在專案根目錄 `Sparkle.framework`
+- Sparkle framework 來源：手動下載固定版本 `2.9.3`，放在專案根目錄 `Sparkle.framework`
 
 **打包行為**
 
-`package.sh` 只檢查 `Sparkle.framework` 是否存在並提示，不會自動下載或更新 framework。若檔案存在，`gui.spec` 會將它打包到 `.app/Contents/Resources/Frameworks/Sparkle.framework`，並在 app plist 中寫入 Sparkle key：
+`package.sh` 只檢查 `Sparkle.framework` 是否存在並提示，不會自動下載或更新 framework。若檔案存在，`gui.spec` 會保留 framework bundle 路徑，打包流程也會確認它位於 `.app/Contents/Frameworks/Sparkle.framework`，並在 app plist 中寫入 Sparkle key：
 
 - `SUFeedURL`
 - `SUPublicEDKey`
@@ -395,6 +395,8 @@ make server            # 啟動測試用 server（WHISPER_TEST=1）
 3. 在 GitHub Releases 上傳 release artifact。
 4. 更新並公開 `appcast.xml`，將 raw URL 寫入 `SUFeedURL`。
 5. 用 Sparkle signing tool 產生 release artifact signature，確認 appcast 版本、URL、signature 一致。
+
+可從 `release/appcast.template.xml` 複製正式 `appcast.xml`，詳細步驟見 `release/README.md`。
 
 中期若發版流程穩定，再評估用 release script 或 CI 自動產生 appcast 與 signature。
 

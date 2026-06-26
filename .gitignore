@@ -31,3 +31,9 @@ dist/
 __pycache__/
 *.spec.bak
 .loop-state-*.md
+
+# Sparkle（binary framework 不進 repo）
+Sparkle.framework/
+
+# Release artifacts
+release/

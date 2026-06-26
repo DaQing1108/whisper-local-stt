@@ -54,6 +54,18 @@
       </div>
     </section>
 
+    <!-- Updates -->
+    <section class="prefs-section">
+      <h2>App 更新</h2>
+      <div class="field">
+        <div class="input-row">
+          <button class="btn validate" id="check-updates-btn" onclick="checkForUpdates()">檢查更新</button>
+          <span class="validate-status" id="updates-status"></span>
+        </div>
+        <span class="field-hint">使用 Sparkle appcast 檢查新版本</span>
+      </div>
+    </section>
+
     <div class="prefs-actions">
       <button class="btn primary" onclick="saveAll()">儲存</button>
       <span class="save-status" id="save-status"></span>
