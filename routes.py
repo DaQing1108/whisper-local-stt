@@ -530,6 +530,44 @@ def upload():
         return jsonify(error=str(e)), 500
 
 
+@bp.route("/api/diarize/status", methods=["GET"])
+def diarize_status():
+    """回傳說話者分離功能是否可用。"""
+    from diarize import is_available
+    return jsonify(available=is_available())
+
+
+@bp.route("/api/diarize", methods=["POST"])
+def diarize():
+    """對上傳音檔執行說話者分離。
+
+    Body: { "audio_path": "/abs/path/to/audio.wav", "num_speakers": 2 (optional) }
+    Returns: { "segments": [{ "start": 0.0, "end": 1.5, "speaker": "說話者 A" }] }
+    """
+    from diarize import diarize_audio, apply_diarization, is_available
+    if not is_available():
+        return jsonify(error="說話者分離未啟用：請在偏好設定填入 HuggingFace Token"), 400
+
+    data = request.json or {}
+    audio_path = data.get("audio_path", "").strip()
+    num_speakers = data.get("num_speakers")
+    transcript = data.get("transcript", "")
+
+    if not audio_path or not os.path.exists(audio_path):
+        return jsonify(error="音檔路徑不存在"), 400
+
+    try:
+        segments = diarize_audio(audio_path, num_speakers=num_speakers or None)
+        result = [{"start": s.start, "end": s.end, "speaker": s.speaker} for s in segments]
+        labeled = apply_diarization(transcript, segments) if transcript else ""
+        return jsonify(ok=True, segments=result, labeled_transcript=labeled)
+    except RuntimeError as e:
+        return jsonify(error=str(e)), 400
+    except Exception as e:
+        log.exception("[Diarize] 失敗")
+        return jsonify(error=f"分析失敗：{e}"), 500
+
+
 @bp.route("/config", methods=["GET"])
 def get_config():
     token   = os.getenv("NOTION_TOKEN", "")
@@ -560,6 +598,7 @@ def get_config():
             logging.warning("[Config] Notion 標題抓取失敗：%s", e)
     page_id_preview = (page_id[:8] + "…") if page_id else ""
     llm_prompt = os.getenv("LLM_CUSTOM_PROMPT", "")
+    llm_preset = os.getenv("LLM_PRESET", "meeting")
     llm_prompt_preview = llm_prompt[:50] + "…" if len(llm_prompt) > 50 else llm_prompt
     return jsonify(
         ready=ready,
@@ -570,6 +609,8 @@ def get_config():
         obsidian_path=os.getenv("OBSIDIAN_MEETING_PATH", ""),
         llm_prompt_preview=llm_prompt_preview,
         llm_prompt=llm_prompt,
+        llm_preset=llm_preset,
+        has_hf_token=bool(os.environ.get("HF_TOKEN", "").strip()),
     )
 
 
@@ -621,6 +662,8 @@ def save_config():
     openai_key     = data.get("openai_key", "").strip()
     obsidian_path  = data.get("obsidian_path", "").strip()
     llm_prompt     = data.get("llm_prompt", None)  # None = 未傳入（不更新）
+    llm_preset     = data.get("llm_preset", None)
+    hf_token       = data.get("hf_token", "").strip()
 
     label = ""
     if token and page_id:
@@ -668,6 +711,14 @@ def save_config():
         expanded = os.path.expanduser(_sanitize(obsidian_path))
         existing["OBSIDIAN_MEETING_PATH"]   = expanded
         os.environ["OBSIDIAN_MEETING_PATH"] = expanded
+    if hf_token:
+        existing["HF_TOKEN"]   = hf_token
+        os.environ["HF_TOKEN"] = hf_token
+    if llm_preset is not None:
+        valid_presets = {"meeting", "interview", "tech", "custom"}
+        if llm_preset in valid_presets:
+            existing["LLM_PRESET"]   = llm_preset
+            os.environ["LLM_PRESET"] = llm_preset
     if llm_prompt is not None:
         if not isinstance(llm_prompt, str):
             return jsonify(error="llm_prompt 必須為字串"), 400
@@ -689,6 +740,7 @@ def save_config():
         page_label=label or page_id,
         has_anthropic_key=bool(existing.get("ANTHROPIC_API_KEY")),
         has_openai_key=bool(existing.get("OPENAI_API_KEY")),
+        has_hf_token=bool(existing.get("HF_TOKEN")),
     )
 
 

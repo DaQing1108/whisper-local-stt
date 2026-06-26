@@ -3,12 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Whisper STT — 偏好設定</title>
+  <title>Echo — 偏好設定</title>
   <link rel="stylesheet" href="/static/preferences.css">
 </head>
-<body>
+<body data-theme="dark">
   <div class="prefs-container">
-    <h1 class="prefs-title">偏好設定</h1>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;">
+      <h1 class="prefs-title" style="margin-bottom:0">偏好設定</h1>
+      <button onclick="toggleTheme()" id="pref-theme-btn"
+        style="padding:4px 10px;font-size:11px;font-family:var(--mono);background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--muted);cursor:pointer;">☀ Light</button>
+    </div>
 
     <!-- Obsidian -->
     <section class="prefs-section">
@@ -52,12 +56,42 @@
         <label for="openai-key">OpenAI API Key <span class="key-status" id="openai-status"></span></label>
         <input type="password" id="openai-key" placeholder="sk-…" autocomplete="new-password">
       </div>
+    </section>
+
+    <!-- LLM 模板 Preset -->
+    <section class="prefs-section">
+      <h2>後處理模板</h2>
       <div class="field">
-        <label for="llm-prompt">自訂標點 Prompt <span class="optional">（選填，留空使用預設）</span></label>
+        <label>Preset</label>
+        <div class="preset-pills" id="preset-pills">
+          <button class="preset-pill active" data-preset="meeting" onclick="selectPreset(this)">會議記錄</button>
+          <button class="preset-pill" data-preset="interview" onclick="selectPreset(this)">訪談</button>
+          <button class="preset-pill" data-preset="tech" onclick="selectPreset(this)">技術討論</button>
+          <button class="preset-pill" data-preset="custom" onclick="selectPreset(this)">自訂</button>
+        </div>
+        <span class="field-hint" id="preset-desc">標點、斷句、繁體中文會議記錄格式</span>
+      </div>
+      <div class="field" id="custom-prompt-field" style="display:none">
+        <label for="llm-prompt">自訂 Prompt <span class="optional">（最多 2000 字元）</span></label>
         <textarea id="llm-prompt" rows="5" maxlength="2000"
           placeholder="輸入自訂的 LLM system prompt，用於標點後處理與同音詞糾錯…"
-          style="width:100%;box-sizing:border-box;resize:vertical;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);"></textarea>
-        <span class="field-hint">最多 2000 字元。留空則回復預設繁體中文標點規則。</span>
+          style="width:100%;box-sizing:border-box;resize:vertical;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--mono)"></textarea>
+      </div>
+    </section>
+
+    <!-- 說話者分離 Beta -->
+    <section class="prefs-section">
+      <h2>說話者分離 <span class="optional">Beta</span></h2>
+      <div class="field">
+        <label for="hf-token">HuggingFace Token <span class="key-status" id="hf-status"></span></label>
+        <input type="password" id="hf-token" placeholder="hf_xxxxxxxxxxxxxxxx" autocomplete="new-password">
+        <span class="field-hint">需接受 <a href="https://hf.co/pyannote/speaker-diarization-3.1" style="color:var(--accent)">pyannote 模型授權</a>，首次使用會下載模型（~250MB）</span>
+      </div>
+      <div class="field">
+        <div class="input-row">
+          <button class="btn validate" id="check-diarize-btn" onclick="checkDiarize()">檢查狀態</button>
+          <span class="validate-status" id="diarize-status"></span>
+        </div>
       </div>
     </section>
 
