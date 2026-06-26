@@ -1,13 +1,18 @@
-# 🎙️ Whisper 本地語音轉文字系統 v1.6.7
+# 🎙️ Whisper 本地語音轉文字系統 v1.6.8
 
 ## Current State
-Last checkpoint: 2026-06-25 今日
-Phase: v1.6.7 — VAD 優化 + Hallucination 偵測
-Working: VAD silence threshold=500、timestamp-only hallucination 過濾、unit tests 16/16、.app 系統音訊正常
-Next action: 日常使用觀察過濾效果
+Last checkpoint: 2026-06-26 下午
+Phase: v1.6.8 — 全專案風險稽核修補（14 項）
+Working: Obsidian 存檔修復驗證通過、.env 路徑根治、unit tests 77/77、.app 系統音訊 + Obsidian 存檔正常
+Next action: 日常使用觀察
 Blockers: none
 
 ## Checkpoint History
+### 2026-06-26｜v1.6.8 全專案風險稽核修補
+- Completed: 統一 .env 路徑到 Application Support（根治 Obsidian 消失問題）、page_id 遮蔽、啟動健檢 endpoint、移除 WHISPER_TEST bypass、race condition 修復、LLM timeout、codesign 強化、靜默失敗改 logging
+- State: 77/77 unit tests 全通過，Obsidian 存檔驗證成功，.app 正常
+- Next: 日常使用觀察
+
 ### 2026-06-25｜v1.6.7 VAD 優化 + Hallucination 偵測
 - Completed: VAD silence threshold 調為 500、新增 timestamp-only phantom 偵測、版號升至 v1.6.7
 - State: unit tests 16/16 全綠，.app 系統音訊轉錄正常
