@@ -1,3 +1,22 @@
+// ── Theme toggle ──────────────────────────────────────────────
+function toggleTheme() {
+  const body = document.body
+  const isDark = body.dataset.theme === 'dark'
+  const next = isDark ? 'light' : 'dark'
+  body.dataset.theme = next
+  const btn = document.getElementById('theme-btn')
+  if (btn) btn.textContent = next === 'dark' ? '☀ Light' : '☾ Dark'
+  try { localStorage.setItem('echo-theme', next) } catch(e) {}
+}
+function initTheme() {
+  let saved
+  try { saved = localStorage.getItem('echo-theme') } catch(e) {}
+  const theme = saved || 'dark'
+  document.body.dataset.theme = theme
+  const btn = document.getElementById('theme-btn')
+  if (btn) btn.textContent = theme === 'dark' ? '☀ Light' : '☾ Dark'
+}
+
 // ── Pill selector helpers ─────────────────────────────────────
 function getPillValue(groupId) {
   return document.querySelector('#' + groupId + ' .pill.active')?.dataset.val || ''
@@ -1491,6 +1510,7 @@ function openPreferences() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  initTheme()
   _initModelCheck()
   _checkConfigHealth()
   // 切換模型時重新檢查
