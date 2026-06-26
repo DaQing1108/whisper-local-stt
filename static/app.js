@@ -1,3 +1,12 @@
+// ── Pill selector helpers ─────────────────────────────────────
+function getPillValue(groupId) {
+  return document.querySelector('#' + groupId + ' .pill.active')?.dataset.val || ''
+}
+function setPill(el, groupId) {
+  document.querySelectorAll('#' + groupId + ' .pill').forEach(p => p.classList.remove('active'))
+  el.classList.add('active')
+}
+
 // ── 錯誤碼對照表（P0-5）──────────────────────────────────────
 const ERROR_MESSAGES = {
   FFMPEG_MISSING:          'ffmpeg 未安裝。請執行 brew install ffmpeg，或重新執行 setup.sh',
@@ -44,10 +53,10 @@ async function _flushChunk(isLast = false) {
       form.append('session_id',  _sessionId)
       form.append('chunk_index', _chunkIndex)
       form.append('is_last',     'true')
-      form.append('mode',        document.getElementById('mode-sel').value)
-      form.append('model',       document.getElementById('model-sel').value)
-      form.append('language',    document.getElementById('lang-sel').value)
-      form.append('domain',      document.getElementById('domain-sel').value)
+      form.append('mode',        getPillValue('mode-pill-group'))
+      form.append('model',       getPillValue('model-pill-group'))
+      form.append('language',    getPillValue('lang-pill-group'))
+      form.append('domain',      getPillValue('domain-pill-group'))
       form.append('extra_terms', document.getElementById('extra-terms').value)
       form.append('obsidian',    obsidianEnabled ? 'true' : 'false')
       try {
@@ -70,12 +79,12 @@ async function _flushChunk(isLast = false) {
   form.append('session_id',  _sessionId)
   form.append('chunk_index', idx)
   form.append('is_last',     isLast ? 'true' : 'false')
-  form.append('model',       document.getElementById('model-sel').value)
-  form.append('language',    document.getElementById('lang-sel').value)
-  form.append('domain',      document.getElementById('domain-sel').value)
+  form.append('model',       getPillValue('model-pill-group'))
+  form.append('language',    getPillValue('lang-pill-group'))
+  form.append('domain',      getPillValue('domain-pill-group'))
   form.append('extra_terms', document.getElementById('extra-terms').value)
   form.append('obsidian',    obsidianEnabled ? 'true' : 'false')
-  form.append('mode',        document.getElementById('mode-sel').value)
+  form.append('mode',        getPillValue('mode-pill-group'))
 
   _pendingChunks++
   try {
@@ -576,7 +585,7 @@ function toggleObsidian() {
 
 // ── Mode change ───────────────────────────────────────────────
 function onModeChange() {
-  const mode = document.getElementById('mode-sel').value
+  const mode = getPillValue('mode-pill-group')
   const hint = document.getElementById('system-audio-hint')
   const icon = document.getElementById('btn-icon')
   const lbl  = document.getElementById('btn-label')
@@ -595,9 +604,9 @@ function onModeChange() {
 let _sysAudioSessionId = null
 
 async function startSystemAudio() {
-  const model    = document.getElementById('model-sel').value
-  const language = document.getElementById('lang-sel').value
-  const domain   = document.getElementById('domain-sel').value
+  const model    = getPillValue('model-pill-group')
+  const language = getPillValue('lang-pill-group')
+  const domain   = getPillValue('domain-pill-group')
   const extra    = document.getElementById('extra-terms').value
   const withMic  = document.getElementById('mix-mic-toggle')?.checked ?? false
   const resp = await fetch('/api/system-audio/start', {
@@ -626,7 +635,7 @@ async function stopSystemAudio() {
 
 // ── Record ────────────────────────────────────────────────────
 async function toggleRecord() {
-  const mode = document.getElementById('mode-sel').value
+  const mode = getPillValue('mode-pill-group')
 
   // System audio mode: simple toggle without mic / modal
   if (mode === 'system') {
@@ -724,7 +733,7 @@ async function startRecording() {
       }
       // 建立預覽播放器（即時模式因時間軸不連續無法正常播放，略過）
       const player = document.getElementById('local-audio-player')
-      const _isLiveMode = document.getElementById('mode-sel').value === 'live'
+      const _isLiveMode = getPillValue('mode-pill-group') === 'live'
       if (!_isLiveMode && audioChunks.length > 0) {
         const actualType = mediaRecorder.mimeType || 'audio/webm'
         const previewBlob = new Blob([...audioChunks], { type: actualType })
@@ -739,7 +748,7 @@ async function startRecording() {
       await _flushChunk(true)
     }
     // 每 10 分鐘自動切段
-    const isLive = document.getElementById('mode-sel').value === 'live'
+    const isLive = getPillValue('mode-pill-group') === 'live'
     const chunkMs = isLive ? CHUNK_INTERVAL_LIVE : CHUNK_INTERVAL_STANDARD
     _chunkTimer = setInterval(() => _flushChunk(false), chunkMs)
     mediaRecorder.start(100)
@@ -781,9 +790,9 @@ async function sendAudio(stream) {
 async function uploadFileBlob(blob, filename='upload.webm') {
   const form = new FormData()
   form.append('audio', blob, filename)
-  form.append('model', document.getElementById('model-sel').value)
-  form.append('language', document.getElementById('lang-sel').value)
-  form.append('domain', document.getElementById('domain-sel').value)
+  form.append('model', getPillValue('model-pill-group'))
+  form.append('language', getPillValue('lang-pill-group'))
+  form.append('domain', getPillValue('domain-pill-group'))
   form.append('extra_terms', document.getElementById('extra-terms').value)
   form.append('obsidian', obsidianEnabled ? 'true' : 'false')
 
@@ -909,8 +918,7 @@ async function uploadToNotion() {
 }
 
 async function doUpload(text, lang) {
-  const pageId = document.getElementById('notion-page-id').value.trim()
-    || null
+  const pageId = null  // 使用偏好設定中儲存的預設頁面
   setStatus('📤 上傳至 Notion…')
   try {
     const r = await fetch('/upload', {
@@ -1422,7 +1430,7 @@ function stopWaveform() {
 
 // ── 頁面初始化 ────────────────────────────────────────────────
 async function _initModelCheck() {
-  const modelName = document.getElementById('model-sel').value
+  const modelName = getPillValue('model-pill-group')
   const ready = await checkModelReady(modelName)
   if (!ready) {
     // 每 3 秒輪詢，直到模型就緒
@@ -1486,8 +1494,10 @@ document.addEventListener('DOMContentLoaded', () => {
   _initModelCheck()
   _checkConfigHealth()
   // 切換模型時重新檢查
-  document.getElementById('model-sel').addEventListener('change', () => {
-    if (_modelPollTimer) { clearInterval(_modelPollTimer); _modelPollTimer = null }
-    _initModelCheck()
+  document.getElementById('model-pill-group')?.addEventListener('click', e => {
+    if (e.target.closest('.pill')) {
+      if (_modelPollTimer) { clearInterval(_modelPollTimer); _modelPollTimer = null }
+      _initModelCheck()
+    }
   })
 })
