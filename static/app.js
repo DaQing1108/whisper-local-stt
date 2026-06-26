@@ -1372,8 +1372,21 @@ async function _initModelCheck() {
   }
 }
 
+async function _checkConfigHealth() {
+  try {
+    const r = await fetch('/api/config/health')
+    if (!r.ok) return
+    const data = await r.json()
+    if (!data.ok && data.missing && data.missing.length > 0) {
+      const msgs = data.missing.map(m => `⚠️ 未設定 ${m.key}（${m.feature}功能不可用）`)
+      msgs.forEach(msg => appendStatus(msg))
+    }
+  } catch (_) {}
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   _initModelCheck()
+  _checkConfigHealth()
   // 切換模型時重新檢查
   document.getElementById('model-sel').addEventListener('change', () => {
     if (_modelPollTimer) { clearInterval(_modelPollTimer); _modelPollTimer = null }

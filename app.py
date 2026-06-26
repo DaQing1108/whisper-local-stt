@@ -18,9 +18,12 @@ from dotenv import load_dotenv
 from flask import Flask
 from werkzeug.serving import WSGIRequestHandler
 
+from constants import ENV_PATH
 from version import __version__
 
-load_dotenv()
+# Terminal 模式與 .app 模式統一讀同一個 .env
+load_dotenv(ENV_PATH)
+load_dotenv()  # fallback：專案目錄 .env（開發時覆蓋用）
 
 # ── 從根部封殺 Broken pipe ────────────────────────────────────
 try:

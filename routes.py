@@ -15,6 +15,7 @@ from flask import Blueprint, Response, jsonify, make_response, request, stream_w
 
 import integrations
 import sse as _sse
+from constants import ENV_PATH as _ENV_PATH
 from transcribe_common import DOMAIN_LABELS, is_hallucination as _is_hallucination
 from version import __version__
 from whisper_core import TranscriptionError, is_model_cached, run_whisper, warmup_model_async, _warmup_state, _warmup_lock
@@ -527,13 +528,27 @@ def get_config():
                     label = tl[0]["plain_text"]
         except Exception as e:
             logging.warning("[Config] Notion 標題抓取失敗：%s", e)
+    page_id_preview = (page_id[:8] + "…") if page_id else ""
     return jsonify(
         ready=ready,
         page_label=label,
-        page_id=page_id,
+        page_id_preview=page_id_preview,
         has_anthropic_key=bool(os.getenv("ANTHROPIC_API_KEY")),
         has_openai_key=bool(os.getenv("OPENAI_API_KEY")),
     )
+
+
+@bp.route("/api/config/health", methods=["GET"])
+def config_health():
+    """啟動健檢：回傳各功能的設定狀態，讓前端在啟動時提示使用者補設定。"""
+    missing = []
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        missing.append({"key": "ANTHROPIC_API_KEY", "feature": "會議記錄自動整理"})
+    if not os.getenv("OBSIDIAN_MEETING_PATH"):
+        missing.append({"key": "OBSIDIAN_MEETING_PATH", "feature": "Obsidian 存檔"})
+    if not os.getenv("NOTION_TOKEN") or not os.getenv("NOTION_PAGE_ID"):
+        missing.append({"key": "NOTION_TOKEN / NOTION_PAGE_ID", "feature": "Notion 存檔"})
+    return jsonify(ok=len(missing) == 0, missing=missing)
 
 
 @bp.route("/config", methods=["POST"])
@@ -563,8 +578,9 @@ def save_config():
     def _sanitize(val: str) -> str:
         return val[:512].replace("\n", "").replace("\r", "").replace("\0", "")
 
-    # 局部更新 .env（保留其他已有的 key）
-    env_path = Path(".env")
+    # 局部更新 .env（統一寫到 Application Support，保留其他已有的 key）
+    env_path = _ENV_PATH
+    env_path.parent.mkdir(parents=True, exist_ok=True)
     existing: dict[str, str] = {}
     if env_path.exists():
         for raw in env_path.read_text(encoding="utf-8").splitlines():
@@ -793,8 +809,8 @@ def test_inject_chunk():
     """
     import os as _os
     from flask import current_app
-    if not (current_app.debug or _os.environ.get("WHISPER_TEST") == "1"):
-        return jsonify(error="只在 debug/test 模式下可用"), 403
+    if not current_app.debug:
+        return jsonify(error="只在 debug 模式下可用"), 403
 
     session_id = request.form.get("session_id", f"test_{int(_time.time())}")
     chunk_index = int(request.form.get("chunk_index", 0))

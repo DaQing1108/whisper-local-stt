@@ -65,3 +65,25 @@ class TestPhraseRepetition:
         # 有變化的正常重複（如列點）不應被判為幻覺
         text = "\n".join([f"第{i}點：這是一個重要議題，需要深入討論。" for i in range(1, 8)])
         assert not is_hallucination(text)
+
+
+class TestTimestampOnlyPhantom:
+    """mlx-whisper 在近靜音段落產生的 timestamp-only phantom 偵測。"""
+
+    def test_repeated_timestamps_rejected(self):
+        # 真實案例：[00:32] × 33
+        text = "[00:32] " * 10
+        assert is_hallucination(text)
+
+    def test_single_timestamp_hms_rejected(self):
+        # 單一 HH:MM:SS 格式，超過 20 字
+        text = "[00:01.234] [00:02.345] [00:03.456]"
+        assert is_hallucination(text)
+
+    def test_timestamp_in_normal_sentence_passes(self):
+        # 時間戳出現在正常句子中 → 不應判幻覺
+        assert not is_hallucination("討論在 [01:23] 時開始，結論如下：需要進一步評估。")
+
+    def test_normal_text_with_numbers_passes(self):
+        # 含數字但非純 timestamp 的正常文字
+        assert not is_hallucination("第一季 Q1 2026 目標：完成三個核心功能模組的開發。")

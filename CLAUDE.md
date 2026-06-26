@@ -32,8 +32,8 @@ log 有 ERROR -3801？
 └── NO（log 無新條目）
     ├── 錄音時間 < 1 秒？ → chunk 不會產生，錄久一點
     └── log 有 RMS 行？
-        ├── RMS > 100 + Hallucination rejected → 音訊擷取 OK，內容不是人聲（換清晰語音影片）
-        └── RMS < 100 → 音訊靜音（確認系統音量、YouTube 是否在播放）
+        ├── RMS > 500 + Hallucination rejected → 音訊擷取 OK，內容不是人聲（換清晰語音影片）
+        └── RMS < 500 → 音訊靜音或背景噪音太低（確認系統音量、YouTube 是否在播放）
 ```
 
 ### 🔴 App 啟動後 crash / SIGABRT
@@ -67,7 +67,7 @@ routes.py system_audio_start 是否呼叫了 _sc.start_sc_capture()？
 | 檔案 | 職責 |
 |------|------|
 | `system_audio_capture.swift` | Swift binary，SCKit 擷取，輸出 16kHz mono int16 PCM |
-| `system_audio.py` | 管理 Swift subprocess，RMS silence filter |
+| `system_audio.py` | 管理 Swift subprocess，RMS silence filter（threshold=500） |
 | `system_audio_sc.py` | pyobjc 實作，**只用於 TCC guard check，不用於擷取** |
 | `routes.py` | Flask routes，三條音訊管線邏輯 |
 | `integrations.py` | Obsidian / Notion 存檔，`[MM:SS]` 逐字稿格式 |
