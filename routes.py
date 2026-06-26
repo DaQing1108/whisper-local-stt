@@ -91,6 +91,24 @@ def index():
     return r
 
 
+@bp.route("/preferences")
+def preferences():
+    from flask import render_template
+    return render_template("preferences.html")
+
+
+@bp.route("/api/validate-obsidian-path", methods=["POST"])
+def validate_obsidian_path():
+    data = request.json or {}
+    raw_path = data.get("path", "").strip()
+    if not raw_path:
+        return jsonify(ok=False, error="路徑不能為空"), 400
+    expanded = os.path.expanduser(raw_path)
+    if os.path.isdir(expanded):
+        return jsonify(ok=True, expanded=expanded)
+    return jsonify(ok=False, error=f"找不到目錄：{expanded}"), 200
+
+
 @bp.route("/events")
 def events():
     q: Queue = Queue(maxsize=50)
@@ -535,12 +553,13 @@ def get_config():
         page_id_preview=page_id_preview,
         has_anthropic_key=bool(os.getenv("ANTHROPIC_API_KEY")),
         has_openai_key=bool(os.getenv("OPENAI_API_KEY")),
+        obsidian_path=os.getenv("OBSIDIAN_MEETING_PATH", ""),
     )
 
 
 @bp.route("/api/config/health", methods=["GET"])
 def config_health():
-    """啟動健檢：回傳各功能的設定狀態，讓前端在啟動時提示使用者補設定。"""
+    """啟動健檢：回傳各功能的設定狀態與 TCC 權限，讓前端在啟動時提示使用者補設定。"""
     missing = []
     if not os.getenv("ANTHROPIC_API_KEY"):
         missing.append({"key": "ANTHROPIC_API_KEY", "feature": "會議記錄自動整理"})
@@ -548,7 +567,33 @@ def config_health():
         missing.append({"key": "OBSIDIAN_MEETING_PATH", "feature": "Obsidian 存檔"})
     if not os.getenv("NOTION_TOKEN") or not os.getenv("NOTION_PAGE_ID"):
         missing.append({"key": "NOTION_TOKEN / NOTION_PAGE_ID", "feature": "Notion 存檔"})
-    return jsonify(ok=len(missing) == 0, missing=missing)
+
+    permissions = _check_tcc_permissions()
+    return jsonify(ok=len(missing) == 0, missing=missing, permissions=permissions)
+
+
+def _check_tcc_permissions() -> dict:
+    """偵測 macOS TCC 權限狀態（螢幕錄製、麥克風）。
+    只在 .app 環境下有意義；Terminal 模式永遠回傳 unknown。
+    """
+    result = {"screen_recording": "unknown", "microphone": "unknown"}
+    try:
+        # 透過 system_audio_sc.py 的 TCC guard 偵測螢幕錄製狀態
+        import system_audio_sc as _sc
+        status = _sc.check_tcc_status()  # 回傳 "granted" / "denied" / "unknown"
+        result["screen_recording"] = status
+    except Exception:
+        pass
+    try:
+        # 麥克風：透過 AVCaptureDevice 的授權狀態（需 pyobjc）
+        import objc  # noqa: F401
+        from AVFoundation import AVCaptureDevice, AVMediaTypeAudio  # type: ignore
+        auth = AVCaptureDevice.authorizationStatusForMediaType_(AVMediaTypeAudio)
+        # 0=notDetermined, 1=restricted, 2=denied, 3=authorized
+        result["microphone"] = "granted" if auth == 3 else ("denied" if auth == 2 else "unknown")
+    except Exception:
+        pass
+    return result
 
 
 @bp.route("/config", methods=["POST"])
@@ -556,8 +601,9 @@ def save_config():
     data    = request.json or {}
     token   = data.get("token", "").strip()
     page_id = data.get("page_id", "").strip()
-    anthropic_key = data.get("anthropic_key", "").strip()
-    openai_key    = data.get("openai_key", "").strip()
+    anthropic_key  = data.get("anthropic_key", "").strip()
+    openai_key     = data.get("openai_key", "").strip()
+    obsidian_path  = data.get("obsidian_path", "").strip()
 
     label = ""
     if token and page_id:
@@ -601,6 +647,10 @@ def save_config():
     if openai_key:
         existing["OPENAI_API_KEY"]   = _sanitize(openai_key)
         os.environ["OPENAI_API_KEY"] = _sanitize(openai_key)
+    if obsidian_path:
+        expanded = os.path.expanduser(_sanitize(obsidian_path))
+        existing["OBSIDIAN_MEETING_PATH"]   = expanded
+        os.environ["OBSIDIAN_MEETING_PATH"] = expanded
 
     env_path.write_text(
         "\n".join(f"{k}={v}" for k, v in existing.items()) + "\n",
@@ -865,6 +915,78 @@ def last_transcript():
     if _last_transcript:
         return jsonify(ok=True, **_last_transcript)
     return jsonify(ok=False)
+
+
+@bp.route("/api/export", methods=["GET"])
+def export_transcript():
+    """匯出最後一次轉錄結果為 .srt / .md / .txt。"""
+    fmt = request.args.get("format", "txt").lower()
+    if fmt not in ("srt", "md", "txt"):
+        return jsonify(error="format 必須為 srt、md 或 txt"), 400
+    if not _last_transcript:
+        return jsonify(error="尚無轉錄結果"), 404
+
+    text: str = _last_transcript.get("text", "")
+    segments: list = _last_transcript.get("segments", [])
+
+    if fmt == "srt":
+        content = _build_srt(segments, text)
+        mime = "text/plain"
+        filename = "transcript.srt"
+    elif fmt == "md":
+        content = _build_md(segments, text)
+        mime = "text/markdown"
+        filename = "transcript.md"
+    else:
+        content = text
+        mime = "text/plain"
+        filename = "transcript.txt"
+
+    from flask import Response
+    resp = Response(content, mimetype=mime)
+    resp.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return resp
+
+
+def _build_srt(segments: list, fallback_text: str) -> str:
+    """把 Whisper segments 轉換成 SRT 格式。若無 segments，整段文字當作第一條。"""
+    def _fmt_time(sec: float) -> str:
+        h = int(sec // 3600)
+        m = int((sec % 3600) // 60)
+        s = int(sec % 60)
+        ms = int((sec - int(sec)) * 1000)
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+    if not segments:
+        return f"1\n00:00:00,000 --> 00:00:01,000\n{fallback_text}\n"
+
+    lines = []
+    for i, seg in enumerate(segments, 1):
+        try:
+            start_sec = float(seg.get("start", 0))
+            end_sec   = float(seg.get("end", start_sec + 1))
+        except (TypeError, ValueError):
+            start_sec, end_sec = 0.0, 1.0
+        start = _fmt_time(start_sec)
+        end   = _fmt_time(end_sec)
+        txt   = seg.get("text", "").strip()
+        lines.append(f"{i}\n{start} --> {end}\n{txt}\n")
+    return "\n".join(lines)
+
+
+def _build_md(segments: list, fallback_text: str) -> str:
+    """把 segments 轉換成帶時間戳的 Markdown。"""
+    if not segments:
+        return fallback_text
+
+    lines = []
+    for seg in segments:
+        start = seg.get("start", 0)
+        m = int(start // 60)
+        s = int(start % 60)
+        txt = seg.get("text", "").strip()
+        lines.append(f"**[{m:02d}:{s:02d}]** {txt}")
+    return "\n\n".join(lines)
 
 
 @bp.route("/api/save_to_obsidian", methods=["POST"])

@@ -9,6 +9,7 @@ DIST_APP="$PROJECT_DIR/dist/$APP_NAME.app"
 INSTALL_APP="/Applications/$APP_NAME.app"
 PORT=5001
 CERT="WhisperSTT Local"
+SPARKLE_FRAMEWORK="$PROJECT_DIR/Sparkle.framework"
 
 cd "$PROJECT_DIR"
 
@@ -27,6 +28,13 @@ if [ "$SPEC_VER" != "$CODE_VER" ]; then
   exit 1
 fi
 echo "   ✅ 版本一致：v$CODE_VER"
+
+if [ -d "$SPARKLE_FRAMEWORK" ]; then
+  echo "   ✅ Sparkle.framework 已找到，將由 gui.spec 納入打包"
+else
+  echo "   ⚠️  找不到 Sparkle.framework；自動更新 UI/檢查邏輯待 framework 放入專案根目錄後才會生效"
+  echo "      預期位置：$SPARKLE_FRAMEWORK"
+fi
 
 # ── 步驟 1：關閉舊 App + 清除 port ──────────────────────────
 echo ""

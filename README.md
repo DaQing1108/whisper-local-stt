@@ -374,6 +374,32 @@ make server            # 啟動測試用 server（WHISPER_TEST=1）
 
 ---
 
+## Sparkle 自動更新
+
+**v1 決策**
+
+- appcast 託管：GitHub Releases + raw `appcast.xml` URL
+- Sparkle framework 來源：手動下載固定版本，放在專案根目錄 `Sparkle.framework`
+
+**打包行為**
+
+`package.sh` 只檢查 `Sparkle.framework` 是否存在並提示，不會自動下載或更新 framework。若檔案存在，`gui.spec` 會將它打包到 `.app/Contents/Resources/Frameworks/Sparkle.framework`，並在 app plist 中寫入 Sparkle key：
+
+- `SUFeedURL`
+- `SUPublicEDKey`
+
+目前這兩個值仍是佔位符。正式發版前需先完成：
+
+1. 用 Sparkle `generate_keys` 產生 EdDSA key pair，保管 private key。
+2. 將 public key 寫入 `Info.plist` 與 `gui.spec` 的 `SUPublicEDKey`。
+3. 在 GitHub Releases 上傳 release artifact。
+4. 更新並公開 `appcast.xml`，將 raw URL 寫入 `SUFeedURL`。
+5. 用 Sparkle signing tool 產生 release artifact signature，確認 appcast 版本、URL、signature 一致。
+
+中期若發版流程穩定，再評估用 release script 或 CI 自動產生 appcast 與 signature。
+
+---
+
 ## License
 
 MIT

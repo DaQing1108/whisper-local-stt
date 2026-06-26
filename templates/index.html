@@ -241,6 +241,20 @@
   </div>
 </div>
 
+<!-- 首次使用引導 modal -->
+<div id="onboarding-modal" class="modal-overlay" style="z-index:2000;display:none;">
+  <div class="modal-content" style="max-width:420px;padding:32px 28px;">
+    <div style="font-size:36px;margin-bottom:12px;">👋</div>
+    <h3 style="margin:0 0 8px;font-size:18px;">歡迎使用 Whisper STT</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 20px;">偵測到以下設定尚未完成，建議先完成後再開始錄音：</p>
+    <ul id="onboarding-list" style="list-style:none;padding:0;margin:0 0 24px;display:flex;flex-direction:column;gap:10px;"></ul>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn" onclick="document.getElementById('onboarding-modal').style.display='none'">稍後設定</button>
+      <button class="btn primary" onclick="openPreferences()">前往設定 ⌘,</button>
+    </div>
+  </div>
+</div>
+
 <!-- 停止錄音確認 modal -->
 <div id="stop-confirm-modal" class="modal-overlay" style="z-index:1000;">
   <div class="modal-content" style="max-width:340px; text-align:center; padding:32px 28px;">

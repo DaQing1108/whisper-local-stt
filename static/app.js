@@ -1377,11 +1377,45 @@ async function _checkConfigHealth() {
     const r = await fetch('/api/config/health')
     if (!r.ok) return
     const data = await r.json()
+
+    // TCC 權限警示（優先顯示，不受 localStorage 限制）
+    if (data.permissions) {
+      if (data.permissions.screen_recording === 'denied') {
+        appendStatus('⚠️ 螢幕錄製權限未授予，系統音訊功能不可用（系統設定 → 隱私權 → 螢幕錄製）')
+      }
+      if (data.permissions.microphone === 'denied') {
+        appendStatus('⚠️ 麥克風權限未授予，錄音功能不可用')
+      }
+    }
+
+    // 設定缺漏：只在首次啟動時顯示引導 modal
     if (!data.ok && data.missing && data.missing.length > 0) {
-      const msgs = data.missing.map(m => `⚠️ 未設定 ${m.key}（${m.feature}功能不可用）`)
-      msgs.forEach(msg => appendStatus(msg))
+      const shownKey = 'onboarding_shown_v2'
+      if (!localStorage.getItem(shownKey)) {
+        const list = document.getElementById('onboarding-list')
+        if (list) {
+          list.innerHTML = data.missing.map(m =>
+            `<li style="display:flex;align-items:center;gap:8px;font-size:13px;">
+              <span style="color:var(--accent)">⚠️</span>
+              <span><strong>${m.feature}</strong> — 未設定 ${m.key}</span>
+            </li>`
+          ).join('')
+          document.getElementById('onboarding-modal').style.display = 'flex'
+          localStorage.setItem(shownKey, '1')
+        }
+      }
     }
   } catch (_) {}
+}
+
+function openPreferences() {
+  document.getElementById('onboarding-modal').style.display = 'none'
+  if (window.pywebview && window.pywebview.api) {
+    window.pywebview.api.open_preferences()
+  } else {
+    // dev server fallback：直接開新分頁
+    window.open('/preferences', '_blank', 'width=560,height=620')
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

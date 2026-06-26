@@ -39,6 +39,13 @@
   <key>NSHighResolutionCapable</key>
   <true/>
 
+  <!-- Sparkle 自動更新（正式發版前替換為 GitHub Releases raw appcast URL 與 EdDSA public key） -->
+  <key>SUFeedURL</key>
+  <string>https://example.com/whisper-stt/appcast.xml</string>
+
+  <key>SUPublicEDKey</key>
+  <string>REPLACE_WITH_SPARKLE_EDDSA_PUBLIC_KEY</string>
+
   <!-- 麥克風權限（瀏覽器側錄音，此項為保險） -->
   <key>NSMicrophoneUsageDescription</key>
   <string>Whisper STT 需要麥克風權限以進行語音轉文字。</string>

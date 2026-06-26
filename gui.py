@@ -128,6 +128,25 @@ def _patch_wkwebview_media_permission() -> None:
         logging.warning("[gui] WKWebView media patch failed: %s", exc)
 
 
+def _open_preferences() -> None:
+    """在獨立視窗開啟偏好設定頁（⌘, 觸發）。
+    pywebview 6.x 的 create_window 在 cocoa platform 內部用 AppHelper.callAfter
+    排入主執行緒，JS bridge 回呼呼叫此函數是安全的。
+    """
+    import webview
+    existing = [w for w in webview.windows if w.title and "偏好設定" in w.title]
+    if existing:
+        existing[0].show()
+        return
+    webview.create_window(
+        title    = "Whisper STT — 偏好設定",
+        url      = f"{URL}/preferences",
+        width    = 560,
+        height   = 620,
+        resizable= False,
+    )
+
+
 def main() -> None:
     import webview
 
@@ -156,6 +175,10 @@ def main() -> None:
             logging.debug("tkinter 錯誤對話框不可用：%s", tk_err)
         sys.exit(1)
 
+    class _Api:
+        def open_preferences(self) -> None:
+            _open_preferences()
+
     window = webview.create_window(
         title        = f"Whisper AI 會議記錄 v{__version__}",
         url          = URL,
@@ -165,7 +188,21 @@ def main() -> None:
         resizable    = True,
         text_select  = True,
         confirm_close= True,
+        js_api       = _Api(),
     )
+
+    # ⌘, 開啟偏好設定視窗
+    def _inject_keybinding() -> None:
+        window.evaluate_js("""
+        document.addEventListener('keydown', function(e) {
+          if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+            e.preventDefault();
+            window.pywebview.api.open_preferences();
+          }
+        });
+        """)
+
+    window.events.loaded += _inject_keybinding
 
     webview.start(
         debug        = False,
