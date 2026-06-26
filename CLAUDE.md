@@ -51,6 +51,15 @@ routes.py system_audio_start 是否呼叫了 _sc.start_sc_capture()？
 → 99% 是改了 source 但跑的是舊 .app
 ```
 
+### 🔇 dev server（Terminal）跑系統音訊沒有回應 / 靜默
+
+```
+→ 這是 TCC 設計限制，不是 code bug，不需要 debug
+→ macOS TCC 只授權給簽名的 .app bundle，python 直接跑沒有螢幕錄製權限
+→ 正確測試流程：./package.sh → 開 .app → 錄音
+→ Terminal 模式只能測麥克風錄音和上傳音檔，無法測系統音訊
+```
+
 ---
 
 ## 架構速查
