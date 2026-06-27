@@ -30,6 +30,7 @@
     --muted:    #6b7280;
     --grid-dot: rgba(0,0,0,0.07);
   }
+  html { background-color: var(--bg); }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Inter', sans-serif;
@@ -314,6 +315,31 @@
     border-color: rgba(39,201,142,0.5);
     color: var(--accent2);
   }
+  .quick-help {
+    width: 100%;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.45;
+    padding-left: 36px;
+  }
+  .mode-hint {
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: rgba(29,158,117,0.08);
+    border: 1px solid rgba(29,158,117,0.25);
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .mode-hint.warn {
+    background: rgba(251,191,36,0.08);
+    border-color: rgba(251,191,36,0.35);
+  }
+  .mode-hint.error {
+    background: rgba(248,113,113,0.08);
+    border-color: rgba(248,113,113,0.35);
+  }
 
   /* ── Vocab Bar (legacy tag-input-box kept for compat) ── */
   .tag-input-box {
@@ -432,6 +458,7 @@
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn.primary:hover { background: var(--accent2); border-color: var(--accent2); }
   .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn.icon-btn { padding: 5px 8px; display: flex; align-items: center; justify-content: center; }
 
   /* ── Toggle ── */
   .toggle-row { display: flex; align-items: center; gap: 6px; }
@@ -551,6 +578,7 @@
     gap: 8px;
     cursor: pointer;
     user-select: none;
+    width: 100%;
   }
   .qb-chip {
     padding: 3px 10px;
@@ -565,10 +593,13 @@
   .qb-summary:hover .qb-chip { border-color: rgba(29,158,117,0.35); }
   .qb-chevron {
     margin-left: auto;
-    color: var(--muted);
-    font-size: 11px;
-    transition: transform .2s;
+    color: var(--text);
+    font-size: 14px;
+    opacity: 0.6;
+    transition: transform .2s, opacity .15s;
+    flex-shrink: 0;
   }
+  .qb-summary:hover .qb-chevron { opacity: 1; }
   .quick-bar.expanded .qb-chevron { transform: rotate(180deg); }
   .qb-expand {
     display: none;
@@ -629,6 +660,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
+    flex-wrap: wrap;
   }
   .vocab-hash {
     color: var(--accent2);
@@ -641,14 +673,18 @@
     background: none;
     border: none;
     cursor: pointer;
-    font-size: 14px;
+    color: var(--text);
     opacity: 0.5;
-    padding: 2px 4px;
+    padding: 4px 6px;
     border-radius: 6px;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
     transition: opacity 0.2s;
   }
+  .vocab-toggle-btn svg { transition: transform .2s; }
   .vocab-toggle-btn:hover { opacity: 1; background: var(--surface2); }
+  .vocab-toggle-btn.open svg { transform: rotate(180deg); }
   .vocab-input-row {
     flex: 1;
     display: flex;
@@ -656,6 +692,17 @@
     align-items: center;
     gap: 6px;
     cursor: text;
+  }
+  #saved-dict-title {
+    width: 100%;
+    padding-left: 24px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.45;
+  }
+  #vocab-tags-container {
+    width: 100%;
+    padding-left: 24px;
   }
   .vocab-input-row input {
     flex: 1;
@@ -688,7 +735,7 @@
   .act-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .act-btn.primary:hover { background: var(--accent2); border-color: var(--accent2); }
   .act-btn:disabled { opacity: .35; cursor: not-allowed; }
-  .act-btn.act-clear { padding: 7px 11px; color: var(--muted); margin-left: auto; }
+  .act-btn.act-clear { padding: 7px 10px; color: var(--muted); margin-left: auto; display: flex; align-items: center; }
   .act-btn.act-clear:hover { color: var(--red); border-color: var(--red); background: rgba(248,113,113,0.06); }
 
   /* ── Scrollbar ── */

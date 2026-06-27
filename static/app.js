@@ -561,7 +561,7 @@ function toggleSavedDict() {
   if (isOpen) {
     container.style.display = 'none'
     title.style.display = 'none'
-    if (btn) btn.style.opacity = '0.5'
+    if (btn) btn.classList.remove('open')
   } else {
     const lib = getVocabLibrary()
     if (lib.length === 0) {
@@ -573,7 +573,7 @@ function toggleSavedDict() {
       container.style.display = 'block'
       renderVocabTags()
     }
-    if (btn) btn.style.opacity = '1'
+    if (btn) btn.classList.add('open')
   }
 }
 
