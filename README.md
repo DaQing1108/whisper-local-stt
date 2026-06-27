@@ -1,17 +1,27 @@
-# 🎙️ Whisper 本地語音轉文字系統 v2.1.0
+# 🎙️ Whisper STT 本地語音轉文字系統 v2.2.1
 
 ## Current State
 Last checkpoint: 2026-06-27
-Phase: v2.2.1 — UX 深度測試後四項優化（tabs 說明、詞庫入口、chips 中文化、系統音訊引導）
-Working: 110/110 tests 通過，Space 鍵 bug 修復，v2.2.1 已打包安裝至 /Applications
-Next action: 實機驗證四項 UX 改善（開啟 app 逐一確認）
+Phase: 說話者分離 Beta 主流程接入完成（v2.2.1+）
+Working: 124/124 tests 通過；Quick-bar diarize toggle → /transcribe keep_wav → /api/diarize → labeled 逐字稿；path traversal 安全防護已修復
+Next action: 測試說話者分離功能（取得 HF Token → 偏好設定填入 → 上傳音檔）
 Blockers: none
 
 ## Checkpoint History
+### 2026-06-27｜說話者分離 Beta 主流程接入
+- Completed: Quick-bar diarize toggle、/transcribe keep_wav、/api/diarize path traversal 防護（tmpdir 限制）、SSE done handler → labeled 逐字稿顯示、9 個 unit test
+- State: 124/124 tests，commit ae08c83，說話者分離 Beta 完整可用（需 HF Token）
+- Next: 取得 HF Token → 偏好設定填入 → 實機驗證說話者標記
+
 ### 2026-06-27｜v2.2.1 UX 深度測試後四項優化
 - Completed: Space 鍵 bug 修復（toggleRecord）、dead code 清除、summary/timeline tab placeholder 引導說明、詞庫 📌 入口按鈕、QB chips 中文化、系統音訊首次引導 toast、升版 v2.2.1 重新打包
 - State: 110/110 tests，commit 8b6e39f，/Applications/Whisper STT.app v2.2.1
 - Next: 實機驗證四項 UX 改善
+
+### 2026-06-27｜v2.2.1 UI/UX 交付一致性優化
+- Completed: 主 UI 品牌收斂回 Whisper STT、quick-bar helper text、系統音訊權限狀態提示、詞庫文案、結果 action disabled reason、Preferences Basic / Workflow / Advanced 分層、release checklist 更新
+- State: 待實機驗證
+- Next: 手動驗證系統音訊權限、Notion/Obsidian disabled reason、Preferences 分層與窄視窗排版
 
 ### 2026-06-27｜v2.1.0 三功能實作
 - Completed: 批次轉錄（batchTranscribe + 失敗計數）、鍵盤快捷鍵（Space/Cmd+U/Cmd+S + isInput guard）、自訂 LLM 模板（LLM_CUSTOM_PROMPT env var + 偏好設定 textarea），修復 2 個 HIGH issues
