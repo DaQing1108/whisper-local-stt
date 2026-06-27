@@ -79,6 +79,7 @@ let timerSec         = 0
 let lastText         = ''
 let lastLang         = ''
 let notionEnabled    = false
+let diarizeEnabled   = localStorage.getItem('diarize-enabled') === 'true'
 let _wakeLock        = null
 
 // ── Chunked recording state ────────────────────────────────────
@@ -415,8 +416,37 @@ function _initSSE() {
     }
     syncUploadBtn()
     setStatus('✅ 轉錄完成', 'ok')
+
+    if (diarizeEnabled && d.audio_path) {
+      setStatus('🔍 說話者分離分析中…（首次執行需下載模型）')
+      try {
+        const dr = await fetch('/api/diarize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audio_path: d.audio_path, transcript: lastText }),
+        })
+        const dd = await dr.json()
+        if (!dr.ok) {
+          setStatus(`⚠️ 說話者分離失敗：${dd.error || '未知錯誤'}`, 'error')
+        } else if (dd.labeled_transcript) {
+          lastText = dd.labeled_transcript
+          const box = document.getElementById('transcript-box')
+          if (box) {
+            box.querySelectorAll('.transcript-text').forEach((el, i) => {
+              if (i === 0) el.innerHTML = escHtml(dd.labeled_transcript).replace(/\n/g, '<br>')
+            })
+          }
+          setStatus(`✅ 說話者分離完成（${dd.segments?.length || 0} 個片段）`, 'ok')
+        } else {
+          setStatus('✅ 說話者分離完成（無可識別片段）', 'ok')
+        }
+      } catch(e) {
+        setStatus(`⚠️ 說話者分離失敗：${e.message}`, 'error')
+      }
+    }
+
     if (notionEnabled && notionReady) {
-      await doUpload(d.text, d.language)
+      await doUpload(lastText, d.language)
     }
   })
   return evtSrc
@@ -634,6 +664,15 @@ function toggleObsidian() {
   obsidianEnabled = !obsidianEnabled
   const btn = document.getElementById('obsidian-toggle')
   btn.className = 'toggle' + (obsidianEnabled ? ' on' : '')
+}
+
+function toggleDiarize() {
+  diarizeEnabled = !diarizeEnabled
+  localStorage.setItem('diarize-enabled', diarizeEnabled)
+  const btn = document.getElementById('diarize-toggle')
+  const lbl = document.getElementById('diarize-label')
+  if (btn) btn.className = 'toggle' + (diarizeEnabled ? ' on' : '')
+  if (lbl) lbl.textContent = diarizeEnabled ? '開啟' : '關閉'
 }
 
 // ── Mode change ───────────────────────────────────────────────
@@ -869,6 +908,7 @@ async function uploadFileBlob(blob, filename='upload.webm') {
   form.append('domain', getPillValue('domain-pill-group'))
   form.append('extra_terms', document.getElementById('extra-terms').value)
   form.append('obsidian', obsidianEnabled ? 'true' : 'false')
+  form.append('diarize',  diarizeEnabled  ? 'true' : 'false')
 
   setBtnState('processing')
   setStatus('⏳ 上傳檔案中…')
@@ -1619,6 +1659,13 @@ document.addEventListener('DOMContentLoaded', () => {
   updateQBSummary()
   _initModelCheck()
   _checkConfigHealth()
+  // 初始化 diarize toggle 視覺狀態
+  if (diarizeEnabled) {
+    const btn = document.getElementById('diarize-toggle')
+    const lbl = document.getElementById('diarize-label')
+    if (btn) btn.className = 'toggle on'
+    if (lbl) lbl.textContent = '開啟'
+  }
   // 切換模型時重新檢查
   document.getElementById('model-pill-group')?.addEventListener('click', e => {
     if (e.target.closest('.pill')) {

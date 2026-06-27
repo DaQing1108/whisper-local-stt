@@ -434,11 +434,13 @@ def run_whisper(
     model_name: str,
     language: Optional[str],
     progress_cb=None,
+    keep_wav: bool = False,
     **kwargs,
 ) -> tuple[str, str, dict]:
     """
     把音訊 bytes 轉為 WAV，切成 CHUNK_SECONDS 段分批轉錄。
     回傳 (full_text, detected_lang, info_dict)。
+    若 keep_wav=True，轉換後的 WAV 不刪除，路徑存於 info["wav_path"]。
     """
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp_in:
         tmp_in.write(audio_bytes)
@@ -535,7 +537,10 @@ def run_whisper(
 
     finally:
         Path(tmp_in_path).unlink(missing_ok=True)
-        Path(tmp_wav).unlink(missing_ok=True)
+        if keep_wav:
+            info["wav_path"] = tmp_wav
+        else:
+            Path(tmp_wav).unlink(missing_ok=True)
 
 # alias for chunked upload route
 transcribe_audio = run_whisper

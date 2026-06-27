@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import threading
 import time as _time
 import traceback
@@ -157,11 +158,12 @@ def transcribe():
     if not audio:
         return jsonify(error="沒有收到音訊"), 400
 
-    model_name    = request.form.get("model", "large")
-    language      = request.form.get("language", "auto")
-    domain        = request.form.get("domain", "general")
-    extra_terms   = request.form.get("extra_terms", "")
-    save_obsidian = request.form.get("obsidian", "false").lower() == "true"
+    model_name      = request.form.get("model", "large")
+    language        = request.form.get("language", "auto")
+    domain          = request.form.get("domain", "general")
+    extra_terms     = request.form.get("extra_terms", "")
+    save_obsidian   = request.form.get("obsidian", "false").lower() == "true"
+    diarize_enabled = request.form.get("diarize", "false").lower() == "true"
 
     ext = ".webm"
     if audio.filename:
@@ -204,6 +206,7 @@ def transcribe():
                     progress_cb=on_progress,
                     domain=domain,
                     extra_terms=extra_terms,
+                    keep_wav=diarize_enabled,
                 )
             except BrokenPipeError:
                 _sse.broadcast("status", {"msg": "⚠️ 轉錄中斷，請重試"})
@@ -244,7 +247,8 @@ def transcribe():
                     _sse.broadcast("status", {"msg": "⚠️ Obsidian 存檔失敗"})
 
             _sse.broadcast("done", {"ok": True, "text": text, "language": lang,
-                                    "obsidian_file": obsidian_file})
+                                    "obsidian_file": obsidian_file,
+                                    "audio_path": info.get("wav_path", "")})
         finally:
             _sse._transcribe_sem.release()
 
@@ -553,8 +557,22 @@ def diarize():
     num_speakers = data.get("num_speakers")
     transcript = data.get("transcript", "")
 
-    if not audio_path or not os.path.exists(audio_path):
+    if not audio_path:
         return jsonify(error="音檔路徑不存在"), 400
+
+    # 安全性：只允許系統 temp 目錄下的路徑，防止 path traversal + 任意刪除
+    try:
+        resolved = Path(audio_path).resolve()
+        tmp_dir  = Path(tempfile.gettempdir()).resolve()
+        if not str(resolved).startswith(str(tmp_dir)):
+            return jsonify(error="音檔路徑必須在系統暫存目錄內"), 400
+    except Exception:
+        return jsonify(error="音檔路徑無效"), 400
+
+    if not resolved.exists():
+        return jsonify(error="音檔路徑不存在"), 400
+
+    audio_path = str(resolved)
 
     try:
         segments = diarize_audio(audio_path, num_speakers=num_speakers or None)
@@ -566,6 +584,8 @@ def diarize():
     except Exception as e:
         log.exception("[Diarize] 失敗")
         return jsonify(error=f"分析失敗：{e}"), 500
+    finally:
+        Path(audio_path).unlink(missing_ok=True)
 
 
 @bp.route("/config", methods=["GET"])

@@ -121,6 +121,14 @@
         </div>
         <span class="quick-help">領域會影響專有名詞提示詞，不會改變音訊來源。</span>
       </div>
+      <div class="quick-group">
+        <span class="quick-label">說話者分離 <span class="optional">Beta</span></span>
+        <div class="toggle-row">
+          <button class="toggle" id="diarize-toggle" onclick="toggleDiarize()" title="需先在偏好設定填入 HuggingFace Token"></button>
+          <span class="toggle-label" id="diarize-label">關閉</span>
+        </div>
+        <span class="quick-help">上傳音檔後自動標記說話者（需 HF Token，<a href="#" onclick="openPreferences();return false" style="color:var(--accent)">偏好設定</a> 設定）。</span>
+      </div>
     </div>
   </div>
 
