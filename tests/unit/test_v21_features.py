@@ -34,10 +34,10 @@ class TestBatchTranscribeJS:
 
 class TestKeyboardShortcuts:
     def test_space_triggers_start_stop(self):
-        """AC-1: Space keydown calls startStopRecording."""
+        """AC-1: Space keydown calls toggleRecord (corrected from startStopRecording in v2.2 UX fix)."""
         js = (Path(__file__).parent.parent.parent / "static" / "app.js").read_text()
         assert "e.code === 'Space'" in js
-        assert "startStopRecording()" in js
+        assert "toggleRecord()" in js
 
     def test_cmd_u_triggers_file_input(self):
         """AC-2: Cmd+U triggers file-input click."""

@@ -504,8 +504,6 @@ function renderActiveTags() {
     container.appendChild(chip);
   });
   document.getElementById('extra-terms').value = activeVocabs.join(', ');
-  // Re-render library to update active states
-  renderVocabTags();
 }
 
 function removeActiveTag(term) {
@@ -547,27 +545,6 @@ function removeVocabFromLibrary(e, term) {
   }
 }
 
-function clearVocabLibrary(e) {
-  if (e) e.stopPropagation();
-  if (confirm("是否還原預設常用詞庫？")) {
-    localStorage.removeItem('whisper_vocab_library');
-    renderVocabTags();
-  }
-}
-
-let isSavedDictExpanded = false;
-function toggleSavedDict() {
-  isSavedDictExpanded = !isSavedDictExpanded;
-  const container = document.getElementById('vocab-tags-container');
-  const title = document.getElementById('saved-dict-title');
-  if (isSavedDictExpanded) {
-    container.style.display = 'flex';
-    title.innerHTML = '📌 常用詞庫 (點擊收合) <span style="font-size:10px;margin-left:4px">▼</span>';
-  } else {
-    container.style.display = 'none';
-    title.innerHTML = '📌 常用詞庫 (點擊展開) <span style="font-size:10px;margin-left:4px">▶</span>';
-  }
-}
 
 // Handle Enter key in tag input
 document.getElementById('tag-input-field').addEventListener('keydown', (e) => {
@@ -926,7 +903,7 @@ document.addEventListener('keydown', (e) => {
 
   if (e.code === 'Space' && !e.metaKey && !e.ctrlKey && !e.altKey) {
     e.preventDefault();
-    startStopRecording();
+    toggleRecord();
     return;
   }
   if ((e.metaKey || e.ctrlKey) && e.key === 'u') {
