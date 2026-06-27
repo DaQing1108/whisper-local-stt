@@ -41,15 +41,19 @@
   <!-- ── 錄音核心區 ── -->
   <div class="record-card">
     <div class="record-area">
-      <canvas id="waveform" style="position:absolute;bottom:0;left:0;right:0;opacity:0.6;height:100%;border-radius:var(--radius);pointer-events:none;z-index:1;mix-blend-mode:screen;"></canvas>
-      <button id="record-btn" onclick="toggleRecord()" style="z-index:2;">
-        <span class="btn-icon" id="btn-icon">🎤</span>
-        <span class="btn-label" id="btn-label">點擊開始錄音</span>
-        <span id="timer"></span>
-      </button>
+      <canvas id="waveform" style="position:absolute;inset:0;width:100%;height:100%;opacity:0.5;pointer-events:none;border-radius:var(--radius);z-index:1;mix-blend-mode:screen;"></canvas>
+      <div class="rec-rings-wrap" id="rec-rings-wrap">
+        <div class="rec-ring rec-ring-3"></div>
+        <div class="rec-ring rec-ring-2"></div>
+        <div class="rec-ring rec-ring-1"></div>
+        <button id="record-btn" onclick="toggleRecord()">
+          <span class="btn-icon" id="btn-icon">🎤</span>
+          <span class="btn-label" id="btn-label">REC</span>
+        </button>
+      </div>
     </div>
     <!-- 系統音訊說明（模式為 system 時顯示） -->
-    <div id="system-audio-hint" style="display:none;margin-top:12px;padding:10px 14px;border-radius:8px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);font-size:13px;color:var(--muted);line-height:1.6;">
+    <div id="system-audio-hint" style="display:none;margin-top:12px;padding:10px 14px;border-radius:8px;background:rgba(29,158,117,0.08);border:1px solid rgba(29,158,117,0.25);font-size:13px;color:var(--muted);line-height:1.6;">
       🖥️ <strong>系統音訊模式</strong>：擷取電腦系統音訊（Teams / Zoom 等 App 播放聲）<br>
       首次使用需在「系統設定 → 隱私權 → 螢幕錄製」授予 App 權限。
       <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
@@ -59,7 +63,8 @@
         </label>
       </div>
     </div>
-    <div id="status-bar" style="margin-top:16px;justify-content:center;background:transparent;">等待錄音…</div>
+    <div id="status-bar">STANDBY_</div>
+    <span id="timer"></span>
   </div>
 
   <!-- ── 快速設定列 ── -->

@@ -611,11 +611,11 @@ function onModeChange() {
   if (mode === 'system') {
     hint.style.display = 'block'
     icon.textContent = '🖥️'
-    lbl.textContent  = '點擊開始擷取系統音訊'
+    lbl.textContent  = 'SYS'
   } else {
     hint.style.display = 'none'
     icon.textContent = '🎤'
-    lbl.textContent  = '點擊開始錄音'
+    lbl.textContent  = 'REC'
   }
 }
 
@@ -1276,14 +1276,20 @@ function setRecordingUI(recording) {
   const btn   = document.getElementById('record-btn')
   const icon  = document.getElementById('btn-icon')
   const label = document.getElementById('btn-label')
+  const wrap  = document.getElementById('rec-rings-wrap')
+  const sb    = document.getElementById('status-bar')
   if (recording) {
     btn.className   = 'recording'
+    if (wrap) wrap.classList.add('recording')
     icon.textContent  = '⏹'
-    label.textContent = '錄音中⋯ 點擊停止'
+    label.textContent = 'STOP'
+    if (sb) { sb.textContent = 'REC ●'; sb.className = 'error'; }
   } else {
     btn.className   = ''
+    if (wrap) wrap.classList.remove('recording')
     icon.textContent  = '🎤'
-    label.textContent = '點擊開始錄音'
+    label.textContent = 'REC'
+    if (sb) { sb.textContent = 'STANDBY_'; sb.className = ''; }
   }
 }
 
@@ -1291,15 +1297,21 @@ function setBtnState(state) {
   const btn   = document.getElementById('record-btn')
   const icon  = document.getElementById('btn-icon')
   const label = document.getElementById('btn-label')
+  const wrap  = document.getElementById('rec-rings-wrap')
+  const sb    = document.getElementById('status-bar')
   if (state === 'processing') {
     btn.className   = 'processing'
+    if (wrap) wrap.classList.remove('recording')
     icon.textContent  = '⏳'
-    label.textContent = '轉錄中…'
+    label.textContent = 'AI'
+    if (sb) { sb.textContent = 'PROCESSING_'; sb.className = 'warn'; }
     showProcessingModal()
   } else {
     btn.className   = ''
+    if (wrap) wrap.classList.remove('recording')
     icon.textContent  = '🎤'
-    label.textContent = '點擊開始錄音'
+    label.textContent = 'REC'
+    if (sb) { sb.textContent = 'STANDBY_'; sb.className = ''; }
   }
 }
 
