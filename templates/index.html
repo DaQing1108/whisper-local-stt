@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Echo — 語音 AI</title>
+<title>Whisper STT — 語音 AI</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
 <style>
@@ -19,8 +19,8 @@
       <circle cx="20" cy="20" r="2.8" fill="currentColor"/>
     </svg>
   </div>
-  <h1>Echo</h1>
-  <span class="header-sub">語音 AI</span>
+  <h1>Whisper STT</h1>
+  <span class="header-sub">本地語音 AI</span>
   <span id="app-version" style="font-size:11px;opacity:.4;margin-left:4px;font-family:var(--mono)"></span>
   <div class="header-actions">
     <div class="toggle-row" style="gap:6px;">
@@ -53,9 +53,9 @@
       </div>
     </div>
     <!-- 系統音訊說明（模式為 system 時顯示） -->
-    <div id="system-audio-hint" style="display:none;margin-top:12px;padding:10px 14px;border-radius:8px;background:rgba(29,158,117,0.08);border:1px solid rgba(29,158,117,0.25);font-size:13px;color:var(--muted);line-height:1.6;">
+    <div id="system-audio-hint" class="mode-hint system-audio-hint" style="display:none;">
       🖥️ <strong>系統音訊模式</strong>：擷取電腦系統音訊（Teams / Zoom 等 App 播放聲）<br>
-      首次使用需在「系統設定 → 隱私權 → 螢幕錄製」授予 App 權限。
+      <span id="system-audio-permission-copy">首次使用需在「系統設定 → 隱私權與安全性 → 螢幕錄製」授予 Whisper STT 權限。</span>
       <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
           <input type="checkbox" id="mix-mic-toggle" style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent);">
@@ -86,6 +86,7 @@
           <button class="pill" data-val="medium" onclick="setPill(this,'model-pill-group')">medium</button>
           <button class="pill active" data-val="large" onclick="setPill(this,'model-pill-group')">large-v3</button>
         </div>
+        <span class="quick-help">large-v3 品質最佳；small 適合快速草稿。</span>
       </div>
       <div class="quick-group">
         <span class="quick-label">語言</span>
@@ -95,6 +96,7 @@
           <button class="pill" data-val="en" onclick="setPill(this,'lang-pill-group')">英文</button>
           <button class="pill" data-val="ja" onclick="setPill(this,'lang-pill-group')">日文</button>
         </div>
+        <span class="quick-help">中文會固定繁中輸出；不確定時可選自動。</span>
       </div>
       <div class="quick-group">
         <span class="quick-label">模式</span>
@@ -103,6 +105,7 @@
           <button class="pill" data-val="live" onclick="setPill(this,'mode-pill-group');onModeChange()">即時</button>
           <button class="pill" data-val="system" onclick="setPill(this,'mode-pill-group');onModeChange()">系統音訊</button>
         </div>
+        <span class="quick-help" id="mode-helper">標準模式錄完後一次整理，適合正式會議。</span>
       </div>
       <div class="quick-group">
         <span class="quick-label">領域</span>
@@ -113,6 +116,7 @@
           <button class="pill" data-val="medical" onclick="setPill(this,'domain-pill-group')">醫療</button>
           <button class="pill" data-val="legal" onclick="setPill(this,'domain-pill-group')">法律</button>
         </div>
+        <span class="quick-help">領域會影響專有名詞提示詞，不會改變音訊來源。</span>
       </div>
     </div>
   </div>
@@ -122,10 +126,10 @@
     <span class="vocab-hash">#</span>
     <div class="vocab-input-row" onclick="document.getElementById('tag-input-field').focus()">
       <div id="active-tags-container" style="display:contents"></div>
-      <input id="tag-input-field" type="text" placeholder="add_term...">
+      <input id="tag-input-field" type="text" placeholder="加入本次專有名詞，按 Enter 套用">
     </div>
     <input type="hidden" id="extra-terms">
-    <button id="vocab-library-btn" class="vocab-toggle-btn" onclick="toggleSavedDict()" title="已儲存詞庫">📌</button>
+    <button id="vocab-library-btn" class="vocab-toggle-btn" onclick="toggleSavedDict()" title="開啟常用詞庫">📌</button>
     <span id="saved-dict-title" style="display:none"></span>
     <div id="vocab-tags-container" style="display:none;"></div>
   </div>
@@ -158,17 +162,17 @@
     <audio id="local-audio-player" controls style="display:none;width:100%;margin-top:10px;height:32px;border-radius:8px;opacity:0.8;"></audio>
     <input type="file" id="file-input" accept="audio/*,video/*" multiple style="display:none">
     <div class="actions">
-      <button class="act-btn" onclick="copyTranscript()">copy</button>
+      <button class="act-btn" id="copy-btn" onclick="copyTranscript()" disabled title="完成轉錄後可複製">copy</button>
       <div class="export-wrap" style="position:relative;display:inline-block;">
-        <button class="act-btn" id="export-btn" onclick="toggleExportMenu()" disabled>export</button>
+        <button class="act-btn" id="export-btn" onclick="toggleExportMenu()" disabled title="完成轉錄後可匯出">export</button>
         <div id="export-menu" style="display:none;position:absolute;bottom:110%;left:0;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:6px;min-width:140px;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,.3);">
           <div class="export-item" onclick="exportAs('txt')">📄 .txt</div>
           <div class="export-item" onclick="exportAs('srt')">🎬 .srt</div>
           <div class="export-item" onclick="exportAs('md')">📝 .md</div>
         </div>
       </div>
-      <button class="act-btn" id="obsidian-btn" onclick="saveToObsidian()" disabled>Obsidian</button>
-      <button class="act-btn primary" id="upload-btn" onclick="uploadToNotion()" disabled>Notion</button>
+      <button class="act-btn" id="obsidian-btn" onclick="saveToObsidian()" disabled title="請先完成轉錄">Obsidian</button>
+      <button class="act-btn primary" id="upload-btn" onclick="uploadToNotion()" disabled title="請先完成轉錄">Notion</button>
       <button class="act-btn act-clear" onclick="clearTranscript()" title="清除轉錄">✕</button>
     </div>
   </div>
@@ -220,7 +224,7 @@
     <ul id="onboarding-list" style="list-style:none;padding:0;margin:0 0 24px;display:flex;flex-direction:column;gap:10px;"></ul>
     <div style="display:flex;gap:10px;justify-content:flex-end;">
       <button class="btn" onclick="document.getElementById('onboarding-modal').style.display='none'">稍後設定</button>
-      <button class="btn primary" onclick="openPreferences()">前往設定 ⌘,</button>
+      <button class="btn primary" onclick="openPreferences()">前往設定</button>
     </div>
   </div>
 </div>
