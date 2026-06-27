@@ -85,15 +85,20 @@ def diarize_audio(audio_path: str, num_speakers: int | None = None) -> list[Segm
     return segments
 
 
-def apply_diarization(transcript: str, segments: list[Segment]) -> str:
+def apply_diarization(
+    transcript: str,
+    segments: list[Segment],
+    whisper_segments: list[dict] | None = None,
+) -> str:
     """將說話者標籤套入逐字稿。
 
-    簡易策略：依照時間戳記（若逐字稿含 [MM:SS] 格式）插入說話者標籤。
-    若逐字稿無時間戳記，則在每個說話者切換點前插入 [Speaker X] 標籤。
+    優先使用 whisper_segments（含 start/end 時間）精確對應說話者；
+    若無 whisper_segments 則 fallback 至 [MM:SS] 時間戳記模式。
 
     Args:
         transcript: 原始逐字稿文字
         segments: diarize_audio 的回傳值
+        whisper_segments: Whisper 的 segment 列表（{text, start, end}）
 
     Returns:
         帶有說話者標籤的逐字稿
@@ -106,16 +111,36 @@ def apply_diarization(transcript: str, segments: list[Segment]) -> str:
     labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     speaker_map = {sp: f"說話者 {labels[i]}" for i, sp in enumerate(speaker_ids)}
 
+    # ── 精確模式：使用 Whisper segment 時間點對應說話者 ──────────────
+    if whisper_segments:
+        result: list[str] = []
+        last_label: str | None = None
+        for ws in whisper_segments:
+            text = ws.get("text", "").strip()
+            if not text:
+                continue
+            mid = (ws.get("start", 0) + ws.get("end", 0)) / 2
+            speaker = _speaker_at(segments, mid)
+            label = speaker_map.get(speaker, "")
+            if label and label != last_label:
+                if result:
+                    result.append("")
+                result.append(f"**{label}**")
+                last_label = label
+            result.append(text)
+        return "\n".join(result)
+
+    # ── Fallback：依 [MM:SS] 時間戳記插入說話者標籤 ─────────────────
+    import re
     lines = transcript.strip().split("\n")
-    result: list[str] = []
+    fallback: list[str] = []
     last_speaker: str | None = None
 
     for line in lines:
         if not line.strip():
-            result.append(line)
+            fallback.append(line)
             continue
 
-        import re
         ts_match = re.match(r"^\[(\d+):(\d+)\]", line)
         if ts_match:
             m, s = int(ts_match.group(1)), int(ts_match.group(2))
@@ -123,17 +148,17 @@ def apply_diarization(transcript: str, segments: list[Segment]) -> str:
             speaker = _speaker_at(segments, t)
             label = speaker_map.get(speaker, "")
             if label and label != last_speaker:
-                result.append(f"\n**{label}**")
+                fallback.append(f"\n**{label}**")
                 last_speaker = label
         elif last_speaker is None and segments:
             label = speaker_map.get(segments[0].speaker, "")
             if label:
-                result.append(f"**{label}**")
+                fallback.append(f"**{label}**")
                 last_speaker = label
 
-        result.append(line)
+        fallback.append(line)
 
-    return "\n".join(result)
+    return "\n".join(fallback)
 
 
 def _speaker_at(segments: list[Segment], t: float) -> str:

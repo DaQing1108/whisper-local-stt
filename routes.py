@@ -248,7 +248,8 @@ def transcribe():
 
             _sse.broadcast("done", {"ok": True, "text": text, "language": lang,
                                     "obsidian_file": obsidian_file,
-                                    "audio_path": info.get("wav_path", "")})
+                                    "audio_path": info.get("wav_path", ""),
+                                    "whisper_segments": info.get("segments", [])})
         finally:
             _sse._transcribe_sem.release()
 
@@ -553,9 +554,10 @@ def diarize():
         return jsonify(error="說話者分離未啟用：請在偏好設定填入 HuggingFace Token"), 400
 
     data = request.json or {}
-    audio_path = data.get("audio_path", "").strip()
-    num_speakers = data.get("num_speakers")
-    transcript = data.get("transcript", "")
+    audio_path       = data.get("audio_path", "").strip()
+    num_speakers     = data.get("num_speakers")
+    transcript       = data.get("transcript", "")
+    whisper_segments = data.get("whisper_segments", [])
 
     if not audio_path:
         return jsonify(error="音檔路徑不存在"), 400
@@ -577,7 +579,7 @@ def diarize():
     try:
         segments = diarize_audio(audio_path, num_speakers=num_speakers or None)
         result = [{"start": s.start, "end": s.end, "speaker": s.speaker} for s in segments]
-        labeled = apply_diarization(transcript, segments) if transcript else ""
+        labeled = apply_diarization(transcript, segments, whisper_segments=whisper_segments) if transcript else ""
         return jsonify(ok=True, segments=result, labeled_transcript=labeled)
     except RuntimeError as e:
         return jsonify(error=str(e)), 400

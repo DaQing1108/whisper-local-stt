@@ -90,6 +90,22 @@ class TestApplyDiarization(unittest.TestCase):
         self.assertIn("說話者 B", result)
         self.assertNotIn("說話者 C", result)
 
+    def test_whisper_segments_mode_two_speakers(self):
+        """whisper_segments 精確模式：依時間中點對應說話者，正確插入兩個標籤。"""
+        from diarize import apply_diarization, Segment
+        segs = [Segment(0.0, 3.0, "SPEAKER_00"), Segment(3.5, 6.0, "SPEAKER_01")]
+        w_segs = [
+            {"text": "第一句話", "start": 0.0, "end": 2.5},
+            {"text": "第二句話", "start": 4.0, "end": 5.5},
+        ]
+        result = apply_diarization("", segs, whisper_segments=w_segs)
+        self.assertIn("說話者 A", result)
+        self.assertIn("說話者 B", result)
+        self.assertIn("第一句話", result)
+        self.assertIn("第二句話", result)
+        # A 應在 B 之前
+        self.assertLess(result.index("說話者 A"), result.index("說話者 B"))
+
     def test_empty_transcript_returns_empty(self):
         """空逐字稿 + segments → labeled 仍為空字串。"""
         from diarize import apply_diarization

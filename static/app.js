@@ -423,7 +423,7 @@ function _initSSE() {
         const dr = await fetch('/api/diarize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ audio_path: d.audio_path, transcript: lastText }),
+          body: JSON.stringify({ audio_path: d.audio_path, transcript: lastText, whisper_segments: d.whisper_segments || [] }),
         })
         const dd = await dr.json()
         if (!dr.ok) {
