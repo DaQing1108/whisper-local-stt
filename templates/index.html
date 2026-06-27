@@ -68,88 +68,99 @@
   </div>
 
   <!-- ── 快速設定列 ── -->
-  <div class="quick-bar">
-    <div class="quick-group">
-      <span class="quick-label">模型</span>
-      <div class="pill-group" id="model-pill-group">
-        <button class="pill" data-val="tiny" onclick="setPill(this,'model-pill-group')">tiny</button>
-        <button class="pill" data-val="base" onclick="setPill(this,'model-pill-group')">base</button>
-        <button class="pill" data-val="small" onclick="setPill(this,'model-pill-group')">small</button>
-        <button class="pill" data-val="medium" onclick="setPill(this,'model-pill-group')">medium</button>
-        <button class="pill active" data-val="large" onclick="setPill(this,'model-pill-group')">large-v3</button>
-      </div>
+  <div class="quick-bar" id="quick-bar">
+    <div class="qb-summary" onclick="toggleQuickSettings()">
+      <span class="qb-chip" id="qb-model">large-v3</span>
+      <span class="qb-chip" id="qb-lang">zh</span>
+      <span class="qb-chip" id="qb-mode">standard</span>
+      <span class="qb-chip" id="qb-domain">general</span>
+      <span class="qb-chevron" id="qb-chevron">▾</span>
     </div>
-    <div class="quick-divider"></div>
-    <div class="quick-group">
-      <span class="quick-label">語言</span>
-      <div class="pill-group" id="lang-pill-group">
-        <button class="pill" data-val="auto" onclick="setPill(this,'lang-pill-group')">自動</button>
-        <button class="pill active" data-val="zh" onclick="setPill(this,'lang-pill-group')">中文</button>
-        <button class="pill" data-val="en" onclick="setPill(this,'lang-pill-group')">英文</button>
-        <button class="pill" data-val="ja" onclick="setPill(this,'lang-pill-group')">日文</button>
+    <div class="qb-expand" id="qb-expand">
+      <div class="quick-group">
+        <span class="quick-label">模型</span>
+        <div class="pill-group" id="model-pill-group">
+          <button class="pill" data-val="tiny" onclick="setPill(this,'model-pill-group')">tiny</button>
+          <button class="pill" data-val="base" onclick="setPill(this,'model-pill-group')">base</button>
+          <button class="pill" data-val="small" onclick="setPill(this,'model-pill-group')">small</button>
+          <button class="pill" data-val="medium" onclick="setPill(this,'model-pill-group')">medium</button>
+          <button class="pill active" data-val="large" onclick="setPill(this,'model-pill-group')">large-v3</button>
+        </div>
       </div>
-    </div>
-    <div class="quick-divider"></div>
-    <div class="quick-group">
-      <span class="quick-label">模式</span>
-      <div class="pill-group" id="mode-pill-group">
-        <button class="pill active" data-val="standard" onclick="setPill(this,'mode-pill-group');onModeChange()">標準</button>
-        <button class="pill" data-val="live" onclick="setPill(this,'mode-pill-group');onModeChange()">即時</button>
-        <button class="pill" data-val="system" onclick="setPill(this,'mode-pill-group');onModeChange()">🖥️ 系統音訊</button>
+      <div class="quick-group">
+        <span class="quick-label">語言</span>
+        <div class="pill-group" id="lang-pill-group">
+          <button class="pill" data-val="auto" onclick="setPill(this,'lang-pill-group')">自動</button>
+          <button class="pill active" data-val="zh" onclick="setPill(this,'lang-pill-group')">中文</button>
+          <button class="pill" data-val="en" onclick="setPill(this,'lang-pill-group')">英文</button>
+          <button class="pill" data-val="ja" onclick="setPill(this,'lang-pill-group')">日文</button>
+        </div>
       </div>
-    </div>
-    <div class="quick-divider"></div>
-    <div class="quick-group">
-      <span class="quick-label">領域</span>
-      <div class="pill-group" id="domain-pill-group">
-        <button class="pill active" data-val="general" onclick="setPill(this,'domain-pill-group')">通用</button>
-        <button class="pill" data-val="media" onclick="setPill(this,'domain-pill-group')">媒體</button>
-        <button class="pill" data-val="tech" onclick="setPill(this,'domain-pill-group')">科技</button>
-        <button class="pill" data-val="medical" onclick="setPill(this,'domain-pill-group')">醫療</button>
-        <button class="pill" data-val="legal" onclick="setPill(this,'domain-pill-group')">法律</button>
+      <div class="quick-group">
+        <span class="quick-label">模式</span>
+        <div class="pill-group" id="mode-pill-group">
+          <button class="pill active" data-val="standard" onclick="setPill(this,'mode-pill-group');onModeChange()">標準</button>
+          <button class="pill" data-val="live" onclick="setPill(this,'mode-pill-group');onModeChange()">即時</button>
+          <button class="pill" data-val="system" onclick="setPill(this,'mode-pill-group');onModeChange()">系統音訊</button>
+        </div>
+      </div>
+      <div class="quick-group">
+        <span class="quick-label">領域</span>
+        <div class="pill-group" id="domain-pill-group">
+          <button class="pill active" data-val="general" onclick="setPill(this,'domain-pill-group')">通用</button>
+          <button class="pill" data-val="media" onclick="setPill(this,'domain-pill-group')">媒體</button>
+          <button class="pill" data-val="tech" onclick="setPill(this,'domain-pill-group')">科技</button>
+          <button class="pill" data-val="medical" onclick="setPill(this,'domain-pill-group')">醫療</button>
+          <button class="pill" data-val="legal" onclick="setPill(this,'domain-pill-group')">法律</button>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- ── 專有名詞庫（折疊） ── -->
+  <!-- ── 專有名詞庫 ── -->
   <div class="vocab-bar">
-    <div class="tag-input-box" onclick="document.getElementById('tag-input-field').focus()">
+    <span class="vocab-hash">#</span>
+    <div class="vocab-input-row" onclick="document.getElementById('tag-input-field').focus()">
       <div id="active-tags-container" style="display:contents"></div>
-      <input id="tag-input-field" type="text" placeholder="輸入專有名詞，按 Enter 新增…">
+      <input id="tag-input-field" type="text" placeholder="add_term...">
     </div>
     <input type="hidden" id="extra-terms">
-    <div class="saved-dict">
-      <div class="saved-dict-header" onclick="toggleSavedDict()">
-        <span id="saved-dict-title">📌 常用詞庫 <span style="font-size:10px;margin-left:4px">▶</span></span>
-        <button class="btn" style="padding:2px 6px;font-size:10px;background:transparent;border-color:transparent" onclick="clearVocabLibrary(event)" title="還原預設詞庫">↺ 重設</button>
-      </div>
-      <div id="vocab-tags-container" class="dict-chips-container" style="display:none;"></div>
-    </div>
+    <span id="saved-dict-title" style="display:none"></span>
+    <div id="vocab-tags-container" style="display:none;"></div>
   </div>
 
   <!-- ── 轉錄結果 ── -->
   <div class="transcript-card">
-    <div class="transcript-header">
-      <span class="section-title">📝 轉錄結果</span>
-      <span style="font-size:11px;color:var(--muted)">(點擊可直接修改)</span>
-      <button class="btn" id="history-btn" onclick="toggleHistory()" style="margin-left:auto;padding:5px 12px;font-size:12px;">🕓 歷史</button>
+    <div class="transcript-tabs">
+      <button class="tab-btn active" onclick="switchTab('transcript',this)">transcript</button>
+      <button class="tab-btn" onclick="switchTab('summary',this)">summary</button>
+      <button class="tab-btn" onclick="switchTab('timeline',this)">timeline</button>
+      <button class="tab-icon-btn" id="history-btn" onclick="toggleHistory()" title="歷史記錄">⏱</button>
     </div>
-    <div id="transcript-box" contenteditable="true" spellcheck="false" style="outline:none;"></div>
+    <div id="panel-transcript" class="tab-panel active">
+      <div id="transcript-box" contenteditable="true" spellcheck="false" style="outline:none;"></div>
+    </div>
+    <div id="panel-summary" class="tab-panel">
+      <div style="min-height:200px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;font-family:var(--mono)">— no summary yet —</div>
+    </div>
+    <div id="panel-timeline" class="tab-panel">
+      <div style="min-height:200px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;font-family:var(--mono)">— no timeline yet —</div>
+    </div>
     <audio id="local-audio-player" controls style="display:none;width:100%;margin-top:10px;height:32px;border-radius:8px;opacity:0.8;"></audio>
     <input type="file" id="file-input" accept="audio/*,video/*" multiple style="display:none">
-    <div class="actions" style="margin-top:14px">
-      <button class="btn primary" id="upload-btn" onclick="uploadToNotion()" disabled>📤 Notion</button>
-      <button class="btn" onclick="copyTranscript()">📋 複製</button>
+    <div class="actions">
+      <button class="act-btn" onclick="copyTranscript()">copy</button>
       <div class="export-wrap" style="position:relative;display:inline-block;">
-        <button class="btn" id="export-btn" onclick="toggleExportMenu()" disabled>⬇️ 匯出</button>
+        <button class="act-btn" id="export-btn" onclick="toggleExportMenu()" disabled>export</button>
         <div id="export-menu" style="display:none;position:absolute;bottom:110%;left:0;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:6px;min-width:140px;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,.3);">
-          <div class="export-item" onclick="exportAs('txt')">📄 純文字 .txt</div>
-          <div class="export-item" onclick="exportAs('srt')">🎬 字幕 .srt</div>
-          <div class="export-item" onclick="exportAs('md')">📝 Markdown .md</div>
+          <div class="export-item" onclick="exportAs('txt')">📄 .txt</div>
+          <div class="export-item" onclick="exportAs('srt')">🎬 .srt</div>
+          <div class="export-item" onclick="exportAs('md')">📝 .md</div>
         </div>
       </div>
-      <button class="btn" id="obsidian-btn" onclick="saveToObsidian()" disabled>🟣 Obsidian</button>
-      <button class="btn" onclick="clearTranscript()">🗑 清除</button>
+      <button class="act-btn" id="obsidian-btn" onclick="saveToObsidian()" disabled>Obsidian</button>
+      <button class="act-btn primary" id="upload-btn" onclick="uploadToNotion()" disabled>Notion</button>
+      <button class="act-btn act-clear" onclick="clearTranscript()" title="清除轉錄">✕</button>
     </div>
   </div>
 

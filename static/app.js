@@ -24,6 +24,34 @@ function getPillValue(groupId) {
 function setPill(el, groupId) {
   document.querySelectorAll('#' + groupId + ' .pill').forEach(p => p.classList.remove('active'))
   el.classList.add('active')
+  updateQBSummary()
+}
+
+// ── Quick bar collapse/expand ─────────────────────────────────
+function updateQBSummary() {
+  const modelVal = getPillValue('model-pill-group')
+  const el = {
+    model:  document.getElementById('qb-model'),
+    lang:   document.getElementById('qb-lang'),
+    mode:   document.getElementById('qb-mode'),
+    domain: document.getElementById('qb-domain'),
+  }
+  if (el.model)  el.model.textContent  = modelVal === 'large' ? 'large-v3' : modelVal
+  if (el.lang)   el.lang.textContent   = getPillValue('lang-pill-group')
+  if (el.mode)   el.mode.textContent   = getPillValue('mode-pill-group')
+  if (el.domain) el.domain.textContent = getPillValue('domain-pill-group')
+}
+function toggleQuickSettings() {
+  document.getElementById('quick-bar')?.classList.toggle('expanded')
+}
+
+// ── Transcript tabs ───────────────────────────────────────────
+function switchTab(tabName, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'))
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'))
+  if (btn) btn.classList.add('active')
+  const panel = document.getElementById('panel-' + tabName)
+  if (panel) panel.classList.add('active')
 }
 
 // ── 錯誤碼對照表（P0-5）──────────────────────────────────────
@@ -1523,6 +1551,7 @@ function openPreferences() {
 
 document.addEventListener('DOMContentLoaded', () => {
   initTheme()
+  updateQBSummary()
   _initModelCheck()
   _checkConfigHealth()
   // 切換模型時重新檢查
