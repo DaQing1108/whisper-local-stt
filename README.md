@@ -1,13 +1,18 @@
 # 🎙️ Whisper 本地語音轉文字系統 v2.1.0
 
 ## Current State
-Last checkpoint: 2026-06-27 晚
-Phase: v2.1.0 — 批次轉錄、鍵盤快捷鍵、自訂 LLM 模板
-Working: 105/105 tests 通過，8/8 AC 驗收通過，版號升至 v2.1.0，已 push
-Next action: ./package.sh 打包 → 手動 UI 驗證 v2.1 三功能
+Last checkpoint: 2026-06-27
+Phase: v2.2.1 — UX 深度測試後四項優化（tabs 說明、詞庫入口、chips 中文化、系統音訊引導）
+Working: 110/110 tests 通過，Space 鍵 bug 修復，v2.2.1 已打包安裝至 /Applications
+Next action: 實機驗證四項 UX 改善（開啟 app 逐一確認）
 Blockers: none
 
 ## Checkpoint History
+### 2026-06-27｜v2.2.1 UX 深度測試後四項優化
+- Completed: Space 鍵 bug 修復（toggleRecord）、dead code 清除、summary/timeline tab placeholder 引導說明、詞庫 📌 入口按鈕、QB chips 中文化、系統音訊首次引導 toast、升版 v2.2.1 重新打包
+- State: 110/110 tests，commit 8b6e39f，/Applications/Whisper STT.app v2.2.1
+- Next: 實機驗證四項 UX 改善
+
 ### 2026-06-27｜v2.1.0 三功能實作
 - Completed: 批次轉錄（batchTranscribe + 失敗計數）、鍵盤快捷鍵（Space/Cmd+U/Cmd+S + isInput guard）、自訂 LLM 模板（LLM_CUSTOM_PROMPT env var + 偏好設定 textarea），修復 2 個 HIGH issues
 - State: 105/105 tests，版號 v2.1.0（version.py + Info.plist + gui.spec），commit b417ef7
