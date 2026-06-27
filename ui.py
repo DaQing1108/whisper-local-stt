@@ -1,7 +1,12 @@
 """ui.py — 組裝前端 HTML（templates/index.html + static/app.css + static/app.js）。"""
+import sys
 from pathlib import Path
 
-_BASE = Path(__file__).parent
+if getattr(sys, 'frozen', False):
+    # PyInstaller macOS app bundle: binary in Contents/MacOS/, data in Contents/Resources/
+    _BASE = Path(sys.executable).parent.parent / 'Resources'
+else:
+    _BASE = Path(__file__).resolve().parent
 
 
 def _read(path: str) -> str:
