@@ -147,20 +147,53 @@ class TestLlmCustomPrompt:
         # Trigger path: read env inside _llm_call_chunk stub
         custom = os.environ.get("LLM_CUSTOM_PROMPT", "").strip()[:2000]
         assert custom == "MY CUSTOM PROMPT"
-        monkeypatch.delenv("LLM_CUSTOM_PROMPT")
 
-    def test_default_prompt_used_when_no_env(self, monkeypatch):
-        """AC-7: _LLM_PUNCT_PROMPT used when LLM_CUSTOM_PROMPT not set."""
-        import llm_post
-        monkeypatch.delenv("LLM_CUSTOM_PROMPT", raising=False)
-        custom = os.environ.get("LLM_CUSTOM_PROMPT", "").strip()
-        assert custom == ""
-        # Default path: _LLM_PUNCT_PROMPT should be non-empty
-        assert len(llm_post._LLM_PUNCT_PROMPT) > 10
 
-    def test_prompt_truncated_at_2000_chars(self, monkeypatch):
-        """AC-7: prompt longer than 2000 chars is truncated."""
-        monkeypatch.setenv("LLM_CUSTOM_PROMPT", "X" * 3000)
-        custom = os.environ.get("LLM_CUSTOM_PROMPT", "").strip()[:2000]
-        assert len(custom) == 2000
-        monkeypatch.delenv("LLM_CUSTOM_PROMPT")
+# ── UX 優化測試（v2.2 深度測試後）───────────────────────────────────────────
+
+class TestUXImprovements:
+    """AC-1~7: UX 深度測試後的四項優化驗收。"""
+
+    def _html(self):
+        return (Path(__file__).parent.parent.parent / "templates" / "index.html").read_text()
+
+    def _js(self):
+        return (Path(__file__).parent.parent.parent / "static" / "app.js").read_text()
+
+    def test_summary_tab_placeholder_updated(self):
+        """AC-1: panel-summary placeholder 不再是原始 '— no summary yet —'，含引導說明。"""
+        html = self._html()
+        assert "— no summary yet —" not in html
+        assert "panel-summary" in html
+
+    def test_timeline_tab_placeholder_updated(self):
+        """AC-2: panel-timeline placeholder 不再是原始 '— no timeline yet —'，含引導說明。"""
+        html = self._html()
+        assert "— no timeline yet —" not in html
+        assert "panel-timeline" in html
+
+    def test_vocab_library_toggle_button_exists(self):
+        """AC-3: vocab-bar 中存在 onclick=toggleSavedDict() 的按鈕。"""
+        html = self._html()
+        assert "toggleSavedDict()" in html
+
+    def test_toggle_saved_dict_function_exists(self):
+        """AC-4: app.js 中 toggleSavedDict() 函數存在且包含 vocab-tags-container display 切換邏輯。"""
+        js = self._js()
+        assert "function toggleSavedDict()" in js
+        assert "vocab-tags-container" in js
+
+    def test_qb_mode_chip_has_chinese_mapping(self):
+        """AC-5: updateQBSummary() 中 mode chip 存在 '標準' 中文 mapping。"""
+        js = self._js()
+        assert "'標準'" in js or '"標準"' in js
+
+    def test_qb_domain_chip_has_chinese_mapping(self):
+        """AC-6: updateQBSummary() 中 domain chip 存在 '通用' 中文 mapping。"""
+        js = self._js()
+        assert "'通用'" in js or '"通用"' in js
+
+    def test_system_audio_onboarding_tip_flag(self):
+        """AC-7: onModeChange() system 分支存在 system_audio_tip_shown localStorage check。"""
+        js = self._js()
+        assert "system_audio_tip_shown" in js

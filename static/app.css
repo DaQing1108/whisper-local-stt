@@ -637,6 +637,18 @@
     font-weight: 600;
     flex-shrink: 0;
   }
+  .vocab-toggle-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    opacity: 0.5;
+    padding: 2px 4px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    transition: opacity 0.2s;
+  }
+  .vocab-toggle-btn:hover { opacity: 1; background: var(--surface2); }
   .vocab-input-row {
     flex: 1;
     display: flex;

@@ -36,10 +36,14 @@ function updateQBSummary() {
     mode:   document.getElementById('qb-mode'),
     domain: document.getElementById('qb-domain'),
   }
+  const modeMap   = { standard: '標準', live: '即時', system: '系統音訊' }
+  const domainMap = { general: '通用', media: '媒體', tech: '技術', medical: '醫療', legal: '法律' }
+  const modeVal   = getPillValue('mode-pill-group')
+  const domainVal = getPillValue('domain-pill-group')
   if (el.model)  el.model.textContent  = modelVal === 'large' ? 'large-v3' : modelVal
   if (el.lang)   el.lang.textContent   = getPillValue('lang-pill-group')
-  if (el.mode)   el.mode.textContent   = getPillValue('mode-pill-group')
-  if (el.domain) el.domain.textContent = getPillValue('domain-pill-group')
+  if (el.mode)   el.mode.textContent   = modeMap[modeVal]   ?? modeVal
+  if (el.domain) el.domain.textContent = domainMap[domainVal] ?? domainVal
 }
 function toggleQuickSettings() {
   document.getElementById('quick-bar')?.classList.toggle('expanded')
@@ -546,6 +550,31 @@ function removeVocabFromLibrary(e, term) {
 }
 
 
+function toggleSavedDict() {
+  const container = document.getElementById('vocab-tags-container')
+  const title = document.getElementById('saved-dict-title')
+  if (!container || !title) return
+  const btn = document.getElementById('vocab-library-btn')
+  const isOpen = container.style.display !== 'none'
+  if (isOpen) {
+    container.style.display = 'none'
+    title.style.display = 'none'
+    if (btn) btn.style.opacity = '0.5'
+  } else {
+    const lib = getVocabLibrary()
+    if (lib.length === 0) {
+      title.textContent = '詞庫目前沒有儲存詞彙'
+      title.style.display = 'block'
+      container.style.display = 'none'
+    } else {
+      title.style.display = 'none'
+      container.style.display = 'block'
+      renderVocabTags()
+    }
+    if (btn) btn.style.opacity = '1'
+  }
+}
+
 // Handle Enter key in tag input
 document.getElementById('tag-input-field').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
@@ -617,6 +646,10 @@ function onModeChange() {
     hint.style.display = 'block'
     icon.textContent = '🖥️'
     lbl.textContent  = 'SYS'
+    if (!localStorage.getItem('system_audio_tip_shown')) {
+      localStorage.setItem('system_audio_tip_shown', '1')
+      showToast('💡 系統音訊需授權螢幕錄製：系統設定 → 隱私權 → 螢幕錄製 → 開啟 Whisper STT', 6000)
+    }
   } else {
     hint.style.display = 'none'
     icon.textContent = '🎤'

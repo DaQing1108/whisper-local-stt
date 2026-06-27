@@ -125,6 +125,7 @@
       <input id="tag-input-field" type="text" placeholder="add_term...">
     </div>
     <input type="hidden" id="extra-terms">
+    <button id="vocab-library-btn" class="vocab-toggle-btn" onclick="toggleSavedDict()" title="已儲存詞庫">📌</button>
     <span id="saved-dict-title" style="display:none"></span>
     <div id="vocab-tags-container" style="display:none;"></div>
   </div>
@@ -141,10 +142,18 @@
       <div id="transcript-box" contenteditable="true" spellcheck="false" style="outline:none;"></div>
     </div>
     <div id="panel-summary" class="tab-panel">
-      <div style="min-height:200px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;font-family:var(--mono)">— no summary yet —</div>
+      <div style="min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted);font-size:13px;font-family:var(--mono);text-align:center;padding:20px">
+        <span style="font-size:24px;opacity:0.4">✦</span>
+        <span>轉錄完成後，點擊 <strong style="color:var(--text)">AI 摘要</strong> 按鈕生成摘要</span>
+        <span style="font-size:11px;opacity:0.6">— 功能開發中，敬請期待 —</span>
+      </div>
     </div>
     <div id="panel-timeline" class="tab-panel">
-      <div style="min-height:200px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;font-family:var(--mono)">— no timeline yet —</div>
+      <div style="min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted);font-size:13px;font-family:var(--mono);text-align:center;padding:20px">
+        <span style="font-size:24px;opacity:0.4">⏱</span>
+        <span>含時間碼的逐段記錄，上傳含時間軸的音訊後自動產生</span>
+        <span style="font-size:11px;opacity:0.6">— 功能開發中，敬請期待 —</span>
+      </div>
     </div>
     <audio id="local-audio-player" controls style="display:none;width:100%;margin-top:10px;height:32px;border-radius:8px;opacity:0.8;"></audio>
     <input type="file" id="file-input" accept="audio/*,video/*" multiple style="display:none">
