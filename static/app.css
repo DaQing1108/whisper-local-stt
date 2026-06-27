@@ -136,8 +136,8 @@
     width: 100%;
     height: 200px;
     border-radius: var(--radius);
-    border: 2px solid rgba(124,106,255,0.4);
-    background: linear-gradient(135deg, rgba(124,106,255,.15), rgba(167,139,250,.05));
+    border: 2px solid rgba(29,158,117,0.35);
+    background: linear-gradient(135deg, rgba(29,158,117,.10), rgba(39,201,142,.04));
     color: var(--accent2);
     font-size: 20px; font-weight: 600;
     cursor: pointer;
@@ -145,12 +145,12 @@
     align-items: center; justify-content: center; gap: 12px;
     transition: all .25s cubic-bezier(0.4,0,0.2,1);
     position: relative; overflow: hidden;
-    box-shadow: 0 4px 20px rgba(124,106,255,0.1);
+    box-shadow: 0 4px 20px rgba(29,158,117,0.08);
   }
   #record-btn:hover {
-    background: linear-gradient(135deg, rgba(124,106,255,.25), rgba(167,139,250,.1));
+    background: linear-gradient(135deg, rgba(29,158,117,.18), rgba(39,201,142,.08));
     transform: translateY(-2px);
-    box-shadow: 0 8px 30px rgba(124,106,255,0.2);
+    box-shadow: 0 8px 30px rgba(29,158,117,0.18);
   }
   #record-btn.recording {
     border-color: var(--red);
@@ -259,8 +259,8 @@
   }
   .pill:hover { border-color: var(--accent); color: var(--accent2); }
   .pill.active {
-    background: rgba(124,106,255,0.2);
-    border-color: rgba(124,106,255,0.5);
+    background: rgba(29,158,117,0.15);
+    border-color: rgba(39,201,142,0.5);
     color: var(--accent2);
   }
 
@@ -288,12 +288,12 @@
   }
   .tag-chip {
     display: inline-flex; align-items: center; gap: 4px;
-    background: rgba(124,106,255,0.15); color: var(--accent2);
-    border: 1px solid rgba(124,106,255,0.3); border-radius: 6px;
+    background: rgba(29,158,117,0.12); color: var(--accent2);
+    border: 1px solid rgba(39,201,142,0.3); border-radius: 6px;
     padding: 2px 8px; font-size: 12px; font-weight: 500;
     transition: all 0.2s; user-select: none;
   }
-  .tag-chip:hover { background: rgba(124,106,255,0.25); }
+  .tag-chip:hover { background: rgba(29,158,117,0.22); }
   .tag-chip .rm-btn {
     cursor: pointer; opacity: 0.6; font-size: 14px; line-height: 1;
     display: inline-block; padding-left: 2px;
@@ -449,7 +449,7 @@
     width: 480px; max-width: 90%;
     background: rgba(22,24,32,0.85);
     border: 1px solid rgba(255,255,255,0.08);
-    box-shadow: 0 30px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(124,106,255,0.1), inset 0 1px 0 rgba(255,255,255,0.05);
+    box-shadow: 0 30px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(29,158,117,0.1), inset 0 1px 0 rgba(255,255,255,0.05);
     transform: translateY(20px) scale(0.96);
     transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
     border-radius: 20px; padding: 24px;
