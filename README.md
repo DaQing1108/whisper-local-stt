@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.2.1
 
 ## Current State
-Last checkpoint: 2026-06-27
-Phase: 說話者分離 Beta 主流程接入完成（v2.2.1+）
-Working: 124/124 tests 通過；Quick-bar diarize toggle → /transcribe keep_wav → /api/diarize → labeled 逐字稿；path traversal 安全防護已修復
-Next action: 測試說話者分離功能（取得 HF Token → 偏好設定填入 → 上傳音檔）
+Last checkpoint: 2026-06-27 22:00
+Phase: 說話者分離 Beta 實機驗證通過，subprocess 架構確立
+Working: 說話者分離完整可用（上傳音檔 → 標記說話者 A/B）；pyannote 改用 /usr/bin/python3 subprocess 繞開 PyInstaller bundle 依賴衝突；兩條工程教訓寫入 CLAUDE.md 與全域記憶
+Next action: checkpoint 後可繼續下一功能
 Blockers: none
 
 ## Checkpoint History
+### 2026-06-27 22:00｜說話者分離 Beta 實機驗證通過
+- Completed: pyannote subprocess 架構（繞開 PyInstaller bundle 依賴衝突）、huggingface_hub 降版 0.23.4、speechbrain/lightning_fabric/torch 三個 patch 整合、實機測試莊敬高職音檔識別出 2 位說話者、工程教訓寫入 CLAUDE.md 與全域記憶
+- State: 說話者分離 Beta 完整可用，上傳音檔後逐字稿出現說話者 A/B 標記
+- Next: checkpoint 後繼續下一功能
+
 ### 2026-06-27｜說話者分離 Beta 主流程接入
 - Completed: Quick-bar diarize toggle、/transcribe keep_wav、/api/diarize path traversal 防護（tmpdir 限制）、SSE done handler → labeled 逐字稿顯示、9 個 unit test
 - State: 124/124 tests，commit ae08c83，說話者分離 Beta 完整可用（需 HF Token）

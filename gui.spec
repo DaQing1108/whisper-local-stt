@@ -23,6 +23,8 @@ a = Analysis(
         # 前端資源（ui.py 組裝器在執行期讀取）
         ('templates',      'templates'),
         ('static',         'static'),
+        # pyannote / lightning_fabric data 檔案（說話者分離 Beta）
+        ('/Users/daqingliao/Library/Python/3.9/lib/python/site-packages/lightning_fabric/version.info', 'lightning_fabric'),
     ] + sparkle_datas,
     hiddenimports=[
         'webview',
@@ -37,6 +39,11 @@ a = Analysis(
         'sounddevice',
         'numpy',
         'objc',
+        'pyannote',
+        'pyannote.audio',
+        'pyannote.core',
+        'pytorch_lightning',
+        'lightning_fabric',
         'Foundation',
         'PyObjCTools.AppHelper',
     ],

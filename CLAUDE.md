@@ -11,6 +11,13 @@
 - **原因**：ad-hoc 每次 rebuild hash 都變，macOS TCC 視為新 app，螢幕錄製授權每次失效
 - **正確做法**：`package.sh` 步驟 3 必須用 `--sign "WhisperSTT Local"`，不能 `-s -`
 
+### 4. PyInstaller bundle 不能直接 import 重量級 ML 依賴
+
+- **症狀**：`FileNotFoundError`、`ImportError`、`weights_only` 錯誤等，在打包後才出現
+- **根因**：pyannote / torch / speechbrain 等套件有複雜的 data files、C extensions、版本耦合，PyInstaller 無法正確打包
+- **正確做法**：用 `/usr/bin/python3` subprocess 執行，完全繞開 bundle，結果以 JSON stdout 傳回。參考 `diarize.py` 的 `_DIARIZE_WORKER_SCRIPT` 模式
+- **Spike 原則**：引入任何新重量級依賴前，先做最小打包 spike（`pyinstaller --onedir test_import.py`）確認可打包，跑不通就改用 subprocess 模式，不要先實作再除錯
+
 ### 3. system_audio_capture binary 必須用穩定 identifier 簽名
 - **identifier**：`com.via.whisper-ai.audio-helper`
 - **cert**：`WhisperSTT Local`（本機 keychain，SHA1: 0D63DB9D7C4A427A0211FE9B237B90E338D7A941）
@@ -42,6 +49,17 @@ log 有 ERROR -3801？
 routes.py system_audio_start 是否呼叫了 _sc.start_sc_capture()？
 └── YES → 立刻改回 _sa.start_capture(_on_chunk, on_error=_on_tcc_error)
           這是已知 crash 路徑，pyobjc SCKit 不能在 app 主進程跑
+```
+
+### ⚠️ 打包後新功能失敗
+
+```
+→ 「source 測試通過」≠「bundle 能跑」，兩者是不同 Python 環境
+→ 每次打包後必須在 bundle 環境跑 smoke test 再告知使用者可以測試
+→ Smoke test 方式：
+     python3 -c "import sys; sys.path.insert(0, '/Applications/Whisper STT.app/Contents/Resources'); <import 新模組>"
+   或直接用 flask test client 呼叫新 endpoint
+→ 新功能如果引入新依賴，smoke test 必須覆蓋「bundle 裡的那條路徑」
 ```
 
 ### 🔄 修了 code 但行為沒變

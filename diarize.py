@@ -11,8 +11,11 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
+import subprocess
+import sys
 from typing import NamedTuple
 
 log = logging.getLogger(__name__)
@@ -25,12 +28,13 @@ class Segment(NamedTuple):
 
 
 def is_available() -> bool:
-    """回傳 True 若 pyannote.audio 與 HF_TOKEN 均可用。"""
-    try:
-        import pyannote.audio  # noqa: F401
-        return bool(os.environ.get("HF_TOKEN", "").strip())
-    except ImportError:
+    """回傳 True 若系統 Python 有 pyannote.audio 且 HF_TOKEN 已設定。"""
+    if not bool(os.environ.get("HF_TOKEN", "").strip()):
         return False
+    # 檢查 pyannote 套件目錄是否存在（不 import，避免 timeout）
+    import site
+    sp = "/Users/daqingliao/Library/Python/3.9/lib/python/site-packages"
+    return os.path.isdir(os.path.join(sp, "pyannote", "audio"))
 
 
 def diarize_audio(audio_path: str, num_speakers: int | None = None) -> list[Segment]:
@@ -53,36 +57,59 @@ def diarize_audio(audio_path: str, num_speakers: int | None = None) -> list[Segm
             "請至偏好設定填入 HF Token，或設定 HF_TOKEN 環境變數。"
         )
 
-    try:
-        from pyannote.audio import Pipeline
-    except ImportError as e:
-        raise RuntimeError(f"pyannote.audio 未安裝：{e}") from e
+    # 用系統 Python 執行 pyannote，避免 PyInstaller bundle 的依賴衝突
+    python_exec = "/usr/bin/python3"
+    script = _DIARIZE_WORKER_SCRIPT
 
-    log.info("[Diarize] 載入 pyannote speaker-diarization-3.1 pipeline…")
-    pipeline = Pipeline.from_pretrained(
-        "pyannote/speaker-diarization-3.1",
-        use_auth_token=hf_token,
+    log.warning("[Diarize] 呼叫系統 Python 執行說話者分離：%s", audio_path)
+    result = subprocess.run(
+        [python_exec, "-c", script, audio_path, hf_token,
+         str(num_speakers) if num_speakers else ""],
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
 
-    params: dict = {}
-    if num_speakers is not None:
-        params["num_speakers"] = num_speakers
+    if result.returncode != 0:
+        log.warning("[Diarize] subprocess stderr: %s", result.stderr[-500:])
+        raise RuntimeError(f"說話者分離失敗：{result.stderr[-200:]}")
 
-    log.info("[Diarize] 開始分析：%s", audio_path)
-    diarization = pipeline(audio_path, **params)
-
-    segments: list[Segment] = []
-    for turn, _, speaker in diarization.itertracks(yield_label=True):
-        segments.append(Segment(
-            start=round(turn.start, 3),
-            end=round(turn.end, 3),
-            speaker=speaker,
-        ))
-
-    log.info("[Diarize] 完成，%d 個片段，%d 位說話者",
-             len(segments),
-             len({s.speaker for s in segments}))
+    raw = result.stdout.strip().split("\n")[-1]
+    data = json.loads(raw)
+    segments = [Segment(d["start"], d["end"], d["speaker"]) for d in data]
+    log.warning("[Diarize] 完成，%d 個片段，%d 位說話者",
+                len(segments), len({s.speaker for s in segments}))
     return segments
+
+
+_DIARIZE_WORKER_SCRIPT = """
+import sys, os, json
+audio_path, hf_token, num_spk_str = sys.argv[1], sys.argv[2], sys.argv[3]
+os.environ['HF_TOKEN'] = hf_token
+
+import speechbrain.utils.importutils as _sbi
+_orig_ensure = _sbi.LazyModule.ensure_module
+def _safe_ensure(self, stacklevel=0):
+    try: return _orig_ensure(self, stacklevel)
+    except ImportError: return None
+_sbi.LazyModule.ensure_module = _safe_ensure
+
+import torch
+import lightning_fabric.utilities.cloud_io as _lf_io
+def _patched(path, map_location=None, **kw):
+    return torch.load(path, map_location=map_location, weights_only=False)
+_lf_io._load = _patched
+
+from pyannote.audio import Pipeline
+pipeline = Pipeline.from_pretrained('pyannote/speaker-diarization-3.1')
+params = {}
+if num_spk_str:
+    params['num_speakers'] = int(num_spk_str)
+diarization = pipeline(audio_path, **params)
+segs = [{'start': round(t.start,3), 'end': round(t.end,3), 'speaker': s}
+        for t, _, s in diarization.itertracks(yield_label=True)]
+print(json.dumps(segs))
+"""
 
 
 def apply_diarization(

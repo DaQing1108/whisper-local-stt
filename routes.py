@@ -164,6 +164,7 @@ def transcribe():
     extra_terms     = request.form.get("extra_terms", "")
     save_obsidian   = request.form.get("obsidian", "false").lower() == "true"
     diarize_enabled = request.form.get("diarize", "false").lower() == "true"
+    logging.warning("[Transcribe] diarize_enabled=%s raw=%s", diarize_enabled, request.form.get("diarize"))
 
     ext = ".webm"
     if audio.filename:
@@ -584,7 +585,7 @@ def diarize():
     except RuntimeError as e:
         return jsonify(error=str(e)), 400
     except Exception as e:
-        log.exception("[Diarize] 失敗")
+        logging.exception("[Diarize] 失敗")
         return jsonify(error=f"分析失敗：{e}"), 500
     finally:
         Path(audio_path).unlink(missing_ok=True)
