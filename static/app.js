@@ -181,6 +181,8 @@ function _releaseWakeLock() {
   if (_wakeLock) { _wakeLock.release(); _wakeLock = null }
 }
 let obsidianEnabled = false
+let obsidianReady = false
+let _configHealth = { permissions: { screen_recording: 'unknown', microphone: 'unknown' } }
 
 // ── 分頁互斥鎖 ────────────────────────────────────────────────
 const TAB_ID = Math.random().toString(36).slice(2)
@@ -602,6 +604,7 @@ async function checkConfig() {
   try {
     const r = await fetch('/config').then(r => r.json())
     notionReady = r.ready
+    obsidianReady = !!r.obsidian_path
     const badge = document.getElementById('notion-badge')
     const badgeText = document.getElementById('notion-badge-text')
     if (r.ready) {
@@ -615,6 +618,7 @@ async function checkConfig() {
       badge.className = 'badge'
     }
     _updateLlmKeyStatus(r.has_anthropic_key, r.has_openai_key)
+    _syncActionButtons()
     syncUploadBtn()
   } catch(e) {}
 }
@@ -623,27 +627,37 @@ async function checkConfig() {
 function toggleNotion() {
   notionEnabled = !notionEnabled
   const btn = document.getElementById('notion-toggle')
-  const lbl = document.getElementById('notion-toggle-label')
   btn.className = 'toggle' + (notionEnabled ? ' on' : '')
-  lbl.textContent = notionEnabled ? '開啟' : '關閉'
 }
 
 function toggleObsidian() {
   obsidianEnabled = !obsidianEnabled
   const btn = document.getElementById('obsidian-toggle')
-  const lbl = document.getElementById('obsidian-toggle-label')
   btn.className = 'toggle' + (obsidianEnabled ? ' on' : '')
-  lbl.textContent = obsidianEnabled ? '開啟' : '關閉'
 }
 
 // ── Mode change ───────────────────────────────────────────────
 function onModeChange() {
   const mode = getPillValue('mode-pill-group')
   const hint = document.getElementById('system-audio-hint')
+  const copy = document.getElementById('system-audio-permission-copy')
+  const helper = document.getElementById('mode-helper')
   const icon = document.getElementById('btn-icon')
   const lbl  = document.getElementById('btn-label')
   if (mode === 'system') {
     hint.style.display = 'block'
+    hint.className = 'mode-hint system-audio-hint'
+    const screen = _configHealth?.permissions?.screen_recording || 'unknown'
+    if (screen === 'denied') {
+      hint.classList.add('error')
+      copy.textContent = '螢幕錄製權限尚未授予。請到「系統設定 → 隱私權與安全性 → 螢幕錄製」開啟 Whisper STT，然後重新啟動 App。'
+    } else if (screen === 'granted') {
+      copy.textContent = '螢幕錄製權限已就緒。若要同時收自己的聲音，請勾選混音模式。'
+    } else {
+      hint.classList.add('warn')
+      copy.textContent = '首次使用需在「系統設定 → 隱私權與安全性 → 螢幕錄製」授予 Whisper STT 權限。'
+    }
+    if (helper) helper.textContent = '系統音訊會錄 Teams / Zoom / YouTube 等電腦播放聲；首次使用需授權螢幕錄製。'
     icon.textContent = '🖥️'
     lbl.textContent  = 'SYS'
     if (!localStorage.getItem('system_audio_tip_shown')) {
@@ -652,6 +666,9 @@ function onModeChange() {
     }
   } else {
     hint.style.display = 'none'
+    if (helper) helper.textContent = mode === 'live'
+      ? '即時模式每 15 秒顯示一段，適合長會議中途確認內容。'
+      : '標準模式錄完後一次整理，適合正式會議與品質優先情境。'
     icon.textContent = '🎤'
     lbl.textContent  = 'REC'
   }
@@ -971,6 +988,10 @@ document.getElementById('file-input')?.addEventListener('change', (e) => {
 // ── Upload ────────────────────────────────────────────────────
 async function uploadToNotion() {
   if (!lastText) return
+  if (!notionReady) {
+    setStatus('⚠️ 請先到偏好設定完成 Notion Token 與 Page ID', 'warn')
+    return
+  }
   await doUpload(lastText, lastLang)
 }
 
@@ -1011,6 +1032,7 @@ function addTranscript(text, lang, time) {
 
 function copyTranscript() {
   const text = document.getElementById('transcript-box').innerText
+  if (!text.trim()) return
   navigator.clipboard.writeText(text)
   setStatus('📋 已複製到剪貼簿', 'ok')
 }
@@ -1078,9 +1100,36 @@ function exportAs(fmt) {
 }
 
 function _syncExportBtn() {
-  document.getElementById('export-btn').disabled = !lastText
+  _syncActionButtons()
+}
+
+function _setActionState(id, enabled, enabledTitle, disabledTitle) {
+  const btn = document.getElementById(id)
+  if (!btn) return
+  btn.disabled = !enabled
+  btn.title = enabled ? enabledTitle : disabledTitle
+}
+
+function _syncActionButtons() {
+  const hasText = !!lastText
+  _setActionState('copy-btn', hasText, '複製逐字稿到剪貼簿', '完成轉錄後可複製')
+  _setActionState('export-btn', hasText, '匯出 .txt / .md / .srt', '完成轉錄後可匯出')
   const ob = document.getElementById('obsidian-btn')
-  if (ob) ob.disabled = !lastText
+  if (ob) {
+    const enabled = hasText && obsidianReady
+    ob.disabled = !enabled
+    ob.title = hasText
+      ? (obsidianReady ? '存入偏好設定中的 Obsidian 路徑' : '請先到偏好設定填寫 Obsidian Vault 路徑')
+      : '完成轉錄後可存入 Obsidian'
+  }
+  const up = document.getElementById('upload-btn')
+  if (up) {
+    const enabled = hasText && notionReady
+    up.disabled = !enabled
+    up.title = hasText
+      ? (notionReady ? '上傳到偏好設定中的 Notion 頁面' : '請先到偏好設定完成 Notion Token 與 Page ID')
+      : '完成轉錄後可上傳 Notion'
+  }
 }
 
 async function saveToObsidian() {
@@ -1088,6 +1137,10 @@ async function saveToObsidian() {
   const entries = Array.from(document.getElementById('transcript-box').querySelectorAll('.transcript-text'))
   const text = entries.length ? entries.map(el => el.textContent).join('\n').trim() : lastText.trim()
   if (!text) return
+  if (!obsidianReady) {
+    setStatus('⚠️ 請先到偏好設定填寫 Obsidian Vault 路徑', 'warn')
+    return
+  }
 
   const btn = document.getElementById('obsidian-btn')
   btn.disabled = true
@@ -1112,8 +1165,8 @@ async function saveToObsidian() {
   } catch(e) {
     setStatus(`❌ 網路錯誤：${e.message}`, 'error')
   } finally {
-    btn.disabled = !lastText
     btn.textContent = '🟣 存入 Obsidian'
+    _syncActionButtons()
   }
 }
 
@@ -1192,7 +1245,7 @@ function clearTranscript() {
 }
 
 function syncUploadBtn() {
-  document.getElementById('upload-btn').disabled = !lastText
+  _syncActionButtons()
 }
 
 // ── Config ────────────────────────────────────────────────────
@@ -1518,6 +1571,7 @@ async function _checkConfigHealth() {
     const r = await fetch('/api/config/health')
     if (!r.ok) return
     const data = await r.json()
+    _configHealth = data
 
     // TCC 權限警示（優先顯示，不受 localStorage 限制）
     if (data.permissions) {
@@ -1547,6 +1601,7 @@ async function _checkConfigHealth() {
       }
     }
   } catch (_) {}
+  onModeChange()
 }
 
 function openPreferences() {
