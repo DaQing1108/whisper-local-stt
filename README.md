@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.2.1
 
 ## Current State
-Last checkpoint: 2026-06-28 14:30
-Phase: Obsidian Plugin 完整實作完成，開發全紀錄寫入 Notion Spec
-Working: Obsidian plugin 全流程可用（ribbon 點擊 → 自動喚起 Whisper app → 麥克風錄音 → 轉錄文字插入 cursor）；Flask 改獨立子程序防止 GUI crash 帶死 server；語言別名轉換修復「中文」無效問題；Notion spec 文件完整
-Next action: npm build + e2e 驗證 plugin，或繼續 Whisper 下一功能
+Last checkpoint: 2026-06-28 17:45
+Phase: 說話者分離 Bundle Smoke Test 確認 + CLAUDE.md discipline-loop 補充
+Working: 說話者分離 Beta 在 bundle 環境完整驗證通過（pyannote subprocess，2 位說話者識別，labeled_transcript 含說話者 A/B 標記）；CLAUDE.md 加入 discipline-loop Step 8 bundle smoke test 補充規則
+Next action: 決定 v2.3 下一功能
 Blockers: none
 
 ## Checkpoint History
+### 2026-06-28 17:45｜說話者分離 Bundle Smoke Test 確認 + discipline-loop 規則補充
+- Completed: bundle 環境 /api/diarize 驗證通過（ok:true，2 位說話者，labeled_transcript 有說話者標記）；CLAUDE.md 加入 discipline-loop Step 8 bundle smoke test 補充規則（Whisper 專案 Step 8 不能只跑 unit test）
+- State: 說話者分離 Beta 在 bundle 環境完整確認，engineering discipline loop 規則已更新
+- Next: 決定 v2.3 下一功能
+
 ### 2026-06-28 14:30｜Obsidian Plugin 完整實作 + Notion Spec
 - Completed: Flask 改獨立子程序（--server-mode）防止 GUI crash 帶死 server；語言別名轉換（中文→zh）修復轉錄失敗；_free_port() 加 ping 保護；Obsidian plugin 全流程驗證可用；CLAUDE.md 加入跨系統整合評估清單與測試紀律；engineering-discipline-loop v1.7.0（Step 1 跨系統評估五項）；Notion Obsidian Spec 文件完整
 - State: Obsidian plugin 全流程可用（已手動驗證）；Whisper app subprocess 架構穩定

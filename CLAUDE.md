@@ -113,6 +113,24 @@ Spike 驗證失敗 → 先討論替代方案，不強行繼續。
 
 「每個零件單獨測過」不等於「用戶路徑可以跑通」。必須有 end-to-end 路徑驗證才能說「修好了」。
 
+### discipline-loop Step 8 補充（Whisper 專案專屬）
+
+Step 8 閉環**不能只跑 unit test 就宣告完成**。Whisper 是 PyInstaller bundle 專案，
+source 環境測試通過 ≠ bundle 能跑。每次打包後必須在 bundle 環境補做 smoke test：
+
+```
+bundle smoke test 最小路徑：
+1. 清環境：pkill -f "WhisperAI"; lsof -ti tcp:5001 | xargs kill
+2. 啟動 bundle：open -a "Whisper STT" && sleep 10
+3. 確認 ping：curl -s http://127.0.0.1:5001/api/ping
+4. 呼叫本次改動涉及的 endpoint，確認回傳正常
+5. 清環境（收尾）
+```
+
+通過後才輸出 `✅ STEP 8 CLOSED LOOP`，才告訴使用者可以測試。
+
+---
+
 ### 打包後強制執行清單（缺一不可）
 
 ```
