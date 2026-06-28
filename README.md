@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.2.1
 
 ## Current State
-Last checkpoint: 2026-06-27 22:00
-Phase: 說話者分離 Beta 實機驗證通過，subprocess 架構確立
-Working: 說話者分離完整可用（上傳音檔 → 標記說話者 A/B）；pyannote 改用 /usr/bin/python3 subprocess 繞開 PyInstaller bundle 依賴衝突；兩條工程教訓寫入 CLAUDE.md 與全域記憶
-Next action: checkpoint 後可繼續下一功能
+Last checkpoint: 2026-06-28 14:30
+Phase: Obsidian Plugin 完整實作完成，開發全紀錄寫入 Notion Spec
+Working: Obsidian plugin 全流程可用（ribbon 點擊 → 自動喚起 Whisper app → 麥克風錄音 → 轉錄文字插入 cursor）；Flask 改獨立子程序防止 GUI crash 帶死 server；語言別名轉換修復「中文」無效問題；Notion spec 文件完整
+Next action: npm build + e2e 驗證 plugin，或繼續 Whisper 下一功能
 Blockers: none
 
 ## Checkpoint History
+### 2026-06-28 14:30｜Obsidian Plugin 完整實作 + Notion Spec
+- Completed: Flask 改獨立子程序（--server-mode）防止 GUI crash 帶死 server；語言別名轉換（中文→zh）修復轉錄失敗；_free_port() 加 ping 保護；Obsidian plugin 全流程驗證可用；CLAUDE.md 加入跨系統整合評估清單與測試紀律；engineering-discipline-loop v1.7.0（Step 1 跨系統評估五項）；Notion Obsidian Spec 文件完整
+- State: Obsidian plugin 全流程可用（已手動驗證）；Whisper app subprocess 架構穩定
+- Next: npm build + e2e 驗證 Obsidian plugin，或繼續 Whisper 下一功能
+
 ### 2026-06-27 22:00｜說話者分離 Beta 實機驗證通過
 - Completed: pyannote subprocess 架構（繞開 PyInstaller bundle 依賴衝突）、huggingface_hub 降版 0.23.4、speechbrain/lightning_fabric/torch 三個 patch 整合、實機測試莊敬高職音檔識別出 2 位說話者、工程教訓寫入 CLAUDE.md 與全域記憶
 - State: 說話者分離 Beta 完整可用，上傳音檔後逐字稿出現說話者 A/B 標記

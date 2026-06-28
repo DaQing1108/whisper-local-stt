@@ -155,10 +155,17 @@ def events():
                 if q in _sse._sse_queues:
                     _sse._sse_queues.remove(q)
 
+    # flask_cors 對 streaming response 無法可靠注入 header，改為手動設定
+    origin = request.headers.get("Origin", "")
+    allow_origin = origin if origin in _PLUGIN_ORIGINS else ""
+    resp_headers: dict[str, str] = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    if allow_origin:
+        resp_headers["Access-Control-Allow-Origin"] = allow_origin
+
     return Response(
         stream_with_context(generator()),
         mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers=resp_headers,
     )
 
 
@@ -317,7 +324,8 @@ def _session_ttl_cleaner() -> None:
 threading.Thread(target=_session_ttl_cleaner, daemon=True).start()
 
 
-@bp.route("/api/upload-chunk", methods=["POST"])
+@bp.route("/api/upload-chunk", methods=["POST", "OPTIONS"])
+@cross_origin(origins=_PLUGIN_ORIGINS)
 def upload_chunk():
     """接收錄音分段，背景轉錄，每段完成後 SSE 推送 chunk_done。
     最後一段完成且全段完成後，合併全文推送 transcript + done。"""
@@ -430,7 +438,8 @@ def upload_chunk():
     return jsonify(status="processing", session_id=session_id, chunk_index=chunk_index), 202
 
 
-@bp.route("/api/finish-session", methods=["POST"])
+@bp.route("/api/finish-session", methods=["POST", "OPTIONS"])
+@cross_origin(origins=_PLUGIN_ORIGINS)
 def finish_session_endpoint():
     """當最後一段音訊為空（已在計時器 flush 時送出），強制結束 session。"""
     session_id = request.form.get("session_id", "")
@@ -778,7 +787,8 @@ def save_config():
     )
 
 
-@bp.route("/api/system-audio/start", methods=["POST"])
+@bp.route("/api/system-audio/start", methods=["POST", "OPTIONS"])
+@cross_origin(origins=_PLUGIN_ORIGINS)
 def system_audio_start():
     """啟動 ScreenCaptureKit 系統音訊即時轉錄（in-process pyobjc，TCC 屬於主 app）。"""
     import system_audio as _sa
@@ -900,7 +910,8 @@ def system_audio_start():
     return jsonify(ok=True, session_id=session_id)
 
 
-@bp.route("/api/system-audio/stop", methods=["POST"])
+@bp.route("/api/system-audio/stop", methods=["POST", "OPTIONS"])
+@cross_origin(origins=_PLUGIN_ORIGINS)
 def system_audio_stop():
     """停止系統音訊擷取，合併全文推送最終結果。"""
     import system_audio as _sa
@@ -958,6 +969,64 @@ def system_audio_stop():
         threading.Thread(target=_finalize, daemon=True).start()
 
     return jsonify(ok=True)
+
+
+@bp.route("/api/transcribe-sync", methods=["POST"])
+def transcribe_sync():
+    """Obsidian 外掛專用（requestUrl，無 CORS）：接收 JSON {audio_b64, model, language}
+    在背景 thread 執行轉錄，同步等待後回傳結果。"""
+    import base64 as _b64
+    import threading as _threading
+
+    # 語言別名對照：把中文名稱轉換成 Whisper ISO code
+    _LANG_ALIASES = {
+        "中文": "zh", "繁體中文": "zh", "簡體中文": "zh",
+        "英文": "en", "日文": "ja", "韓文": "ko",
+        "法文": "fr", "德文": "de", "西班牙文": "es",
+        "chinese": "zh", "english": "en", "japanese": "ja",
+        "korean": "ko", "french": "fr", "german": "de",
+    }
+
+    data = request.json or {}
+    audio_b64  = data.get("audio_b64", "")
+    model_name = data.get("model", "large")
+    _raw_lang  = (data.get("language", "") or "").strip()
+    language   = _LANG_ALIASES.get(_raw_lang, _raw_lang) or "auto"
+
+    if not audio_b64:
+        return jsonify(ok=False, error="沒有收到音訊"), 400
+
+    try:
+        audio_bytes = _b64.b64decode(audio_b64)
+    except Exception:
+        return jsonify(ok=False, error="audio_b64 格式錯誤"), 400
+
+    result: dict = {}
+    done_event = _threading.Event()
+
+    def _worker():
+        _sse._transcribe_sem.acquire()
+        try:
+            text, lang, _ = run_whisper(audio_bytes, ".webm", model_name, language)
+            result["text"] = text
+            result["language"] = lang
+        except TranscriptionError as e:
+            result["error"] = str(e)
+        except Exception as e:
+            logging.error("[transcribe-sync] 失敗: %s", e)
+            result["error"] = str(e)
+        finally:
+            _sse._transcribe_sem.release()
+            done_event.set()
+
+    _threading.Thread(target=_worker, daemon=True).start()
+    done_event.wait(timeout=300)   # 最多等 5 分鐘
+
+    if "error" in result:
+        return jsonify(ok=False, error=result["error"]), 500
+    if "text" not in result:
+        return jsonify(ok=False, error="transcription timeout"), 504
+    return jsonify(ok=True, text=result["text"], language=result["language"])
 
 
 @bp.route("/api/health")
@@ -1024,6 +1093,7 @@ def test_inject_chunk():
 
 
 @bp.route("/api/last_transcript", methods=["GET"])
+@cross_origin(origins=_PLUGIN_ORIGINS)
 def last_transcript():
     if _last_transcript:
         return jsonify(ok=True, **_last_transcript)

@@ -80,6 +80,82 @@ routes.py system_audio_start 是否呼叫了 _sc.start_sc_capture()？
 
 ---
 
+## 跨系統整合評估（實作前必做）
+
+任何涉及「讓 Whisper app 與外部系統整合」的任務（Obsidian plugin、Notion、Slack 等），
+在寫任何程式碼之前，必須先回答以下五個問題，輸出給使用者確認後才能進入實作：
+
+```
+□ 1. 介面約束：兩個系統之間的傳輸格式、安全限制是什麼？
+      （CORS origin、Obsidian requestUrl vs fetch、auth header 格式等）
+
+□ 2. 生命週期約束：各元件的存活範圍與依賴關係是什麼？
+      （Flask thread 與 GUI 主 thread 的關係、subprocess orphan 行為等）
+
+□ 3. 不可控邊界：哪些東西由 OS / 框架決定，無法改變？
+      （macOS TCC 授權、PyInstaller bundle 限制、Whisper ISO 語言代碼等）
+
+□ 4. 最高風險假設：哪個假設一旦錯就要整個重來？
+      → 寫 ≤50 行 spike 驗證，通過後才展開完整實作
+
+□ 5. 測試邊界：哪些我能自動驗證，哪些只有使用者能驗證？
+      → 現在就標注，不留到交付前才發現
+```
+
+**「評估」≠「實作」**：上面五項的輸出是「應不應該做、怎麼做風險最低」，不是程式碼。
+Spike 驗證失敗 → 先討論替代方案，不強行繼續。
+
+---
+
+## Claude 測試紀律（每次修改都必須遵守）
+
+### 原則：元件通過 ≠ 功能完成
+
+「每個零件單獨測過」不等於「用戶路徑可以跑通」。必須有 end-to-end 路徑驗證才能說「修好了」。
+
+### 打包後強制執行清單（缺一不可）
+
+```
+1. 先清環境（防止副作用遮蔽問題）：
+   pkill -f "WhisperAI" 2>/dev/null
+   lsof -ti tcp:5001 | xargs kill 2>/dev/null
+   sleep 2
+
+2. 看 log 確認沒有 ERROR（30 秒能省一輪測試）：
+   tail -30 ~/Library/Application\ Support/WhisperSTT/whisper_app.log | grep -E "ERROR|WARN|失敗"
+
+3. 送真實 payload 到 transcribe-sync，驗證 endpoint 本身通：
+   open -a "Whisper STT" && sleep 10
+   curl -s -X POST http://127.0.0.1:5001/api/transcribe-sync \
+     -H "Content-Type: application/json" \
+     -d '{"audio_b64":"","model":"base","language":"中文"}' | python3 -m json.tool
+   # 預期：400 + {"ok":false,"error":"沒有收到音訊"}（語言代碼轉換後不應出現 ValueError）
+
+4. 才告訴使用者可以測試
+```
+
+### 我能自動驗證的 vs 必須使用者驗證的
+
+| Claude 能驗（自動化） | 必須使用者驗（人工） |
+|----------------------|-------------------|
+| server 啟動、存活、API 回應 | 麥克風收音是否正常 |
+| 語言代碼轉換邏輯 | 轉錄準確率 |
+| base64 編解碼 | 文字插入 note 的位置是否正確 |
+| endpoint 回傳格式 | App crash/重啟的實際體驗 |
+
+**每次交付時必須明確說出：「以下 X 項我已驗證，以下 Y 項需要你用真實聲音測試。」**
+
+### 測試後必須清環境
+
+任何用 `kill`、`subprocess`、`Popen` 做的測試，結束後立刻清掉：
+```bash
+pkill -f "WhisperAI" 2>/dev/null
+lsof -ti tcp:5001 | xargs kill 2>/dev/null
+```
+不清乾淨會留下副作用（orphan server），讓下一輪測試的結果失真。
+
+---
+
 ## 架構速查
 
 | 模式 | 入口 | 音訊來源 |

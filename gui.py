@@ -54,8 +54,20 @@ PORT = int(os.environ.get("PORT", 5001))
 URL  = f"http://localhost:{PORT}"
 
 
+def _ping_server() -> bool:
+    """回傳 True 代表 server 目前在線且回應正常。"""
+    import urllib.request, json as _json
+    try:
+        r = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/ping", timeout=2)
+        return _json.loads(r.read()).get("app") == "whisper-stt"
+    except Exception:
+        return False
+
+
 def _free_port() -> None:
-    """釋放 PORT 上的舊程序（避免 .app 重複開啟時 port 衝突）。"""
+    """釋放 PORT 上的殭屍程序。若 server 已在正常運作，不殺它。"""
+    if _ping_server():
+        return  # 已有 server 在跑，跳過
     import signal, subprocess
     try:
         result = subprocess.run(
@@ -148,16 +160,31 @@ def _open_preferences() -> None:
 
 
 def main() -> None:
+    # --server-mode：只跑 Flask，沒有 GUI（由 GUI 程序 spawn 此模式）
+    if "--server-mode" in sys.argv:
+        _start_flask()
+        return
+
     import webview
 
     _patch_wkwebview_media_permission()
     _free_port()
 
-    # Flask 在 daemon 執行緒跑，視窗關掉後自動結束
-    t = threading.Thread(target=_start_flask, daemon=True)
-    t.start()
+    # 若 server 已在跑（前次 GUI crash 後 server 存活），直接用它
+    # 否則 spawn 獨立子程序，讓 server 在 GUI crash 後繼續存活
+    import subprocess as _sp
+    _server_proc: "_sp.Popen[bytes] | None" = None
+    if not _ping_server():
+        _server_proc = _sp.Popen(
+            [sys.executable, "--server-mode"],
+            stdin=_sp.DEVNULL,
+            stdout=open(_LOG_FILE, "a"),
+            stderr=_sp.STDOUT,
+        )
 
     if not _wait_for_server():
+        if _server_proc and _server_proc.poll() is None:
+            _server_proc.terminate()
         logging.error("❌ 伺服器啟動失敗（Flask 未在 15 秒內回應），請確認 port %s 未被佔用", PORT)
         try:
             import tkinter as tk
@@ -209,6 +236,10 @@ def main() -> None:
         http_server  = False,
         private_mode = False,  # 保留 cookie/permission 狀態，避免每次重問
     )
+
+    # GUI 正常關閉 → 一起結束 server 子程序
+    if _server_proc and _server_proc.poll() is None:
+        _server_proc.terminate()
 
 
 if __name__ == "__main__":
