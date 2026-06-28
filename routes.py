@@ -13,6 +13,7 @@ from pathlib import Path
 from queue import Empty, Queue
 
 from flask import Blueprint, Response, jsonify, make_response, request, stream_with_context
+from flask_cors import cross_origin
 
 import integrations
 import sparkle_updater
@@ -59,6 +60,16 @@ _EXT_MAP = {
     "mp4": ".mp4", "m4a": ".m4a", "flac": ".flac",
     "webm": ".webm", "mpeg": ".mp3",
 }
+
+
+_PLUGIN_ORIGINS = ["app://obsidian.md", "http://localhost", "http://127.0.0.1"]
+
+
+@bp.route("/api/ping")
+@cross_origin(origins=_PLUGIN_ORIGINS)
+def api_ping():
+    """外掛用來識別並確認連到的是 Whisper STT server。"""
+    return jsonify({"app": "whisper-stt", "version": __version__})
 
 
 @bp.route("/api/version")
