@@ -902,10 +902,11 @@ def system_audio_start():
             _sa.start_mixed_capture(_on_chunk)
         else:
             _sa.start_capture(_on_chunk, on_error=_on_tcc_error)
-    except RuntimeError as e:
+    except Exception as e:
         with _chunk_sessions_lock:
             _chunk_sessions.pop(session_id, None)
-        return jsonify(error=str(e)), 503
+        logging.error("[system_audio_start] failed to start capture: %s", e)
+        return jsonify(ok=False, error="音訊裝置開啟失敗，請重新開啟 App 後再試"), 503
 
     return jsonify(ok=True, session_id=session_id)
 

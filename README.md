@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.2.1
 
 ## Current State
-Last checkpoint: 2026-06-28 17:45
-Phase: 說話者分離 Bundle Smoke Test 確認 + CLAUDE.md discipline-loop 補充
-Working: 說話者分離 Beta 在 bundle 環境完整驗證通過（pyannote subprocess，2 位說話者識別，labeled_transcript 含說話者 A/B 標記）；CLAUDE.md 加入 discipline-loop Step 8 bundle smoke test 補充規則
-Next action: 決定 v2.3 下一功能
+Last checkpoint: 2026-07-01 09:30
+Phase: PortAudio 裝置失效自動恢復修復
+Working: 錄音按鈕無回應（插拔耳機/HDMI/睡眠後）根因修復——PortAudioError -9986 自動 reinit，不需重啟 App 或 NB；bundle smoke test 通過
+Next action: 使用者插拔耳機後實機驗證自動恢復
 Blockers: none
 
 ## Checkpoint History
+### 2026-07-01 09:30｜PortAudio 裝置失效自動恢復修復
+- Completed: 診斷出錄音按鈕無回應根因為 sounddevice.PortAudioError -9986（AUHAL Invalid Property Value）；在 MixedAudioCapture.start() 加入 PortAudio reinit + retry；routes.py exception handler 補強
+- State: bundle v2.2.1 smoke test 通過，自動恢復機制已打包
+- Next: 使用者插拔耳機後實機驗證
+
 ### 2026-06-28 17:45｜說話者分離 Bundle Smoke Test 確認 + discipline-loop 規則補充
 - Completed: bundle 環境 /api/diarize 驗證通過（ok:true，2 位說話者，labeled_transcript 有說話者標記）；CLAUDE.md 加入 discipline-loop Step 8 bundle smoke test 補充規則（Whisper 專案 Step 8 不能只跑 unit test）
 - State: 說話者分離 Beta 在 bundle 環境完整確認，engineering discipline loop 規則已更新

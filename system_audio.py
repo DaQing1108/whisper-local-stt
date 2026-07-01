@@ -256,13 +256,30 @@ class MixedAudioCapture:
         import sounddevice as sd
 
         self._running = True
-        self._mic_stream = sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype="int16",
-            callback=self._mic_callback,
-            blocksize=4096,
-        )
+        try:
+            self._mic_stream = sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=CHANNELS,
+                dtype="int16",
+                callback=self._mic_callback,
+                blocksize=4096,
+            )
+        except sd.PortAudioError as e:
+            # macOS audio device handle goes stale after device changes (headphone
+            # plug/unplug, HDMI, sleep/wake). Reinitialize PortAudio and retry once.
+            logging.warning("[MixedAudio] PortAudio error on open (%s), reinitialising...", e)
+            try:
+                sd._terminate()
+                sd._initialize()
+            except Exception:
+                pass
+            self._mic_stream = sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=CHANNELS,
+                dtype="int16",
+                callback=self._mic_callback,
+                blocksize=4096,
+            )
         self._mic_stream.start()
         self._sys_capture.start()
         self._timer_thread = threading.Thread(target=self._timer_loop, daemon=True)
