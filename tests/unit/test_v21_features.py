@@ -197,3 +197,137 @@ class TestUXImprovements:
         """AC-7: onModeChange() system 分支存在 system_audio_tip_shown localStorage check。"""
         js = self._js()
         assert "system_audio_tip_shown" in js
+
+    def test_branding_is_whisper_stt(self):
+        """AC-8: 交付版主畫面品牌收斂為 Whisper STT。"""
+        html = self._html()
+        assert "<title>Whisper STT" in html
+        assert "<h1>Whisper STT</h1>" in html
+
+    def test_quick_bar_has_mode_helper_text(self):
+        """AC-9: quick-bar 展開後提供模式差異說明。"""
+        html = self._html()
+        assert "id=\"mode-helper\"" in html
+        assert "標準模式錄完後一次整理" in html
+
+    def test_vocab_placeholder_explains_enter_to_apply(self):
+        """AC-10: 詞庫輸入框說明本次套用行為。"""
+        html = self._html()
+        assert "加入本次專有名詞，按 Enter 套用" in html
+
+    def test_action_buttons_have_disabled_titles(self):
+        """AC-11: 結果 action 初始 disabled 時提供原因。"""
+        html = self._html()
+        assert 'id="copy-btn"' in html
+        assert "完成轉錄後可複製" in html
+        assert "完成轉錄後可匯出" in html
+
+    def test_preferences_are_grouped(self):
+        """AC-12: Preferences 分為 Basic / Workflow / Advanced。"""
+        prefs = (Path(__file__).parent.parent.parent / "templates" / "preferences.html").read_text()
+        assert "Basic 基礎設定" in prefs
+        assert "Workflow 產出格式" in prefs
+        assert "Advanced / Beta 進階功能" in prefs
+
+
+# ── 自動記住上次錄音/存檔設定 ─────────────────────────────────
+
+class TestLastSettingsPersistence:
+    """驗證 model/lang/mode/domain/Obsidian/Notion/混音 設定會寫入並還原 localStorage。"""
+
+    def _js(self):
+        return (Path(__file__).parent.parent.parent / "static" / "app.js").read_text()
+
+    def test_save_and_restore_functions_defined(self):
+        """核心函數存在：儲存、讀取、還原。"""
+        js = self._js()
+        assert "function _saveLastSetting(key, value)" in js
+        assert "function _loadLastSettings()" in js
+        assert "function restoreLastSettings()" in js
+        assert "LAST_SETTINGS_KEY = 'whisper_last_settings'" in js
+
+    def test_set_pill_persists_selection(self):
+        """happy path：setPill() 選擇後會呼叫 _saveLastSetting()。"""
+        js = self._js()
+        set_pill_body = js.split("function setPill(el, groupId) {")[1].split("\n}")[0]
+        assert "_saveLastSetting(key, el.dataset.val)" in set_pill_body
+
+    def test_toggle_functions_persist_state(self):
+        """happy path：Obsidian / Notion 開關切換後會寫入 localStorage。"""
+        js = self._js()
+        toggle_notion_body = js.split("function toggleNotion() {")[1].split("\n}")[0]
+        toggle_obsidian_body = js.split("function toggleObsidian() {")[1].split("\n}")[0]
+        assert "_saveLastSetting('notionEnabled', notionEnabled)" in toggle_notion_body
+        assert "_saveLastSetting('obsidianEnabled', obsidianEnabled)" in toggle_obsidian_body
+
+    def test_mix_mic_toggle_persists_on_change(self):
+        """happy path：混音勾選變更時寫入 localStorage。"""
+        js = self._js()
+        assert "mix-mic-toggle')?.addEventListener('change'" in js
+        assert "_saveLastSetting('mixMic', e.target.checked)" in js
+
+    def test_restore_guards_missing_saved_value(self):
+        """edge case：沒有已存設定時（首次使用 / key 不存在）不覆蓋預設 active pill，不丟例外。"""
+        js = self._js()
+        restore_body = js.split("function restoreLastSettings() {")[1].split("\n}\n")[0]
+        assert "if (!s[key]) return" in restore_body
+
+    def test_restore_called_before_qb_summary_on_load(self):
+        """edge case：DOMContentLoaded 必須先還原設定再更新快速列摘要，否則摘要會顯示還原前的舊值。"""
+        js = self._js()
+        dom_ready_block = js.split("document.addEventListener('DOMContentLoaded', () => {")[1]
+        restore_idx = dom_ready_block.index("restoreLastSettings()")
+        summary_idx = dom_ready_block.index("updateQBSummary()")
+        assert restore_idx < summary_idx
+
+
+# ── Light mode 下處理進度 modal 可讀性修正 ────────────────────
+
+class TestLightModeModalFix:
+    """驗證錄音處理事件視窗 (.modal-content/.modal-header/.modal-log-entry) 有主題感知的顏色，而非寫死深色。"""
+
+    def _css(self):
+        return (Path(__file__).parent.parent.parent / "static" / "app.css").read_text()
+
+    def _html(self):
+        return (Path(__file__).parent.parent.parent / "templates" / "index.html").read_text()
+
+    def test_modal_theme_variables_defined_for_both_themes(self):
+        """happy path：:root 與 [data-theme="light"] 都定義了 modal 專用變數。"""
+        css = self._css()
+        root_block = css.split(":root {")[1].split("\n  }")[0]
+        light_block = css.split('[data-theme="light"] {')[1].split("\n  }")[0]
+        for var in ("--modal-bg", "--modal-border", "--modal-log-bg", "--modal-log-border"):
+            assert var in root_block, f"{var} missing from :root"
+            assert var in light_block, f"{var} missing from [data-theme=light]"
+
+    def test_modal_content_uses_theme_variables(self):
+        """happy path：.modal-content / .modal-header h3 / .modal-log-entry 改用 var()。"""
+        css = self._css()
+        assert "background: var(--modal-bg)" in css
+        assert "border: 1px solid var(--modal-border)" in css
+        assert ".modal-header h3 { font-size: 16px; margin: 0; color: var(--text)" in css
+        assert "background: var(--modal-log-bg)" in css
+
+    def test_no_hardcoded_dark_colors_remain_in_modal(self):
+        """edge case（回歸防護）：舊的寫死深色（會在 light mode 造成深字疊深底）不應再出現。"""
+        css = self._css()
+        assert "background: rgba(22,24,32,0.85)" not in css
+        assert "color: #fff; font-weight: 500;" not in css
+        assert "border: 1px solid rgba(255,255,255,0.03)" not in css
+
+    def test_processing_modal_buttons_use_theme_variables(self):
+        """edge case（回歸防護）：處理進度 modal 與停止確認 modal 的按鈕不再寫死白底幽靈按鈕樣式。"""
+        html = self._html()
+        assert "background:rgba(255,255,255,0.05)" not in html
+        assert 'onclick="hideProcessingModal()"' in html
+        assert 'onclick="confirmStop(false)"' in html
+
+    def test_toast_uses_theme_variable_not_hardcoded_dark(self):
+        """edge case（回歸防護）：錄音期間絕大多數狀態訊息（如系統音訊分段、模型啟動提示）走 toast
+        而非 processing modal（見 setStatus() 的關鍵字分流邏輯），toast 背景之前寫死深色
+        rgba(30,35,51,0.9) 但文字用 var(--text)，light mode 下同樣會深字疊深底。"""
+        css = self._css()
+        assert "background: rgba(30,35,51,0.9)" not in css
+        toast_block = css.split(".toast {")[1].split("\n  }")[0]
+        assert "background: var(--modal-bg)" in toast_block

@@ -21,10 +21,46 @@ function initTheme() {
 function getPillValue(groupId) {
   return document.querySelector('#' + groupId + ' .pill.active')?.dataset.val || ''
 }
+const PILL_SETTING_KEY = { 'model-pill-group': 'model', 'lang-pill-group': 'lang', 'mode-pill-group': 'mode', 'domain-pill-group': 'domain' }
 function setPill(el, groupId) {
   document.querySelectorAll('#' + groupId + ' .pill').forEach(p => p.classList.remove('active'))
   el.classList.add('active')
   updateQBSummary()
+  const key = PILL_SETTING_KEY[groupId]
+  if (key) _saveLastSetting(key, el.dataset.val)
+}
+
+// ── Persisted "last used" recording/save settings ───────────────
+const LAST_SETTINGS_KEY = 'whisper_last_settings'
+function _saveLastSetting(key, value) {
+  let s = {}
+  try { s = JSON.parse(localStorage.getItem(LAST_SETTINGS_KEY) || '{}') } catch(e) {}
+  s[key] = value
+  try { localStorage.setItem(LAST_SETTINGS_KEY, JSON.stringify(s)) } catch(e) {}
+}
+function _loadLastSettings() {
+  try { return JSON.parse(localStorage.getItem(LAST_SETTINGS_KEY) || '{}') } catch(e) { return {} }
+}
+function restoreLastSettings() {
+  const s = _loadLastSettings()
+  Object.entries(PILL_SETTING_KEY).forEach(([groupId, key]) => {
+    if (!s[key]) return
+    const pill = document.querySelector('#' + groupId + ' .pill[data-val="' + s[key] + '"]')
+    if (pill) {
+      document.querySelectorAll('#' + groupId + ' .pill').forEach(p => p.classList.remove('active'))
+      pill.classList.add('active')
+    }
+  })
+  if (s.obsidianEnabled) {
+    obsidianEnabled = true
+    document.getElementById('obsidian-toggle')?.classList.add('on')
+  }
+  if (s.notionEnabled) {
+    notionEnabled = true
+    document.getElementById('notion-toggle')?.classList.add('on')
+  }
+  const mixMic = document.getElementById('mix-mic-toggle')
+  if (mixMic && s.mixMic) mixMic.checked = true
 }
 
 // ── Quick bar collapse/expand ─────────────────────────────────
@@ -658,12 +694,14 @@ function toggleNotion() {
   notionEnabled = !notionEnabled
   const btn = document.getElementById('notion-toggle')
   btn.className = 'toggle' + (notionEnabled ? ' on' : '')
+  _saveLastSetting('notionEnabled', notionEnabled)
 }
 
 function toggleObsidian() {
   obsidianEnabled = !obsidianEnabled
   const btn = document.getElementById('obsidian-toggle')
   btn.className = 'toggle' + (obsidianEnabled ? ' on' : '')
+  _saveLastSetting('obsidianEnabled', obsidianEnabled)
 }
 
 function toggleDiarize() {
@@ -1656,6 +1694,7 @@ function openPreferences() {
 
 document.addEventListener('DOMContentLoaded', () => {
   initTheme()
+  restoreLastSettings()
   updateQBSummary()
   _initModelCheck()
   _checkConfigHealth()
@@ -1672,5 +1711,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (_modelPollTimer) { clearInterval(_modelPollTimer); _modelPollTimer = null }
       _initModelCheck()
     }
+  })
+  // 記住上次的混音模式選擇
+  document.getElementById('mix-mic-toggle')?.addEventListener('change', e => {
+    _saveLastSetting('mixMic', e.target.checked)
   })
 })

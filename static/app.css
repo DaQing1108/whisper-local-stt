@@ -14,6 +14,10 @@
     --radius:   16px;
     --grid-dot: rgba(99,120,200,0.09);
     --mono:     'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+    --modal-bg:      rgba(22,24,32,0.85);
+    --modal-border:  rgba(255,255,255,0.08);
+    --modal-log-bg:  rgba(0,0,0,0.25);
+    --modal-log-border: rgba(255,255,255,0.03);
   }
   [data-theme="light"] {
     --bg:       #f0f2f5;
@@ -29,6 +33,10 @@
     --text:     #0f1117;
     --muted:    #6b7280;
     --grid-dot: rgba(0,0,0,0.07);
+    --modal-bg:      rgba(255,255,255,0.92);
+    --modal-border:  rgba(0,0,0,0.08);
+    --modal-log-bg:  rgba(0,0,0,0.04);
+    --modal-log-border: rgba(0,0,0,0.06);
   }
   html { background-color: var(--bg); }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -483,7 +491,7 @@
     display: flex; flex-direction: column; gap: 10px; z-index: 9999;
   }
   .toast {
-    background: rgba(30,35,51,0.9);
+    background: var(--modal-bg);
     backdrop-filter: blur(10px);
     border: 1px solid var(--border);
     border-left: 4px solid var(--accent);
@@ -516,8 +524,9 @@
   .modal-overlay.active { opacity: 1; pointer-events: auto; }
   .modal-content {
     width: 480px; max-width: 90%;
-    background: rgba(22,24,32,0.85);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: var(--modal-bg);
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--modal-border);
     box-shadow: 0 30px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(29,158,117,0.1), inset 0 1px 0 rgba(255,255,255,0.05);
     transform: translateY(20px) scale(0.96);
     transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
@@ -533,10 +542,10 @@
   }
   .modal-header {
     display: flex; align-items: center; gap: 16px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--modal-border);
     padding-bottom: 20px; margin-bottom: 20px;
   }
-  .modal-header h3 { font-size: 16px; margin: 0; color: #fff; font-weight: 500; display: flex; align-items: center; letter-spacing: 0.5px; }
+  .modal-header h3 { font-size: 16px; margin: 0; color: var(--text); font-weight: 500; display: flex; align-items: center; letter-spacing: 0.5px; }
   .modal-timer-badge {
     font-family: var(--mono); font-size: 12px; font-weight: bold;
     color: var(--accent2); background: rgba(29,158,117,0.15);
@@ -559,14 +568,14 @@
   }
   .modal-log-entry {
     animation: slideUpFade 0.4s cubic-bezier(0.4,0,0.2,1) forwards;
-    padding: 12px 14px; background: rgba(0,0,0,0.25); border-radius: 10px;
+    padding: 12px 14px; background: var(--modal-log-bg); border-radius: 10px;
     display: flex; align-items: flex-start; gap: 12px;
-    border: 1px solid rgba(255,255,255,0.03);
+    border: 1px solid var(--modal-log-border);
     opacity: 0; transform: translateY(10px); line-height: 1.5;
   }
   .modal-log-entry:last-child {
     background: rgba(29,158,117,0.08);
-    border: 1px solid rgba(29,158,117,0.2); color: #e2e8f0;
+    border: 1px solid rgba(29,158,117,0.2); color: var(--text);
   }
   .modal-log-entry:last-child::before  { content: "⏳"; font-size: 14px; animation: pulse 2s infinite; display: inline-block; }
   .modal-log-entry:not(:last-child)::before { content: "✓"; font-size: 14px; color: var(--green); display: inline-block; font-weight: bold; text-shadow: 0 0 10px rgba(52,211,153,0.5); }
