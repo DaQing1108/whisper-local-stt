@@ -11,7 +11,8 @@
 </head>
 <body data-theme="dark">
 
-<header>
+<div class="app-shell">
+<header class="app-toolbar">
   <div class="logo-mark" aria-hidden="true">
     <svg width="18" height="18" viewBox="0 0 40 40" fill="none">
       <path d="M8 20 Q14 12 20 20 Q26 28 32 20" stroke="currentColor" stroke-width="2.8" fill="none" stroke-linecap="round"/>
@@ -23,15 +24,18 @@
   <span class="header-sub">本地語音 AI</span>
   <span id="app-version" style="font-size:11px;opacity:.4;margin-left:4px;font-family:var(--mono)"></span>
   <div class="header-actions">
-    <div class="toggle-row" style="gap:6px;">
-      <span id="notion-toggle-label" style="font-size:12px;color:var(--muted)">Notion</span>
-      <button class="toggle" id="notion-toggle" onclick="toggleNotion()"></button>
+    <div class="toolbar-output-status" title="輸出目的地狀態">
+      <div class="tos-item">
+        <span id="notion-toggle-label" class="tos-label">Notion</span>
+        <button class="toggle" id="notion-toggle" onclick="toggleNotion()"></button>
+      </div>
+      <div class="tos-divider"></div>
+      <div class="tos-item">
+        <span id="obsidian-toggle-label" class="tos-label">Obsidian</span>
+        <button class="toggle" id="obsidian-toggle" onclick="toggleObsidian()"></button>
+      </div>
+      <span class="badge" id="notion-badge" title="未連線"><span class="status-dot"></span><span id="notion-badge-text">未連線</span></span>
     </div>
-    <div class="toggle-row" style="gap:6px;">
-      <span id="obsidian-toggle-label" style="font-size:12px;color:var(--muted)">Obsidian</span>
-      <button class="toggle" id="obsidian-toggle" onclick="toggleObsidian()"></button>
-    </div>
-    <span class="badge" id="notion-badge" title="未連線"><span class="status-dot"></span><span id="notion-badge-text">未連線</span></span>
     <button class="btn icon-btn" id="prefs-btn" onclick="openPreferences()" title="偏好設定">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
@@ -41,8 +45,8 @@
 
 <main class="app-layout">
 
-  <!-- ── 錄音核心區 ── -->
-  <div class="record-card">
+  <!-- ── 錄音核心區（Main Capture Panel）── -->
+  <div class="capture-panel">
     <div class="record-area">
       <canvas id="waveform" style="position:absolute;inset:0;width:100%;height:100%;opacity:0.5;pointer-events:none;border-radius:var(--radius);z-index:1;mix-blend-mode:screen;"></canvas>
       <div class="rec-rings-wrap" id="rec-rings-wrap">
@@ -70,6 +74,8 @@
     <span id="timer"></span>
   </div>
 
+  <!-- ── Context Bar ── -->
+  <div class="context-bar">
   <!-- ── 快速設定列 ── -->
   <div class="quick-bar" id="quick-bar">
     <div class="qb-summary" onclick="toggleQuickSettings()">
@@ -146,10 +152,14 @@
     <span id="saved-dict-title" style="display:none"></span>
     <div id="vocab-tags-container" style="display:none;"></div>
   </div>
+  </div><!-- /context-bar -->
 
-  <!-- ── 轉錄結果 ── -->
-  <div class="transcript-card">
-    <div class="transcript-tabs">
+  <!-- ── Results Workspace ── -->
+  <div class="results-workspace">
+    <div class="workspace-header">
+      <span class="workspace-title">本次轉錄結果</span>
+    </div>
+    <div class="workspace-tabs transcript-tabs">
       <button class="tab-btn active" onclick="switchTab('transcript',this)">transcript</button>
       <button class="tab-btn" onclick="switchTab('summary',this)">summary</button>
       <button class="tab-btn" onclick="switchTab('timeline',this)">timeline</button>
@@ -157,26 +167,28 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       </button>
     </div>
-    <div id="panel-transcript" class="tab-panel active">
-      <div id="transcript-box" contenteditable="true" spellcheck="false" style="outline:none;"></div>
-    </div>
-    <div id="panel-summary" class="tab-panel">
-      <div style="min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted);font-size:13px;font-family:var(--mono);text-align:center;padding:20px">
-        <span style="font-size:24px;opacity:0.4">✦</span>
-        <span>轉錄完成後，點擊 <strong style="color:var(--text)">AI 摘要</strong> 按鈕生成摘要</span>
-        <span style="font-size:11px;opacity:0.6">— 功能開發中，敬請期待 —</span>
+    <div class="workspace-content">
+      <div id="panel-transcript" class="tab-panel active">
+        <div id="transcript-box" contenteditable="true" spellcheck="false" style="outline:none;"></div>
       </div>
-    </div>
-    <div id="panel-timeline" class="tab-panel">
-      <div style="min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted);font-size:13px;font-family:var(--mono);text-align:center;padding:20px">
-        <span style="font-size:24px;opacity:0.4">⏱</span>
-        <span>含時間碼的逐段記錄，上傳含時間軸的音訊後自動產生</span>
-        <span style="font-size:11px;opacity:0.6">— 功能開發中，敬請期待 —</span>
+      <div id="panel-summary" class="tab-panel">
+        <div style="min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted);font-size:13px;font-family:var(--mono);text-align:center;padding:20px">
+          <span style="font-size:24px;opacity:0.4">✦</span>
+          <span>轉錄完成後，點擊 <strong style="color:var(--text)">AI 摘要</strong> 按鈕生成摘要</span>
+          <span style="font-size:11px;opacity:0.6">— 功能開發中，敬請期待 —</span>
+        </div>
       </div>
+      <div id="panel-timeline" class="tab-panel">
+        <div style="min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted);font-size:13px;font-family:var(--mono);text-align:center;padding:20px">
+          <span style="font-size:24px;opacity:0.4">⏱</span>
+          <span>含時間碼的逐段記錄，上傳含時間軸的音訊後自動產生</span>
+          <span style="font-size:11px;opacity:0.6">— 功能開發中，敬請期待 —</span>
+        </div>
+      </div>
+      <audio id="local-audio-player" controls style="display:none;width:100%;margin-top:10px;height:32px;border-radius:8px;opacity:0.8;"></audio>
+      <input type="file" id="file-input" accept="audio/*,video/*" multiple style="display:none">
     </div>
-    <audio id="local-audio-player" controls style="display:none;width:100%;margin-top:10px;height:32px;border-radius:8px;opacity:0.8;"></audio>
-    <input type="file" id="file-input" accept="audio/*,video/*" multiple style="display:none">
-    <div class="actions">
+    <div class="workspace-actions">
       <button class="act-btn" id="file-upload-btn" onclick="document.getElementById('file-input').click()" title="上傳音檔（⌘U）">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>上傳
       </button>
@@ -207,6 +219,7 @@
   </div>
 
 </main>
+</div><!-- /app-shell -->
 <div id="toast-container"></div>
 
 <!-- 處理進度 Modal -->

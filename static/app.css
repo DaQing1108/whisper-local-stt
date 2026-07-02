@@ -64,8 +64,16 @@
   }
   body[data-theme="light"]::before { display: none; }
 
-  /* ── Header ── */
-  header {
+  /* ── App Shell ── */
+  .app-shell {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* ── Toolbar ── */
+  .app-toolbar {
     width: 100%;
     padding: 16px 32px;
     display: flex;
@@ -86,26 +94,39 @@
     font-size: 11px; color: var(--muted);
     font-family: var(--mono); letter-spacing: .3px;
   }
-  header h1 { font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
+  .app-toolbar h1 { font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
   .header-actions {
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
   }
-  header .badge {
+  /* ── Toolbar Output Status Capsule ── */
+  .toolbar-output-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 6px 4px 12px;
+  }
+  .tos-item { display: flex; align-items: center; gap: 6px; }
+  .tos-label { font-size: 11px; color: var(--muted); }
+  .tos-divider { width: 1px; height: 14px; background: var(--border); flex-shrink: 0; }
+  .toolbar-output-status .badge {
     font-size: 12px; padding: 4px 10px; border-radius: 20px;
-    background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+    background: transparent; border: none; color: var(--muted);
     display: flex; align-items: center; cursor: default;
     transition: all 0.3s ease;
   }
-  header .badge.ok { color: var(--green); border-color: rgba(52,211,153,0.4); background: rgba(52,211,153,0.05); }
+  .toolbar-output-status .badge.ok { color: var(--green); }
   .status-dot {
     display: inline-block; width: 6px; height: 6px;
     border-radius: 50%; margin-right: 6px;
     background: var(--muted);
   }
-  header .badge.ok .status-dot {
+  .toolbar-output-status .badge.ok .status-dot {
     background: var(--green);
     box-shadow: 0 0 6px var(--green);
     animation: pulse-dot 2s infinite;
@@ -126,7 +147,7 @@
   }
 
   /* ── Card base ── */
-  .record-card, .transcript-card, .history-card {
+  .capture-panel, .results-workspace, .history-card {
     background: var(--card);
     backdrop-filter: blur(20px);
     border: 1px solid var(--border);
@@ -134,6 +155,13 @@
     border-radius: var(--radius);
     padding: 24px;
     display: flex; flex-direction: column; gap: 0;
+  }
+  /* Capture panel is the primary hero — slightly stronger presence than
+     surrounding cards so it reads as the one action the user should take. */
+  .capture-panel {
+    padding: 32px 24px;
+    border-color: rgba(29,158,117,0.22);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 0 0 1px rgba(29,158,117,0.05);
   }
 
   /* ── Record Area ── */
@@ -266,6 +294,13 @@
   }
   #timer.active { display: block; }
 
+  /* ── Context Bar ── */
+  .context-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
   /* ── Quick Bar ── */
   .quick-bar {
     display: flex;
@@ -330,23 +365,26 @@
     line-height: 1.45;
     padding-left: 36px;
   }
+  /* Slim guidance strip: left accent bar instead of a full card, so it
+     reads as an inline status line rather than a persistent onboarding card. */
   .mode-hint {
-    margin-top: 12px;
-    padding: 10px 14px;
-    border-radius: 8px;
-    background: rgba(29,158,117,0.08);
-    border: 1px solid rgba(29,158,117,0.25);
-    font-size: 13px;
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: rgba(29,158,117,0.06);
+    border: none;
+    border-left: 3px solid rgba(29,158,117,0.5);
+    font-size: 12px;
     color: var(--muted);
-    line-height: 1.6;
+    line-height: 1.5;
   }
   .mode-hint.warn {
-    background: rgba(251,191,36,0.08);
-    border-color: rgba(251,191,36,0.35);
+    background: rgba(251,191,36,0.06);
+    border-left-color: rgba(251,191,36,0.55);
   }
   .mode-hint.error {
-    background: rgba(248,113,113,0.08);
-    border-color: rgba(248,113,113,0.35);
+    background: rgba(248,113,113,0.06);
+    border-left-color: rgba(248,113,113,0.55);
   }
 
   /* ── Vocab Bar (legacy tag-input-box kept for compat) ── */
@@ -441,7 +479,7 @@
   }
 
   /* ── Action Buttons ── */
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .workspace-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .export-item {
     padding: 7px 12px; font-size: 13px; cursor: pointer;
     border-radius: 7px; color: var(--text); transition: background .15s;
@@ -726,7 +764,23 @@
   .vocab-input-row input::placeholder { color: var(--muted); }
 
   /* ── Action Buttons (transcript) ── */
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
+  /* Sits directly under the workspace content with a hairline divider —
+     same card, one continuous workspace instead of a detached row. */
+  .workspace-actions {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    margin-top: 14px; padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .workspace-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  .workspace-title {
+    font-size: 13px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted);
+  }
   .act-btn {
     padding: 7px 16px;
     border-radius: 8px;
@@ -757,4 +811,8 @@
     main.app-layout { padding: 16px 12px 60px; }
     .quick-bar { gap: 8px; }
     .quick-divider { display: none; }
+    .app-toolbar { padding: 12px 16px; gap: 6px; }
+    .header-sub { display: none; }
+    .tos-label { display: none; }
+    .toolbar-output-status { padding: 4px; gap: 4px; }
   }
