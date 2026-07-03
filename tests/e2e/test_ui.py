@@ -99,6 +99,41 @@ class TestObsidianToggle:
         assert initial_class != new_class
 
 
+class TestPreferencesLayout:
+    """Preferences 頁面重整為三個 <details> 分區：Basic（預設展開）、
+    Workflow、Advanced/Beta（預設收合）。"""
+
+    def test_three_sections_present_with_correct_defaults(self, prefs_page):
+        groups = prefs_page.locator("details.prefs-group")
+        assert groups.count() == 3
+        summaries = [groups.nth(i).locator("summary").inner_text() for i in range(3)]
+        assert summaries == ["Basic 基礎設定", "Workflow 產出格式", "Advanced / Beta 進階功能"]
+        assert groups.nth(0).get_attribute("open") is not None, "Basic 應預設展開"
+        assert groups.nth(1).get_attribute("open") is None, "Workflow 應預設收合"
+        assert groups.nth(2).get_attribute("open") is None, "Advanced/Beta 應預設收合"
+
+    def test_clicking_summary_toggles_section(self, prefs_page):
+        workflow = prefs_page.locator("details.prefs-group").nth(1)
+        assert workflow.get_attribute("open") is None
+        workflow.locator("summary").click()
+        assert workflow.get_attribute("open") is not None
+        workflow.locator("summary").click()
+        assert workflow.get_attribute("open") is None
+
+    def test_workflow_section_preset_switching(self, prefs_page):
+        workflow = prefs_page.locator("details.prefs-group").nth(1)
+        workflow.locator("summary").click()
+        prefs_page.locator(".preset-pill[data-preset='tech']").click()
+        # 比對 preferences.js PRESETS.tech.desc 的完整文字，而不是鬆散的關鍵字比對
+        assert prefs_page.locator("#preset-desc").inner_text() == "技術討論，保留英文術語與縮寫"
+
+    def test_advanced_section_has_diarize_and_update_checks(self, prefs_page):
+        advanced = prefs_page.locator("details.prefs-group").nth(2)
+        advanced.locator("summary").click()
+        assert advanced.locator("#check-diarize-btn").count() == 1
+        assert advanced.locator("#check-updates-btn").count() == 1
+
+
 class TestNotionSettings:
     def test_notion_token_field_present(self, prefs_page):
         field = prefs_page.locator("input[placeholder*='secret'], input[placeholder*='token'], #notion-token")
@@ -211,7 +246,11 @@ class TestViewModeRecordingContinuity:
 
     def test_manual_view_mode_survives_reload(self, page):
         page.evaluate("setViewMode('compact')")
-        page.reload(wait_until="load")
+        # dev waitress server's task queue depth climbs across the full 24-test
+        # session-scoped browser_context run (background health/model polling
+        # from earlier tests' pages) — default 30s times out near the end of
+        # the suite even though the reload itself is fast in isolation.
+        page.reload(wait_until="load", timeout=60000)
         assert page.evaluate("document.body.dataset.viewMode") == "compact", (
             "manual override must persist across a reload (simulates app restart)"
         )

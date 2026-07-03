@@ -1,6 +1,6 @@
-# Whisper STT — 手動測試清單
+# Whisper STT v2.3.0 — 手動測試清單
 
-每次 release 前執行。預計 5-10 分鐘。
+每次 release 前執行。預計 8-12 分鐘。
 
 ---
 
@@ -8,7 +8,8 @@
 
 - [ ] App 已打包：`bash package.sh`
 - [ ] 開啟 `/Applications/Whisper STT.app`
-- [ ] 確認版本號正確（右上角 v1.6.x）
+- [ ] 確認版本號正確（右上角 v2.3.0）
+- [ ] 主畫面、偏好設定、macOS 權限提示使用同一名稱：`Whisper STT`
 
 ---
 
@@ -31,6 +32,7 @@
 
 - [ ] 開啟 YouTube 或任何音源
 - [ ] 切換到「系統音訊」模式 → 點「開始」
+- [ ] 系統音訊提示顯示螢幕錄製權限狀態與修復步驟
 - [ ] 播放 30 秒 → 點「停止」
 - [ ] 轉錄結果顯示（非空）
 - [ ] 狀態列顯示「✅ 全部轉錄完成」（不再卡在 LLM 處理中）
@@ -78,6 +80,18 @@
 - [ ] 「匯出」按鈕：產生 .txt 檔案
 - [ ] 「清除」按鈕：清除轉錄內容
 - [ ] 「歷史」按鈕：顯示過去記錄
+- [ ] 無轉錄結果時，Copy / Export / Obsidian / Notion 按鈕 disabled 且 title 說明原因
+- [ ] 未設定 Notion/Obsidian 時，完成轉錄後按鈕仍提示需先到偏好設定完成設定
+- [ ] quick-bar 展開後可看到模型、語言、模式、領域的 helper text
+- [ ] 詞庫輸入框顯示「加入本次專有名詞，按 Enter 套用」，📌 可開啟常用詞庫
+
+## 8.1 偏好設定分層
+
+- [ ] 偏好設定標題顯示 Whisper STT v2.3.0
+- [ ] Basic 基礎設定預設展開，包含 Obsidian、Notion、LLM API Key
+- [ ] Workflow 產出格式預設收合，展開後可設定後處理模板
+- [ ] Advanced / Beta 進階功能預設收合，展開後可檢查說話者分離與 App 更新
+- [ ] 儲存設定後回主畫面，Notion/Obsidian 按鈕可用狀態正確更新
 
 ---
 

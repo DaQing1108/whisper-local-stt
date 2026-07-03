@@ -3,109 +3,127 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Echo — 偏好設定</title>
+  <title>Whisper STT — 偏好設定</title>
   <link rel="stylesheet" href="/static/preferences.css">
 </head>
 <body data-theme="dark">
   <div class="prefs-container">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;">
-      <h1 class="prefs-title" style="margin-bottom:0">偏好設定</h1>
+      <div>
+        <h1 class="prefs-title" style="margin-bottom:0">偏好設定</h1>
+        <div class="prefs-subtitle">Whisper STT v2.3.0</div>
+      </div>
       <button onclick="toggleTheme()" id="pref-theme-btn"
         style="padding:4px 10px;font-size:11px;font-family:var(--mono);background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--muted);cursor:pointer;">☀ Light</button>
     </div>
 
-    <!-- Obsidian -->
-    <section class="prefs-section">
-      <h2>Obsidian 存檔</h2>
-      <div class="field">
-        <label for="obsidian-path">Vault 路徑</label>
-        <div class="input-row">
-          <input type="text" id="obsidian-path" placeholder="~/Documents/Obsidian/meetings">
-          <button class="btn validate" id="validate-obsidian-btn" onclick="validateObsidian()">驗證</button>
-        </div>
-        <span class="field-hint">存入的 .md 檔案會放在這個目錄下</span>
-        <span class="validate-status" id="obsidian-status"></span>
-      </div>
-    </section>
+    <details class="prefs-group" open>
+      <summary>Basic 基礎設定</summary>
+      <p class="group-hint">完成這裡即可使用轉錄、Obsidian / Notion 存檔與 LLM 後處理。</p>
 
-    <!-- Notion -->
-    <section class="prefs-section">
-      <h2>Notion 存檔</h2>
-      <div class="field">
-        <label for="notion-token">Integration Token</label>
-        <input type="password" id="notion-token" placeholder="secret_xxxxxxxxxxxxxxxx" autocomplete="new-password">
-      </div>
-      <div class="field">
-        <label for="notion-page-id">目標頁面 ID</label>
-        <div class="input-row">
-          <input type="text" id="notion-page-id" placeholder="37a280a95f76810b90d0e6cad40786fa">
-          <button class="btn validate" id="validate-notion-btn" onclick="validateNotion()">驗證</button>
+      <!-- Obsidian -->
+      <section class="prefs-section">
+        <h2>Obsidian 存檔</h2>
+        <div class="field">
+          <label for="obsidian-path">Vault 路徑</label>
+          <div class="input-row">
+            <input type="text" id="obsidian-path" placeholder="~/Documents/Obsidian/meetings">
+            <button class="btn validate" id="validate-obsidian-btn" onclick="validateObsidian()">驗證</button>
+          </div>
+          <span class="field-hint">存入的 .md 檔案會放在這個目錄下；未設定也不影響本地轉錄。</span>
+          <span class="validate-status" id="obsidian-status"></span>
         </div>
-        <span class="validate-status" id="notion-status"></span>
-      </div>
-    </section>
+      </section>
 
-    <!-- LLM -->
-    <section class="prefs-section">
-      <h2>LLM API Key <span class="optional">（選填）</span></h2>
-      <div class="field">
-        <label for="anthropic-key">Claude API Key <span class="key-status" id="anthropic-status"></span></label>
-        <input type="password" id="anthropic-key" placeholder="sk-ant-api03-…" autocomplete="new-password">
-      </div>
-      <div class="field">
-        <label for="openai-key">OpenAI API Key <span class="key-status" id="openai-status"></span></label>
-        <input type="password" id="openai-key" placeholder="sk-…" autocomplete="new-password">
-      </div>
-    </section>
-
-    <!-- LLM 模板 Preset -->
-    <section class="prefs-section">
-      <h2>後處理模板</h2>
-      <div class="field">
-        <label>Preset</label>
-        <div class="preset-pills" id="preset-pills">
-          <button class="preset-pill active" data-preset="meeting" onclick="selectPreset(this)">會議記錄</button>
-          <button class="preset-pill" data-preset="interview" onclick="selectPreset(this)">訪談</button>
-          <button class="preset-pill" data-preset="tech" onclick="selectPreset(this)">技術討論</button>
-          <button class="preset-pill" data-preset="custom" onclick="selectPreset(this)">自訂</button>
+      <!-- Notion -->
+      <section class="prefs-section">
+        <h2>Notion 存檔</h2>
+        <div class="field">
+          <label for="notion-token">Integration Token</label>
+          <input type="password" id="notion-token" placeholder="secret_xxxxxxxxxxxxxxxx" autocomplete="new-password">
         </div>
-        <span class="field-hint" id="preset-desc">標點、斷句、繁體中文會議記錄格式</span>
-      </div>
-      <div class="field" id="custom-prompt-field" style="display:none">
-        <label for="llm-prompt">自訂 Prompt <span class="optional">（最多 2000 字元）</span></label>
-        <textarea id="llm-prompt" rows="5" maxlength="2000"
-          placeholder="輸入自訂的 LLM system prompt，用於標點後處理與同音詞糾錯…"
-          style="width:100%;box-sizing:border-box;resize:vertical;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--mono)"></textarea>
-      </div>
-    </section>
-
-    <!-- 說話者分離 Beta -->
-    <section class="prefs-section">
-      <h2>說話者分離 <span class="optional">Beta</span></h2>
-      <div class="field">
-        <label for="hf-token">HuggingFace Token <span class="key-status" id="hf-status"></span></label>
-        <input type="password" id="hf-token" placeholder="hf_xxxxxxxxxxxxxxxx" autocomplete="new-password">
-        <span class="field-hint">需接受 <a href="https://hf.co/pyannote/speaker-diarization-3.1" style="color:var(--accent)">pyannote 模型授權</a>，首次使用會下載模型（~250MB）</span>
-      </div>
-      <div class="field">
-        <div class="input-row">
-          <button class="btn validate" id="check-diarize-btn" onclick="checkDiarize()">檢查狀態</button>
-          <span class="validate-status" id="diarize-status"></span>
+        <div class="field">
+          <label for="notion-page-id">目標頁面 ID</label>
+          <div class="input-row">
+            <input type="text" id="notion-page-id" placeholder="37a280a95f76810b90d0e6cad40786fa">
+            <button class="btn validate" id="validate-notion-btn" onclick="validateNotion()">驗證</button>
+          </div>
+          <span class="validate-status" id="notion-status"></span>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- Updates -->
-    <section class="prefs-section">
-      <h2>App 更新</h2>
-      <div class="field">
-        <div class="input-row">
-          <button class="btn validate" id="check-updates-btn" onclick="checkForUpdates()">檢查更新</button>
-          <span class="validate-status" id="updates-status"></span>
+      <!-- LLM -->
+      <section class="prefs-section">
+        <h2>LLM API Key <span class="optional">（選填）</span></h2>
+        <div class="field">
+          <label for="anthropic-key">Claude API Key <span class="key-status" id="anthropic-status"></span></label>
+          <input type="password" id="anthropic-key" placeholder="sk-ant-api03-…" autocomplete="new-password">
         </div>
-        <span class="field-hint">使用 Sparkle appcast 檢查新版本</span>
-      </div>
-    </section>
+        <div class="field">
+          <label for="openai-key">OpenAI API Key <span class="key-status" id="openai-status"></span></label>
+          <input type="password" id="openai-key" placeholder="sk-…" autocomplete="new-password">
+        </div>
+      </section>
+    </details>
+
+    <details class="prefs-group">
+      <summary>Workflow 產出格式</summary>
+      <p class="group-hint">調整轉錄完成後的 LLM 後處理格式。</p>
+
+      <!-- LLM 模板 Preset -->
+      <section class="prefs-section">
+        <h2>後處理模板</h2>
+        <div class="field">
+          <label>Preset</label>
+          <div class="preset-pills" id="preset-pills">
+            <button class="preset-pill active" data-preset="meeting" onclick="selectPreset(this)">會議記錄</button>
+            <button class="preset-pill" data-preset="interview" onclick="selectPreset(this)">訪談</button>
+            <button class="preset-pill" data-preset="tech" onclick="selectPreset(this)">技術討論</button>
+            <button class="preset-pill" data-preset="custom" onclick="selectPreset(this)">自訂</button>
+          </div>
+          <span class="field-hint" id="preset-desc">標點、斷句、繁體中文會議記錄格式</span>
+        </div>
+        <div class="field" id="custom-prompt-field" style="display:none">
+          <label for="llm-prompt">自訂 Prompt <span class="optional">（最多 2000 字元）</span></label>
+          <textarea id="llm-prompt" rows="5" maxlength="2000"
+            placeholder="輸入自訂的 LLM system prompt，用於標點後處理與同音詞糾錯…"
+            style="width:100%;box-sizing:border-box;resize:vertical;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--mono)"></textarea>
+        </div>
+      </section>
+    </details>
+
+    <details class="prefs-group">
+      <summary>Advanced / Beta 進階功能</summary>
+      <p class="group-hint">實驗性功能與更新檢查；一般轉錄不需要調整。</p>
+
+      <!-- 說話者分離 Beta -->
+      <section class="prefs-section">
+        <h2>說話者分離 <span class="optional">Beta</span></h2>
+        <div class="field">
+          <label for="hf-token">HuggingFace Token <span class="key-status" id="hf-status"></span></label>
+          <input type="password" id="hf-token" placeholder="hf_xxxxxxxxxxxxxxxx" autocomplete="new-password">
+          <span class="field-hint">需接受 <a href="https://hf.co/pyannote/speaker-diarization-3.1" style="color:var(--accent)">pyannote 模型授權</a>，首次使用會下載模型（~250MB）</span>
+        </div>
+        <div class="field">
+          <div class="input-row">
+            <button class="btn validate" id="check-diarize-btn" onclick="checkDiarize()">檢查狀態</button>
+            <span class="validate-status" id="diarize-status"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Updates -->
+      <section class="prefs-section">
+        <h2>App 更新</h2>
+        <div class="field">
+          <div class="input-row">
+            <button class="btn validate" id="check-updates-btn" onclick="checkForUpdates()">檢查更新</button>
+            <span class="validate-status" id="updates-status"></span>
+          </div>
+          <span class="field-hint">使用 Sparkle appcast 檢查新版本</span>
+        </div>
+      </section>
+    </details>
 
     <div class="prefs-actions">
       <button class="btn primary" onclick="saveAll()">儲存</button>
