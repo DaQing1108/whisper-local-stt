@@ -17,6 +17,38 @@ function initTheme() {
   if (btn) btn.textContent = theme === 'dark' ? '☀ Light' : '☾ Dark'
 }
 
+// ── View Mode (Expanded / Regular / Compact) ────────────────────
+const VIEW_MODE_KEY = 'whisper_view_mode_override'
+let _viewModeOverride = null
+function _detectAutoViewMode() {
+  const w = window.innerWidth
+  if (w < 480) return 'compact'
+  if (w <= 900) return 'regular'
+  return 'expanded'
+}
+function setViewMode(mode, persist = true) {
+  document.body.dataset.viewMode = mode
+  document.querySelectorAll('.vms-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode))
+  if (persist) {
+    _viewModeOverride = mode
+    try { localStorage.setItem(VIEW_MODE_KEY, mode) } catch(e) {}
+  }
+}
+function initViewMode() {
+  let saved
+  try { saved = localStorage.getItem(VIEW_MODE_KEY) } catch(e) {}
+  if (saved) {
+    _viewModeOverride = saved
+    setViewMode(saved, false)
+  } else {
+    setViewMode(_detectAutoViewMode(), false)
+  }
+  window.addEventListener('resize', () => {
+    if (_viewModeOverride) return
+    setViewMode(_detectAutoViewMode(), false)
+  })
+}
+
 // ── Pill selector helpers ─────────────────────────────────────
 function getPillValue(groupId) {
   return document.querySelector('#' + groupId + ' .pill.active')?.dataset.val || ''
@@ -640,6 +672,30 @@ function toggleSavedDict() {
       renderVocabTags()
     }
     if (btn) btn.classList.add('open')
+  }
+}
+
+// ── Compact Mode Screen Router ──────────────────────────────────
+// Reuses the existing history-panel / vocab-library toggling logic above —
+// only orchestrates which one is visible, doesn't change how they render.
+function setCompactScreen(screen) {
+  const shell = document.querySelector('.app-shell')
+  if (shell) shell.dataset.compactScreen = screen
+  document.querySelectorAll('.ctb-btn[data-screen]').forEach(b => b.classList.toggle('active', b.dataset.screen === screen))
+
+  const historyPanel = document.getElementById('history-panel')
+  if (screen === 'history') {
+    if (historyPanel && historyPanel.style.display === 'none') { historyPanel.style.display = 'block'; renderHistory() }
+  } else if (historyPanel) {
+    historyPanel.style.display = 'none'
+  }
+
+  const dictBtn = document.getElementById('vocab-library-btn')
+  const dictOpen = !!dictBtn && dictBtn.classList.contains('open')
+  if (screen === 'dictionaries' && !dictOpen) {
+    toggleSavedDict()
+  } else if (screen !== 'dictionaries' && dictOpen) {
+    toggleSavedDict()
   }
 }
 
@@ -1441,6 +1497,22 @@ async function checkModelReady(modelName) {
 }
 
 // ── UI helpers ────────────────────────────────────────────────
+function _syncCaptureCta(state) {
+  const cta = document.getElementById('capture-cta-btn')
+  const lbl = document.getElementById('capture-cta-label')
+  if (!cta || !lbl) return
+  cta.classList.remove('recording', 'processing')
+  if (state === 'recording') {
+    cta.classList.add('recording')
+    lbl.textContent = '停止錄音'
+  } else if (state === 'processing') {
+    cta.classList.add('processing')
+    lbl.textContent = '處理中...'
+  } else {
+    lbl.textContent = '開始錄音'
+  }
+}
+
 function setRecordingUI(recording) {
   const btn   = document.getElementById('record-btn')
   const icon  = document.getElementById('btn-icon')
@@ -1460,6 +1532,7 @@ function setRecordingUI(recording) {
     label.textContent = 'REC'
     if (sb) { sb.textContent = 'STANDBY_'; sb.className = ''; }
   }
+  _syncCaptureCta(recording ? 'recording' : 'idle')
 }
 
 function setBtnState(state) {
@@ -1482,6 +1555,7 @@ function setBtnState(state) {
     label.textContent = 'REC'
     if (sb) { sb.textContent = 'STANDBY_'; sb.className = ''; }
   }
+  _syncCaptureCta(state === 'processing' ? 'processing' : 'idle')
 }
 
 let modalTimerInterval = null;
@@ -1694,6 +1768,7 @@ function openPreferences() {
 
 document.addEventListener('DOMContentLoaded', () => {
   initTheme()
+  initViewMode()
   restoreLastSettings()
   updateQBSummary()
   _initModelCheck()

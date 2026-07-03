@@ -137,6 +137,32 @@
     100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
   }
 
+  /* ── View Mode Switch (segmented control) ── */
+  .view-mode-switch {
+    display: flex;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px;
+    gap: 2px;
+  }
+  .vms-btn {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    padding: 5px 8px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .vms-btn:hover { color: var(--text); }
+  .vms-btn.active {
+    background: rgba(29,158,117,0.2);
+    color: var(--accent2);
+  }
+
   /* ── Main Layout ── */
   main.app-layout {
     width: 100%; max-width: 780px;
@@ -250,6 +276,26 @@
   }
   .btn-icon  { font-size: 28px; line-height: 1; }
   .btn-label { font-size: 9px; font-family: var(--mono); letter-spacing: 2px; opacity: 0.6; }
+
+  /* ── Capture CTA (pill button under the ring) ── */
+  .capture-cta {
+    margin-top: 18px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 26px;
+    border-radius: 999px;
+    border: none;
+    background: var(--accent);
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .capture-cta:hover { background: var(--accent2); transform: translateY(-1px); }
+  .capture-cta.recording { background: var(--red); }
+  .capture-cta.processing { background: var(--yellow); color: #1a1400; pointer-events: none; }
 
   /* ── Drag & Drop ── */
   .record-area.dragover .rec-rings-wrap {
@@ -806,7 +852,7 @@
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-  /* ── Responsive ── */
+  /* ── Responsive (legacy width-only safety net) ── */
   @media (max-width: 600px) {
     main.app-layout { padding: 16px 12px 60px; }
     .quick-bar { gap: 8px; }
@@ -816,3 +862,67 @@
     .tos-label { display: none; }
     .toolbar-output-status { padding: 4px; gap: 4px; }
   }
+
+  /* ── View Modes (driven by body[data-view-mode], set in JS) ──
+     Kept separate from the width-only media query above: a manually
+     forced mode must render the same way regardless of actual window
+     width, so the visual reaction lives here, keyed off the attribute
+     JS computes — not off raw viewport width. */
+  body[data-view-mode="expanded"] main.app-layout { max-width: 960px; }
+
+  .compact-tabbar { display: none; }
+
+  body[data-view-mode="compact"] .app-toolbar,
+  body[data-view-mode="compact"] main.app-layout {
+    max-width: 420px;
+    margin: 0 auto;
+  }
+  body[data-view-mode="compact"] .tos-label { display: none; }
+  body[data-view-mode="compact"] .header-sub { display: none; }
+  body[data-view-mode="compact"] main.app-layout {
+    padding: 16px 14px 84px;
+  }
+  body[data-view-mode="compact"] .compact-tabbar {
+    display: flex;
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 0;
+    width: 100%;
+    max-width: 420px;
+    justify-content: space-around;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 8px 4px calc(8px + env(safe-area-inset-bottom, 0px));
+    z-index: 20;
+  }
+  .ctb-btn {
+    background: none;
+    border: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    color: var(--muted);
+    font-size: 10px;
+    cursor: pointer;
+    padding: 4px 10px;
+  }
+  .ctb-btn.active { color: var(--accent2); }
+
+  /* Compact screen router: only one top-level section visible at a time,
+     switched by JS setting data-compact-screen on .app-shell. Record is
+     the default and needs no override. */
+  .app-shell[data-compact-screen="history"] .capture-panel,
+  .app-shell[data-compact-screen="history"] .context-bar,
+  .app-shell[data-compact-screen="history"] .results-workspace,
+  .app-shell[data-compact-screen="dictionaries"] .capture-panel,
+  .app-shell[data-compact-screen="dictionaries"] .results-workspace,
+  .app-shell[data-compact-screen="dictionaries"] .quick-bar {
+    display: none;
+  }
+  .app-shell[data-compact-screen="dictionaries"] .context-bar { display: flex; }
+  /* The dictionaries screen forces the vocab library open via setCompactScreen()
+     and is the only entry point while this screen is active — hiding the inline
+     toggle button avoids two independent controls fighting over the same state. */
+  .app-shell[data-compact-screen="dictionaries"] #vocab-library-btn { display: none; }

@@ -29,7 +29,10 @@ def browser_context(playwright):
 @pytest.fixture
 def page(browser_context):
     page = browser_context.new_page()
-    page.goto(BASE_URL, wait_until="networkidle")
+    # "networkidle" never fires on this page — it polls config health / model
+    # status in the background (see app.js _checkConfigHealth/_initModelCheck),
+    # so there's never a quiet network window. "load" is the reliable signal.
+    page.goto(BASE_URL, wait_until="load")
     yield page
     page.close()
 
@@ -41,7 +44,7 @@ class TestPageLoad:
     def test_version_displayed(self, page):
         # 版本號應顯示在頁面上
         content = page.content()
-        assert "v1.6" in content
+        assert "v2.2.1" in content
 
     def test_record_button_present(self, page):
         btn = page.locator("#record-btn, [data-testid='record-btn'], button:has-text('錄音')")
@@ -133,3 +136,54 @@ class TestVersionConsistency:
         api_version = r.json().get("version", "")
         page_content = page.content()
         assert api_version in page_content, f"API 版本 {api_version} 未顯示在 UI 中"
+
+
+class TestViewModeRecordingContinuity:
+    """The view-mode redesign deliberately keeps one DOM tree and only reflows
+    it via CSS, so switching modes must never touch recording state. Real
+    microphone capture can't run headless, so this simulates the in-progress
+    state the same way the app's own JS does (isRecording flag + startTimer),
+    then asserts a mode switch leaves it untouched."""
+
+    def test_mode_switch_does_not_reset_recording_state(self, page):
+        # isRecording / timerInterval are top-level `let` bindings in app.js,
+        # not window properties — must mutate the bare identifier so the
+        # app's own functions (which close over the same script scope) see it.
+        page.evaluate("""() => {
+            isRecording = true;
+            setRecordingUI(true);
+            startTimer();
+        }""")
+        assert "recording" in page.locator("#record-btn").get_attribute("class")
+        assert "recording" in page.locator("#capture-cta-btn").get_attribute("class")
+        interval_before = page.evaluate("timerInterval")
+        assert interval_before is not None
+
+        page.evaluate("setViewMode('compact')")
+        assert page.evaluate("document.body.dataset.viewMode") == "compact"
+        assert page.evaluate("isRecording") is True
+        assert "recording" in page.locator("#record-btn").get_attribute("class")
+        assert "recording" in page.locator("#capture-cta-btn").get_attribute("class")
+        assert page.evaluate("timerInterval") == interval_before
+
+        page.evaluate("setViewMode('expanded')")
+        assert page.evaluate("isRecording") is True
+        assert "recording" in page.locator("#record-btn").get_attribute("class")
+        assert page.evaluate("timerInterval") == interval_before
+
+        page.evaluate("stopTimer(); isRecording = false; setRecordingUI(false)")
+
+    def test_manual_view_mode_survives_resize(self, page):
+        page.evaluate("setViewMode('expanded')")
+        page.set_viewport_size({"width": 375, "height": 800})
+        time.sleep(0.2)
+        assert page.evaluate("document.body.dataset.viewMode") == "expanded", (
+            "manual override must not be replaced by width-based auto-detection"
+        )
+
+    def test_manual_view_mode_survives_reload(self, page):
+        page.evaluate("setViewMode('compact')")
+        page.reload(wait_until="load")
+        assert page.evaluate("document.body.dataset.viewMode") == "compact", (
+            "manual override must persist across a reload (simulates app restart)"
+        )

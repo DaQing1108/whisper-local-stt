@@ -13,6 +13,7 @@ import pytest
 ROOT = Path(__file__).parent.parent.parent
 HTML = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
 JS = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+CSS = (ROOT / "static" / "app.css").read_text(encoding="utf-8")
 
 HTML_IDS = set(re.findall(r'id="([a-zA-Z0-9_-]+)"', HTML))
 JS_ELEMENT_IDS = set(re.findall(r"getElementById\('([a-zA-Z0-9_-]+)'\)", JS))
@@ -57,3 +58,43 @@ class TestJsDomWiringIntact:
         }
         missing = JS_ELEMENT_IDS - HTML_IDS - dynamic_ids - preferences_ids
         assert not missing, f"static/app.js references ids missing from templates/index.html: {missing}"
+
+
+class TestViewModeStructure:
+    """Guards the AC for the three-mode responsive redesign (expanded / regular / compact)."""
+
+    def test_segmented_control_has_three_modes(self):
+        assert 'class="view-mode-switch"' in HTML
+        for mode in ("expanded", "regular", "compact"):
+            assert f'data-mode="{mode}"' in HTML, f"missing view-mode-switch button for {mode}"
+
+    def test_capture_cta_button_present(self):
+        assert 'id="capture-cta-btn"' in HTML
+        assert 'id="capture-cta-label"' in HTML
+
+    def test_compact_tabbar_has_four_screens(self):
+        assert 'id="compact-tabbar"' in HTML
+        for screen in ("record", "history", "dictionaries"):
+            assert f'data-screen="{screen}"' in HTML, f"missing compact-tabbar button for {screen}"
+        assert 'id="ctb-settings"' in HTML
+
+    def test_view_mode_functions_defined_in_js(self):
+        for fn in ("function setViewMode", "function initViewMode",
+                   "function _detectAutoViewMode", "function setCompactScreen"):
+            assert fn in JS, f"expected {fn} in static/app.js"
+
+    def test_breakpoints_match_locked_spec(self):
+        # < 480px compact, 480-900px regular, > 900px expanded
+        assert "w < 480" in JS
+        assert "w <= 900" in JS
+
+    def test_css_reacts_to_view_mode_attribute_not_just_width(self):
+        """A manually forced mode must render correctly regardless of actual
+        window width, so the visual rules must key off body[data-view-mode],
+        not only off a raw @media width query."""
+        assert 'body[data-view-mode="compact"]' in CSS
+        assert 'body[data-view-mode="expanded"]' in CSS
+
+    def test_compact_screen_router_selectors_present(self):
+        assert '[data-compact-screen="history"]' in CSS
+        assert '[data-compact-screen="dictionaries"]' in CSS
