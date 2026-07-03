@@ -1,4 +1,4 @@
-# 🎙️ Whisper STT 本地語音轉文字系統 v2.2.1
+# 🎙️ Whisper STT 本地語音轉文字系統 v2.3.0
 
 ## Current State
 Last checkpoint: 2026-07-01 09:30

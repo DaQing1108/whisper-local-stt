@@ -60,7 +60,7 @@ class TestPageLoad:
             timeout=5000,
         )
         content = page.content()
-        assert "v2.2.1" in content
+        assert "v2.3.0" in content
 
     def test_record_button_present(self, page):
         btn = page.locator("#record-btn, [data-testid='record-btn'], button:has-text('錄音')")
