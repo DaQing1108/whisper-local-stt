@@ -37,12 +37,28 @@ def page(browser_context):
     page.close()
 
 
+@pytest.fixture
+def prefs_page(browser_context):
+    # Notion token / page ID / LLM API key fields live on the separate
+    # Preferences page (routes.py: GET /preferences), not on the main index —
+    # openPreferences() opens it in its own window, it's never embedded.
+    page = browser_context.new_page()
+    page.goto(f"{BASE_URL}/preferences", wait_until="load")
+    yield page
+    page.close()
+
+
 class TestPageLoad:
     def test_title_contains_whisper(self, page):
         assert "Whisper" in page.title()
 
     def test_version_displayed(self, page):
-        # 版本號應顯示在頁面上
+        # 版本號是 window.onload 裡 fetch('/api/version') 非同步填入 #app-version 的，
+        # "load" 事件觸發時不保證已經回來，要等它填值才能斷言。
+        page.wait_for_function(
+            "document.getElementById('app-version')?.textContent?.includes('v')",
+            timeout=5000,
+        )
         content = page.content()
         assert "v2.2.1" in content
 
@@ -68,37 +84,44 @@ class TestObsidianToggle:
         assert initial_class != new_class or True  # toggle 可能有其他視覺變化
 
     def test_obsidian_label_updates(self, page):
+        # obsidian-toggle-label 是固定文案「Obsidian」（純標籤），開關狀態是靠
+        # #obsidian-toggle 本身的 class（.toggle.on）表示，不是文字切換——
+        # 跟 diarize-toggle 那種「開啟/關閉」文字切換是不同的既有設計。
         label = page.locator("#obsidian-toggle-label, [id*='obsidian'][id*='label']").first
         if label.count() == 0:
             pytest.skip("Obsidian label 元素不存在")
         toggle = page.locator("#obsidian-toggle").first
+        initial_class = toggle.get_attribute("class") or ""
         toggle.click()
         time.sleep(0.3)
-        text = label.inner_text()
-        assert text in ("開啟", "關閉")
+        assert label.inner_text() == "Obsidian"
+        new_class = toggle.get_attribute("class") or ""
+        assert initial_class != new_class
 
 
 class TestNotionSettings:
-    def test_notion_token_field_present(self, page):
-        field = page.locator("input[placeholder*='secret'], input[placeholder*='token'], #notion-token")
+    def test_notion_token_field_present(self, prefs_page):
+        field = prefs_page.locator("input[placeholder*='secret'], input[placeholder*='token'], #notion-token")
         assert field.count() > 0
 
-    def test_notion_page_id_field_present(self, page):
-        field = page.locator("input[placeholder*='32'], #notion-page-id, [id*='notion'][id*='page']")
+    def test_notion_page_id_field_present(self, prefs_page):
+        field = prefs_page.locator("input[placeholder*='32'], #notion-page-id, [id*='notion'][id*='page']")
         assert field.count() > 0
 
-    def test_notion_save_button_present(self, page):
-        btn = page.locator("button:has-text('驗證'), button:has-text('儲存'), #notion-save")
+    def test_notion_save_button_present(self, prefs_page):
+        btn = prefs_page.locator("button:has-text('驗證'), button:has-text('儲存'), #notion-save")
         assert btn.count() > 0
 
 
 class TestLLMSettings:
-    def test_claude_api_key_field_present(self, page):
-        field = page.locator("input[placeholder*='sk-ant'], input[placeholder*='Claude'], #claude-key")
+    def test_claude_api_key_field_present(self, prefs_page):
+        field = prefs_page.locator("input[placeholder*='sk-ant'], input[placeholder*='Claude'], #claude-key")
         assert field.count() > 0
 
-    def test_save_api_key_button_present(self, page):
-        btn = page.locator("button:has-text('儲存 API'), button:has-text('Save'), #save-api-key")
+    def test_save_api_key_button_present(self, prefs_page):
+        # Preferences has one shared "儲存" button for all settings — there's
+        # no dedicated "儲存 API" / "Save" button, so match on the real text.
+        btn = prefs_page.locator("button:has-text('儲存'), button:has-text('Save'), #save-api-key")
         assert btn.count() > 0
 
 
@@ -134,6 +157,11 @@ class TestVersionConsistency:
         import requests
         r = requests.get(f"{BASE_URL}/api/version")
         api_version = r.json().get("version", "")
+        # same async-fetch race as TestPageLoad.test_version_displayed
+        page.wait_for_function(
+            "document.getElementById('app-version')?.textContent?.includes('v')",
+            timeout=5000,
+        )
         page_content = page.content()
         assert api_version in page_content, f"API 版本 {api_version} 未顯示在 UI 中"
 
