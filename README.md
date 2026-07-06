@@ -125,7 +125,8 @@ bash build_app.sh
 | 🔊 錄音回放 | 標準模式轉錄完成後可播放原始錄音，方便聽打校對 |
 | ☁️ Notion 上傳 | 轉錄完成後一鍵上傳至指定 Notion 頁面，右上角顯示頁面真實標題 |
 | 📓 Obsidian 存檔 | 自動產生含 Dataview YAML frontmatter 的 .md 檔 |
-| 🤖 LLM 標點精修 | 轉錄後自動以 Claude / OpenAI 精修標點與同音詞糾錯 |
+| 🤖 LLM 標點精修 | 轉錄後自動以 Claude / OpenAI 精修標點、同音詞糾錯，並將簡體轉為台灣繁體用語 |
+| 🇹🇼 強制繁體中文 | OpenCC s2twp 確定性轉換 + LLM 雙層保障，輸出保證為繁體中文（台灣慣用詞） |
 | 🛡️ 意外防護 | 錄音誤按確認 modal、SSE 斷線自動重連、頁面關閉警告、跨分頁互斥鎖 |
 | 📦 ffmpeg 內建 | .app bundle 已內建 ffmpeg binary，無需 Homebrew，開箱即用 |
 | ⬇️ 模型下載提示 | 首次使用未快取模型時顯示下載進度 overlay，不再無聲等待 |
@@ -160,18 +161,22 @@ bash build_app.sh
 
 ---
 
-## LLM 標點後處理（可選）
+## LLM 標點後處理 + 繁體中文保證
 
-轉錄完成後，自動呼叫 LLM 精修標點符號並糾正同音錯字。
+轉錄完成後，自動呼叫 LLM 精修標點符號、糾正同音錯字，並將簡體中文轉為繁體中文（台灣慣用詞）。
 
-在 `.env` 設定任一 API Key 即可自動啟用（依優先順序）：
+**繁體中文雙層保障：**
+1. **LLM 層**：prompt 指示將簡體用語轉為台灣慣用寫法（信息→資訊、程序→程式）
+2. **OpenCC 層**：`s2twp` 模式做確定性字詞轉換，即使沒有 LLM Key 也保證輸出為繁體
+
+在 `.env` 設定任一 API Key 即可啟用 LLM 精修（依優先順序）：
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-xxxx    # Claude Haiku 4.5 ≈ NT$0.03/場
 OPENAI_API_KEY=sk-xxxx           # GPT-4o-mini      ≈ NT$0.05/場
 ```
 
-未設定任何 Key 時靜默略過，不影響基本轉錄功能。
+未設定任何 Key 時 LLM 精修靜默略過，但 OpenCC 繁體轉換仍會執行。
 
 ---
 
@@ -265,7 +270,27 @@ Whisper/
 
 ## 版本記錄
 
-### v1.6.5（目前版本）
+### v2.3.0（目前版本）
+
+**v2.3.0 Patch**（2026-07-06）
+
+強制繁體中文（台灣）輸出，徹底解決 Whisper 輸出夾雜簡體字問題。
+
+| # | 修復／新增 | 說明 |
+|---|------|------|
+| 1 | **OpenCC 簡轉繁保底** | 新增 `opencc` (`s2twp`) 確定性轉換，所有轉錄輸出在回傳前強制轉為繁體中文（台灣慣用詞），如「内存」→「記憶體」、「鼠标」→「滑鼠」 |
+| 2 | **LLM Prompt 簡繁指令** | LLM 後處理 prompt 加入簡體→繁體台灣用語轉換指令，搭配標點修正同步處理 |
+| 3 | **新增依賴** | `opencc-python-reimplemented>=0.1.7`、PyInstaller spec 加入 `opencc` hidden import |
+
+---
+
+**v2.3.0**（2026-07-03）
+
+macOS 主畫面響應式改版 + Preferences 分層重構。
+
+---
+
+### v1.6.5
 
 **v1.6.5**（2026-06-22）
 

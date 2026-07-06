@@ -46,6 +46,7 @@ a = Analysis(
         'lightning_fabric',
         'Foundation',
         'PyObjCTools.AppHelper',
+        'opencc',
     ],
     hookspath=[],
     runtime_hooks=[],

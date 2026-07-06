@@ -13,6 +13,29 @@ from pathlib import Path
 from typing import Optional
 
 
+# ── 簡體→繁體（台灣）確定性轉換 ──────────────────────────────
+_OPENCC_CONVERTER = None
+
+def _to_traditional(text: str) -> str:
+    """使用 OpenCC s2twp 將簡體中文轉為繁體中文（台灣慣用詞）。
+    s2twp = Simplified → Traditional (Taiwan) with phrase conversion.
+    若 opencc 未安裝則原文回傳。"""
+    global _OPENCC_CONVERTER
+    if not text:
+        return text
+    try:
+        if _OPENCC_CONVERTER is None:
+            import opencc
+            _OPENCC_CONVERTER = opencc.OpenCC('s2twp')
+        return _OPENCC_CONVERTER.convert(text)
+    except ImportError:
+        logging.warning("[Whisper] opencc 未安裝，跳過簡轉繁。請執行：pip install opencc-python-reimplemented")
+        return text
+    except Exception as e:
+        logging.warning("[Whisper] opencc 轉換失敗：%s", e)
+        return text
+
+
 class TranscriptionError(Exception):
     """帶有 error_code 的轉錄錯誤，routes.py 可直接取用 code 推送結構化 SSE。"""
     def __init__(self, code: str, message: str):
@@ -493,7 +516,7 @@ def run_whisper(
             if not kwargs.get("skip_llm") and has_llm_key():
                 broadcast("status", {"msg": "⏳ 語音辨識完畢，正在啟動 LLM 進行語意糾錯與標點處理..."})
                 full_text = llm_punctuate(full_text, extra_terms)
-            return full_text, lang, info
+            return _to_traditional(full_text), lang, info
 
         # 長音檔：切段
         chunk_frames = int(CHUNK_SECONDS * framerate)
@@ -533,7 +556,7 @@ def run_whisper(
         if not kwargs.get("skip_llm") and has_llm_key():
             broadcast("status", {"msg": "⏳ 全文轉錄完畢，正在啟動 LLM 進行語意糾錯與標點處理..."})
             full_text = llm_punctuate(full_text, extra_terms)
-        return full_text, lang, info
+        return _to_traditional(full_text), lang, info
 
     finally:
         Path(tmp_in_path).unlink(missing_ok=True)
