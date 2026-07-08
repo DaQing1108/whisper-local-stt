@@ -174,6 +174,8 @@ def save_to_obsidian(text: str, lang: str, meta: dict | None = None) -> str:
 
         segments = meta.get("segments") or []
         if segments:
+            from transcribe_common import clean_segments
+            segments = clean_segments(segments)
             lines = []
             for seg in segments:
                 t = int(seg.get("start", 0))

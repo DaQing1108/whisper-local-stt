@@ -504,6 +504,9 @@ def _finish_session(session_id: str) -> None:
             })
         cumulative += chunk_durations.get(i, 0)
 
+    from transcribe_common import clean_segments
+    all_segments = clean_segments(all_segments)
+
     info = {"model": sess["model"], "domain": sess["domain"],
             "extra_terms": sess["extra_terms"], "duration_seconds": cumulative,
             "segments": all_segments}

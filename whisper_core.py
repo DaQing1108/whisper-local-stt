@@ -44,6 +44,7 @@ class TranscriptionError(Exception):
 
 from llm_post import has_llm_key, llm_punctuate
 from sse import broadcast
+from transcribe_common import clean_segments
 
 # ── ffmpeg 路徑解析（lazy，呼叫時才找，避免 import 時 PATH 尚未設好）────
 os.environ["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "")
@@ -407,7 +408,7 @@ def _transcribe_file(wav_path: str, model_name: str, opts: dict) -> dict:
         if _get_system_python_mlx():
             try:
                 data = _transcribe_mlx_system_subprocess(wav_path, model_name, language, initial_prompt)
-                segs = data.get("segments", [])
+                segs = clean_segments(data.get("segments", []))
                 text = _punctuate_segments(segs) if segs else data.get("text", "").strip()
                 return {"text": text, "language": data.get("language", "?"), "segments": segs}
             except Exception as e:
@@ -415,7 +416,7 @@ def _transcribe_file(wav_path: str, model_name: str, opts: dict) -> dict:
         if _get_system_python():
             try:
                 data = _transcribe_fw_subprocess(wav_path, model_name, language, initial_prompt)
-                segs = data.get("segments", [])
+                segs = clean_segments(data.get("segments", []))
                 text = _punctuate_segments(segs) if segs else data.get("text", "").strip()
                 return {"text": text, "language": data.get("language", "?"), "segments": segs}
             except Exception as e:
@@ -425,7 +426,7 @@ def _transcribe_file(wav_path: str, model_name: str, opts: dict) -> dict:
     if _HAS_MLX:
         try:
             data = _transcribe_mlx_subprocess(wav_path, model_name, language, initial_prompt)
-            segs = data.get("segments", [])
+            segs = clean_segments(data.get("segments", []))
             text = _punctuate_segments(segs) if segs else data.get("text", "").strip()
             return {"text": text, "language": data.get("language", "?"), "segments": segs}
         except Exception as e:
@@ -446,7 +447,7 @@ def _transcribe_file(wav_path: str, model_name: str, opts: dict) -> dict:
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 300},
     )
-    segs = [{"text": s.text, "start": s.start, "end": s.end} for s in raw_segs]
+    segs = clean_segments([{"text": s.text, "start": s.start, "end": s.end} for s in raw_segs])
     text = _punctuate_segments(segs) if segs else ""
     return {"text": text, "language": info.language, "segments": segs}
 

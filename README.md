@@ -1,13 +1,19 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.3.0
 
 ## Current State
-Last checkpoint: 2026-07-03 10:40
-Phase: macOS 主畫面響應式改版（Phase 1 五段式結構 + 三種視窗模式）+ Preferences 分層重構驗收 + 版本升級 v2.3.0
-Working: 五段式結構重排（app-toolbar/capture-panel/context-bar/results-workspace）、展開/一般/直式三種視窗模式 + phone 底部導覽（單一 DOM + data-view-mode 屬性驅動，錄音狀態跨模式切換不中斷）、Preferences 三分區可折疊重構，皆已 unit(158/158)+e2e 測試通過、兩輪獨立 code review、封裝後真實截圖驗證，並 push 至 remote main
-Next action: 待使用者指示是否進行 Phase 2（互動細節：guidance strip 動態開合、disabled reason）或 Phase 3（compact 行為深化）
+Last checkpoint: 2026-07-08 10:10
+Phase: Hallucination 漏檢修復（character-level CJK 重複偵測 + segment 清理管線）
+Working: is_hallucination() 強化三項偵測（char-level CJK 重複、foreign script 污染、原有 word/phrase-level）+ 新增 clean_segments() segment 後處理函式，已插入 whisper_core.py 4 個引擎出口 + integrations.py + routes.py，unit tests 28/28 通過，已重新打包 v2.3.0
+Next action: 日常使用觀察 hallucination 過濾效果；Phase 2/3 UI 改版待排
 Blockers: none
 
 ## Checkpoint History
+### 2026-07-08 10:10｜Hallucination 漏檢修復
+- Completed: (1) is_hallucination() 新增 character-level CJK 重複偵測（Counter 對每字元計頻，佔 60%+ 且 10+ 次即判定）；(2) 新增 foreign script 污染偵測（Cyrillic/Arabic/Thai 等佔比 > 30%）；(3) 新增 clean_segments() segment 層級後處理（空白 segment 移除、hallucination segment 過濾、重複 timestamp 去重）；(4) whisper_core.py 4 個引擎出口插入 clean_segments()；(5) integrations.py save_to_obsidian() + routes.py _finish_session() 加防線
+- State: unit tests 28/28 通過（新增 12 cases：4 char-level + 3 foreign script + 5 clean_segments），已重新打包 v2.3.0 並安裝
+- Root cause: 中文字元重複（如「好」×200）因 split() 空格分詞無法偵測；空白 phantom segments 因 len<20 直接放行
+- Next: 日常使用觀察過濾效果
+
 ### 2026-07-03 10:40｜macOS UI 響應式改版 + Preferences 驗收 + v2.3.0
 - Completed: (1) Phase 1 五段式結構重排（commit c46fbfc）；(2) 展開/一般/直式三種視窗模式 + phone 風格底部導覽 Record/History/Dictionaries/Settings（commit e4ef4e1），核心決策為單一 DOM + data-view-mode 屬性驅動 CSS 重排，避免模式切換中斷錄音狀態；(3) 修正既有 e2e 測試 3 類 test/實作不匹配問題（commit 4f6c949）；(4) 版本升級 2.2.1→2.3.0（commit 7f17070）；(5) 驗收既有未 commit 的 Preferences 分層重構並補齊版本號（commit f9174c0）
 - State: unit tests 158/158、e2e tests 全數通過（含 3 個核心行為測試驗證錄音狀態跨模式不中斷）；獨立 code review 兩輪，皆確認 CRITICAL/HIGH 問題已解決；已打包 v2.3.0 並用真實 App 截圖驗證三模式切換、compact 4-tab 導覽、深淺主題渲染；5 個 commit 皆已 push 至 remote main
