@@ -1,5 +1,5 @@
 # ── Core Whisper ──────────────────────────────────────────────
-openai-whisper==20240930
+openai-whisper==20250625
 faster-whisper==1.2.1
 mlx-whisper==0.4.3; sys_platform == 'darwin'  # Apple Silicon only
 
