@@ -259,6 +259,15 @@ Whisper/
 
 ---
 
+## Governance
+
+- Branch: `main`
+- Changes should go through pull requests
+- Repo validation is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+- Ownership defaults to [`.github/CODEOWNERS`](.github/CODEOWNERS)
+- Contribution workflow is documented in [CONTRIBUTING.md](CONTRIBUTING.md)
+- Security reporting guidance is in [SECURITY.md](SECURITY.md)
+
 ## 環境變數（.env）
 
 | 變數 | 說明 |
