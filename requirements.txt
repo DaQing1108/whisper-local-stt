@@ -14,4 +14,4 @@ notion-client==3.1.0
 opencc-python-reimplemented>=0.1.7
 
 # ── GUI App ───────────────────────────────────────────────────
-pywebview>=4.4
+pywebview>=6.2.1
