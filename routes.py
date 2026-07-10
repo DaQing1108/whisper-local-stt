@@ -798,7 +798,8 @@ def system_audio_start():
     import system_audio_sc as _sc
 
     if (_sa.get_capture() and _sa.get_capture().is_running) or \
-       (_sc.get_sc_capture() and _sc.get_sc_capture().is_running):
+       (_sc.get_sc_capture() and _sc.get_sc_capture().is_running) or \
+       (_sa.get_mixed_capture() and _sa.get_mixed_capture().is_running):
         return jsonify(error="系統音訊擷取已在運行中"), 409
 
     data = request.json or {}

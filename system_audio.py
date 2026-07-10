@@ -202,7 +202,7 @@ def start_capture(
 ) -> SystemAudioCapture:
     global _capture
     with _capture_lock:
-        if _capture and _capture.is_running:
+        if (_capture and _capture.is_running) or (_mixed_capture and _mixed_capture.is_running):
             raise RuntimeError("系統音訊擷取已在運行中")
         cap = SystemAudioCapture(on_chunk, on_error=on_error)
         cap.start()
