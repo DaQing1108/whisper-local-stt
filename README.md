@@ -1,13 +1,20 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.3.0
 
 ## Current State
-Last checkpoint: 2026-07-11
-Phase: Whisper STT 完整架構與功能驗證 review + 全數修復（6 個 commit）
-Working: 4 個並行 subagent 完成核心架構/打包邊界/整合功能/測試覆蓋四大範圍審查（3 Critical/4 High/6 Medium），依優先序全部修復：gui.spec 打包回歸清理、/api/transcribe-sync 與 Notion /upload 測試補強、混音擷取併發 guard 修正、system_audio_sc.py 等技術債清理、CLAUDE.md 架構決策記錄、CI 新增 macOS integration-test 與 bundle 依賴檢查 job（含過程中發現並修復的 WHISPER_TEST 未接線問題與 3 個既有測試 bug）。189 個 unit test + 16 個 integration test 全數通過
-Next action: 使用者至 GitHub Actions 確認新 CI job 雲端執行結果；ctranslate2.converters 拉入 torch 的深層根因待後續處理（已建 task chip）
+Last checkpoint: 2026-07-11 12:07
+Phase: Whisper STT 完整架構審查與修復 + 兩輪 CI 除錯，全部收尾
+Working: 10 個 commit 全數完成並驗證：4-subagent 架構 review 修復（gui.spec 打包回歸、測試覆蓋補強、混音併發 guard、技術債清理、CLAUDE.md 決策記錄）+ CI 擴大（macOS integration-test / bundle 依賴檢查 job）+ torch 排除打包優化（bundle 731M→400M）+ 兩輪 CI 除錯（wheel 建置工具缺失、gui.spec .env 假設錯誤、既有測試斷言錯誤）。最新 commit e93f8d8 觸發的 CI run（29138838327）三個 job 全綠：unit-tests、integration-tests、bundle-dependency-check
+Next action: 無待辦，整個 review-and-fix 循環已收尾，等待使用者下一個任務
 Blockers: none
 
 ## Checkpoint History
+### 2026-07-11 12:07｜CI 兩輪除錯收尾 + torch 打包優化
+- Completed: (1) 排除 torch 打包，app bundle 縮小 304M（704M→400M，commit f3baeb2），以 `sys.meta_path` import-blocking 測試驗證真實推論路徑未受影響；(2) CI 第一輪失敗修復——補上 wheel 建置工具解決 macOS runner 安裝 openai-whisper 失敗（commit bdb76f2）；(3) CI 第二輪失敗修復——gui.spec 假設 `.env` 一定存在於全新 checkout（CI 上不成立）+ 一個既有 integration test 斷言邏輯錯誤（commit e93f8d8）；(4) 確認最新 commit 觸發的 CI run 三個 job（unit-tests / integration-tests / bundle-dependency-check）全數 success
+- State: 10 個 commit 全數 push 至 origin/main，working tree 乾淨，CI 全綠，無需第三輪修復
+- Root cause/決策背景: `ctranslate2.converters` 因其 `__init__.py` 無條件 import 無法排除，但 torch 本身可以排除（faster_whisper/ctranslate2 內所有 torch 使用皆為 try/except 保護或 function-local lazy import）；gui.spec 的 `.env` datas entry 在任何跑過一次 app 的開發機上都存在，因此本機測試從未暴露此問題，只有全新 CI runner 才會踩到
+- 踩過的坑: 連續完整 PyInstaller 重建（~5 次）驗證打包 excludes 清單，耗盡本機記憶體（已存入全域 memory `feedback_pyinstaller_rebuild_cost.md`）；第一次 torch 排除驗證方式（打包後直接呼叫 API）具誤導性，因本機系統 Python 已裝 mlx_whisper/faster_whisper，走的是 external subprocess 路徑而非真正要驗證的 in-process 路徑，改用 `sys.meta_path` 精確阻擋 import 才驗證到位
+- 可複用摘要: 驗證打包依賴排除時，優先用 PyInstaller 自己的 xref report（`build/*/xref-*.html`）而非檔案系統 `find`，後者對編入 PYZ 封存檔的純 Python 套件會有 false negative；CI 除錯若瀏覽器工具未登入 GitHub，只能看到 job 通過/失敗圖示，看不到展開的 step log，需請使用者貼上實際錯誤文字才能精確定位
+
 ### 2026-07-11｜Whisper STT 完整架構審查與修復
 - Completed: (1) 4 個並行唯讀 subagent 完成核心架構/打包邊界/整合功能/測試覆蓋四大範圍審查，發現 gui.spec 打包設定回歸重新引入 torch/pyannote 打包風險，以及兩個核心端點零測試覆蓋 (2) 依優先序修復並各自 push：gui.spec 清理（9af0494）、補 /api/transcribe-sync 與 Notion /upload 測試（9ddcb28）、修正混音擷取併發 guard 缺口（bb16d65）、清理 system_audio_sc.py 等技術債（53eaa4b）、CLAUDE.md 補架構決策記錄（25ada68）、CI 新增 macOS integration-test 與 bundle 依賴檢查 job（46f9721）
 - State: 189 個 unit test + 16 個 integration test 全數通過，6 個 commit 皆已 push 至 origin/main，完整 review 報告與過程記錄已存入 Notion「工作總結倉庫」
