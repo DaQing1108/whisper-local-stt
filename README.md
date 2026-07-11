@@ -1,13 +1,19 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.3.0
 
 ## Current State
-Last checkpoint: 2026-07-08 10:10
-Phase: Hallucination 漏檢修復（character-level CJK 重複偵測 + segment 清理管線）
-Working: is_hallucination() 強化三項偵測（char-level CJK 重複、foreign script 污染、原有 word/phrase-level）+ 新增 clean_segments() segment 後處理函式，已插入 whisper_core.py 4 個引擎出口 + integrations.py + routes.py，unit tests 28/28 通過，已重新打包 v2.3.0
-Next action: 日常使用觀察 hallucination 過濾效果；Phase 2/3 UI 改版待排
+Last checkpoint: 2026-07-11
+Phase: Whisper STT 完整架構與功能驗證 review + 全數修復（6 個 commit）
+Working: 4 個並行 subagent 完成核心架構/打包邊界/整合功能/測試覆蓋四大範圍審查（3 Critical/4 High/6 Medium），依優先序全部修復：gui.spec 打包回歸清理、/api/transcribe-sync 與 Notion /upload 測試補強、混音擷取併發 guard 修正、system_audio_sc.py 等技術債清理、CLAUDE.md 架構決策記錄、CI 新增 macOS integration-test 與 bundle 依賴檢查 job（含過程中發現並修復的 WHISPER_TEST 未接線問題與 3 個既有測試 bug）。189 個 unit test + 16 個 integration test 全數通過
+Next action: 使用者至 GitHub Actions 確認新 CI job 雲端執行結果；ctranslate2.converters 拉入 torch 的深層根因待後續處理（已建 task chip）
 Blockers: none
 
 ## Checkpoint History
+### 2026-07-11｜Whisper STT 完整架構審查與修復
+- Completed: (1) 4 個並行唯讀 subagent 完成核心架構/打包邊界/整合功能/測試覆蓋四大範圍審查，發現 gui.spec 打包設定回歸重新引入 torch/pyannote 打包風險，以及兩個核心端點零測試覆蓋 (2) 依優先序修復並各自 push：gui.spec 清理（9af0494）、補 /api/transcribe-sync 與 Notion /upload 測試（9ddcb28）、修正混音擷取併發 guard 缺口（bb16d65）、清理 system_audio_sc.py 等技術債（53eaa4b）、CLAUDE.md 補架構決策記錄（25ada68）、CI 新增 macOS integration-test 與 bundle 依賴檢查 job（46f9721）
+- State: 189 個 unit test + 16 個 integration test 全數通過，6 個 commit 皆已 push 至 origin/main，完整 review 報告與過程記錄已存入 Notion「工作總結倉庫」
+- Root cause/決策背景: gui.spec 的 hiddenimports 從未同步 diarize.py 的 subprocess 隔離重構，是這次最關鍵的回歸來源；CI 擴大過程中意外發現 WHISPER_TEST 環境變數從未真正被讀取、3 個既有 integration test 有邏輯錯誤，皆已修復並經使用者同意才擴大範圍，獨立 review 又抓到 3 個 HIGH（含一個自己漏改的同類 bug）也一併修復
+- Next: 使用者至 GitHub Actions 確認新 CI job 雲端執行結果；ctranslate2.converters 拉入 torch 的問題已建 task chip，待後續處理
+
 ### 2026-07-08 10:10｜Hallucination 漏檢修復
 - Completed: (1) is_hallucination() 新增 character-level CJK 重複偵測（Counter 對每字元計頻，佔 60%+ 且 10+ 次即判定）；(2) 新增 foreign script 污染偵測（Cyrillic/Arabic/Thai 等佔比 > 30%）；(3) 新增 clean_segments() segment 層級後處理（空白 segment 移除、hallucination segment 過濾、重複 timestamp 去重）；(4) whisper_core.py 4 個引擎出口插入 clean_segments()；(5) integrations.py save_to_obsidian() + routes.py _finish_session() 加防線
 - State: unit tests 28/28 通過（新增 12 cases：4 char-level + 3 foreign script + 5 clean_segments），已重新打包 v2.3.0 並安裝
