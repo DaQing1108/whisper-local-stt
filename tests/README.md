@@ -5,7 +5,7 @@
 ### Unit Tests（每次改完 code 就跑）
 
 ```bash
-# 不需要 server，61 個測試，約 30s
+# 不需要 server，184 個測試，約 40s
 /Users/daqingliao/Library/Python/3.9/bin/pytest tests/unit/ -v
 ```
 
@@ -63,7 +63,8 @@ tests/
 
 ## Release 流程
 
-1. `pytest tests/unit/` — 61 個 unit tests 全過
+1. `pytest tests/unit/` — 184 個 unit tests 全過
 2. `WHISPER_TEST=1 python3 app.py & pytest tests/integration/ -m integration`
-3. `bash package.sh` — 打包 + smoke test
-4. 照 `manual_checklist.md` 手動跑（5-10 分鐘）
+3. `pytest tests/accuracy/ --run-accuracy` — CER 準確率回歸（需先備妥 `tests/accuracy/reference/*.wav`）
+4. `bash package.sh` — 打包 + smoke test
+5. 照 `manual_checklist.md` 手動跑（5-10 分鐘）

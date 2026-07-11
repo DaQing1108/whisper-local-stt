@@ -793,12 +793,10 @@ def save_config():
 @bp.route("/api/system-audio/start", methods=["POST", "OPTIONS"])
 @cross_origin(origins=_PLUGIN_ORIGINS)
 def system_audio_start():
-    """啟動 ScreenCaptureKit 系統音訊即時轉錄（in-process pyobjc，TCC 屬於主 app）。"""
+    """啟動系統音訊即時轉錄（Swift subprocess + ScreenCaptureKit，TCC 屬於主 app）。"""
     import system_audio as _sa
-    import system_audio_sc as _sc
 
     if (_sa.get_capture() and _sa.get_capture().is_running) or \
-       (_sc.get_sc_capture() and _sc.get_sc_capture().is_running) or \
        (_sa.get_mixed_capture() and _sa.get_mixed_capture().is_running):
         return jsonify(error="系統音訊擷取已在運行中"), 409
 
@@ -859,8 +857,7 @@ def system_audio_start():
                     text = ""
                     chunk_info = {}  # discard hallucinated segments too
 
-                sys_audio_chunk_sec = 15
-                offset = chunk_index * sys_audio_chunk_sec
+                offset = chunk_index * _sa.CHUNK_SECONDS
                 with _chunk_sessions_lock:
                     sess = _chunk_sessions.get(session_id)
                     if sess is not None:

@@ -6,7 +6,6 @@ setup_notion.py — 互動式引導，幫你完成 Notion integration 設定。
 
 import os
 import sys
-from pathlib import Path
 
 
 def main():
@@ -45,12 +44,22 @@ def main():
     if "-" in page_id:
         page_id = page_id.split("-")[-1]
 
-    # 寫入 .env
-    env_path = Path(".env")
-    env_content = f"NOTION_TOKEN={token}\nNOTION_PAGE_ID={page_id}\n"
-    env_path.write_text(env_content)
+    # 寫入 .env（統一寫到 Application Support，與 GUI 設定共用同一份，保留其他已有的 key）
+    from constants import ENV_PATH
+    env_path = ENV_PATH
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    existing: dict[str, str] = {}
+    if env_path.exists():
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            raw = raw.strip()
+            if raw and not raw.startswith("#") and "=" in raw:
+                k, _, v = raw.partition("=")
+                existing[k.strip()] = v.strip()
+    existing["NOTION_TOKEN"] = token
+    existing["NOTION_PAGE_ID"] = page_id
+    env_path.write_text("".join(f"{k}={v}\n" for k, v in existing.items()))
     print()
-    print(f"✅ 設定完成！已寫入 .env")
+    print(f"✅ 設定完成！已寫入 {env_path}")
     print()
 
     # 驗證連線
