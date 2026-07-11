@@ -1,6 +1,7 @@
 """integration/test_system_audio_flow.py — 系統音訊流程：inject → stop → Obsidian 存檔驗證。"""
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 
@@ -9,7 +10,28 @@ import requests
 
 from tests.conftest import make_silence_wav
 
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from constants import ENV_PATH  # noqa: E402  server 與測試 process 在同一台機器，共用同一份 .env
+
 pytestmark = pytest.mark.integration
+
+
+def _snapshot_env() -> str | None:
+    """讀取 server 實際在用的 .env 原始內容（None 代表檔案原本不存在）。
+
+    比透過 /config API 記錄 obsidian_path 再回寫更可靠：save_config() 的
+    obsidian_path 只在真值時才寫入（見 routes.py），送空字串無法清除既有值，
+    用「回填空字串」的方式復原永遠不完整。直接快照/還原整份檔案內容才能保證
+    測試前後 byte-for-byte 一致，不會在使用者本機留下永久性設定污染。
+    """
+    return ENV_PATH.read_text(encoding="utf-8") if ENV_PATH.exists() else None
+
+
+def _restore_env(snapshot: str | None) -> None:
+    if snapshot is None:
+        ENV_PATH.unlink(missing_ok=True)
+    else:
+        ENV_PATH.write_text(snapshot, encoding="utf-8")
 
 
 class TestSystemAudioObsidian:
@@ -18,38 +40,51 @@ class TestSystemAudioObsidian:
         session_id = f"test_sysaudio_{int(time.time())}"
         wav = make_silence_wav(2.0)
 
-        # 設定 Obsidian vault 路徑（透過 /config POST）
+        # 設定 Obsidian vault 路徑（透過 /config POST，欄位名須對應 save_config() 的 obsidian_path；
+        # server 是獨立 subprocess，只有真正打這支 API 才能讓它的 os.environ 生效，
+        # monkeypatch 這個 process 的變數對它沒有作用）
+        env_snapshot = _snapshot_env()
         r = requests.post(f"{server_url}/config", json={
-            "obsidian_meeting_path": str(tmp_obsidian_vault)
+            "obsidian_path": str(tmp_obsidian_vault)
         })
-        # 若 config 不支援此欄位，用環境變數注入（在 conftest 設定）
-
-        # inject 模擬系統音訊 chunk
-        r = requests.post(
-            f"{server_url}/api/test/inject-chunk",
-            files={"wav": ("test.wav", wav, "audio/wav")},
-            data={
-                "session_id": session_id,
-                "chunk_index": "0",
-                "save_obsidian": "true",
-            },
-        )
         assert r.status_code == 200
-        time.sleep(3)
 
-        # finish session（模擬停止系統音訊）
-        r = requests.post(
-            f"{server_url}/api/finish-session",
-            json={"session_id": session_id, "total": 1},
-        )
-        assert r.json().get("ok") is True
-        time.sleep(2)
+        try:
+            # inject 模擬系統音訊 chunk
+            r = requests.post(
+                f"{server_url}/api/test/inject-chunk",
+                files={"wav": ("test.wav", wav, "audio/wav")},
+                data={
+                    "session_id": session_id,
+                    "chunk_index": "0",
+                    "save_obsidian": "true",
+                },
+            )
+            assert r.status_code == 200
+            time.sleep(3)
 
-    def test_obsidian_save_api_directly(self, server_url, tmp_obsidian_vault, monkeypatch):
-        """直接打 /api/save_to_obsidian 端點，驗證寫檔成功。"""
-        import integrations
-        original_path = integrations._OBSIDIAN_PATH
-        integrations._OBSIDIAN_PATH = str(tmp_obsidian_vault)
+            # finish session（模擬停止系統音訊；真正的前端用 FormData，不是 JSON）
+            r = requests.post(
+                f"{server_url}/api/finish-session",
+                data={"session_id": session_id, "total": "1"},
+            )
+            assert r.json().get("status") == "ok"
+            time.sleep(2)
+        finally:
+            _restore_env(env_snapshot)
+
+    def test_obsidian_save_api_directly(self, server_url, tmp_obsidian_vault):
+        """直接打 /api/save_to_obsidian 端點，驗證寫檔成功。
+
+        save_to_obsidian() 每次呼叫都直接讀取 os.environ["OBSIDIAN_MEETING_PATH"]
+        （見 integrations.py:153），不是讀 integrations._OBSIDIAN_PATH 這個只在
+        import 當下算過一次、之後從未被使用的模組常數——用 monkeypatch 改後者對
+        實際行為沒有影響，而且 server 是獨立 subprocess，同一個限制在這裡更明顯：
+        必須透過 /config 這支 API 才能改到 server 自己 process 裡的 os.environ。
+        """
+        env_snapshot = _snapshot_env()
+        r = requests.post(f"{server_url}/config", json={"obsidian_path": str(tmp_obsidian_vault)})
+        assert r.status_code == 200
 
         try:
             r = requests.post(f"{server_url}/api/save_to_obsidian", json={
@@ -68,7 +103,7 @@ class TestSystemAudioObsidian:
             assert "這是一段測試的會議記錄" in content
             assert "language: zh" in content
         finally:
-            integrations._OBSIDIAN_PATH = original_path
+            _restore_env(env_snapshot)
 
     def test_obsidian_save_empty_text_rejected(self, server_url):
         r = requests.post(f"{server_url}/api/save_to_obsidian", json={

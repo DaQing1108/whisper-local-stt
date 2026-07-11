@@ -10,6 +10,7 @@ import logging
 import os
 import signal
 import socketserver
+import sys
 import threading
 import traceback
 import warnings
@@ -61,6 +62,11 @@ warnings.filterwarnings('ignore')
 # ── Flask app ─────────────────────────────────────────────────
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024 * 1024  # 1 GB
+# 只在 source 執行時允許測試模式；packaged bundle（gui.spec 會把 .env 一起打包）
+# 絕不能因為開發者的 .env 裡殘留 WHISPER_TEST=1 就讓正式 app 開啟 debug 模式
+# （/api/test/inject-chunk 這種測試專用端點會因此暴露給真實使用者）
+if not getattr(sys, "frozen", False) and os.environ.get("WHISPER_TEST") == "1":
+    app.config["DEBUG"] = True
 
 # 注入 HTML 後再註冊 Blueprint（routes.py 依賴 HTML_PAGE）
 from ui import HTML_PAGE

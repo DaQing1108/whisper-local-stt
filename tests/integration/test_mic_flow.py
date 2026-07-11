@@ -62,13 +62,13 @@ class TestChunkUpload:
         assert r.status_code == 200
         time.sleep(3)  # 等轉錄完成
 
-        # finish session
+        # finish session（真正的前端用 FormData 呼叫，不是 JSON——route 讀 request.form）
         r = requests.post(
             f"{server_url}/api/finish-session",
-            json={"session_id": session_id, "total": 1},
+            data={"session_id": session_id, "total": "1"},
         )
         assert r.status_code == 200
-        assert r.json().get("ok") is True
+        assert r.json().get("status") == "ok"
 
     def test_last_transcript_after_finish(self, server_url):
         """finish 後 /api/last_transcript 應回傳結果。"""
@@ -82,10 +82,11 @@ class TestChunkUpload:
         )
         time.sleep(3)
 
-        requests.post(
+        r = requests.post(
             f"{server_url}/api/finish-session",
-            json={"session_id": session_id, "total": 1},
+            data={"session_id": session_id, "total": "1"},
         )
+        assert r.json().get("status") == "ok"
         time.sleep(2)
 
         r = requests.get(f"{server_url}/api/last_transcript")
