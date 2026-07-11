@@ -16,7 +16,7 @@ a = Analysis(
     datas=[
         # 專案所有 .py（routes / whisper_core / sse / ui / integrations / llm_post / version）
         ('*.py',           '.'),
-        ('.env',           '.'),
+        ('.env',           '.') if (project_dir / '.env').exists() else ('gui.py', '.'),
         ('.env.example',   '.') if (project_dir / '.env.example').exists() else ('gui.py', '.'),
         # bin/ 目錄（ffmpeg + system_audio_capture）
         ('bin',            'bin'),
