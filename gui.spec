@@ -43,7 +43,10 @@ a = Analysis(
     ],
     hookspath=[],
     runtime_hooks=[],
-    excludes=['tkinter', 'PyQt5', 'PyQt6', 'wx'],
+    # torch 只被 ctranslate2.converters（faster_whisper 的依賴鏈）以 try/except 防護或
+    # 函式內 lazy import 的方式引用（見 ctranslate2/converters/transformers.py、fairseq.py），
+    # 本 app 從不呼叫模型轉換功能，排除後 import ctranslate2 應仍會成功
+    excludes=['tkinter', 'PyQt5', 'PyQt6', 'wx', 'torch'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

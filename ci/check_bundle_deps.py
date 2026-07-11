@@ -1,19 +1,20 @@
-"""ci/check_bundle_deps.py — 確認 pyannote 沒有被打包進 PyInstaller bundle。
+"""ci/check_bundle_deps.py — 確認 pyannote 與 torch 沒有被打包進 PyInstaller bundle。
 
 CLAUDE.md NEVER #4：pyannote/torch/speechbrain 等重量級 ML 依賴不能被 PyInstaller
 直接打包，必須靠 diarize.py 的 subprocess 隔離。這支腳本檢查 gui.spec 的
-hiddenimports 有沒有意外重新把 pyannote 拉回 bundle（2026-07-10 發生過一次
-這樣的回歸，見 commit 9af0494）。
+hiddenimports/excludes 有沒有意外讓這些套件重新回到 bundle：
+- pyannote 家族：2026-07-10 發生過一次回歸（hiddenimports 誤加，見 commit 9af0494）
+- torch：2026-07-11 確認可安全排除（gui.spec excludes 加入 'torch'，見 commit）——
+  ctranslate2.converters 對 torch 的依賴皆有防護（try/except 或函式內 lazy import），
+  faster_whisper 本身無直接依賴，已用「封鎖 torch import + 實際跑一次 WhisperModel
+  轉錄」的方式驗證過整條鏈路仍正常運作。torchaudio/lightning/pytorch_lightning/
+  lightning_fabric/torchmetrics/functorch 只透過 torch 自己的內部機制間接可達，
+  排除 torch 後這些會一併消失，不需要逐一列舉
 
 純 Python 程式碼會被編譯進 PyInstaller 的 PYZ 封存檔，不會在 dist/*.app 底下
 以資料夾形式出現，所以不能用 find 檢查檔案系統——要讀 PyInstaller 自己產生的
 依賴分析報告（build/<name>/xref-<name>.html），確認目標套件的 moduletype
 不是 Package/SourceModule 等「已收錄」的分類。
-
-刻意不檢查 torch/lightning/pytorch_lightning/lightning_fabric：這幾個目前仍
-透過 ctranslate2.converters（faster_whisper 的依賴鏈）存在於 bundle 裡，是
-已知、獨立追蹤的問題（見 task chip），不是這次要防的回歸，加進來只會造成
-這個檢查永遠失敗、失去訊號價值。
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ import glob
 import re
 import sys
 
-FORBIDDEN = ["pyannote", "pyannote.audio", "pyannote.core"]
+FORBIDDEN = ["pyannote", "pyannote.audio", "pyannote.core", "torch"]
 INCLUDED_TYPES = {"Package", "SourceModule", "Extension", "NamespacePackage"}
 
 
@@ -52,12 +53,12 @@ def main() -> int:
     found = find_forbidden_packages(content)
 
     if found:
-        print("❌ 發現 pyannote 被重新打包進 bundle（gui.spec hiddenimports 回歸）：")
+        print("❌ 發現不該被打包的重量級套件回到 bundle（gui.spec hiddenimports/excludes 回歸）：")
         for name, kind in found:
             print(f"   {name}: {kind}")
         return 1
 
-    print("✅ Bundle 分析乾淨，pyannote 未被收錄")
+    print("✅ Bundle 分析乾淨，pyannote 與 torch 皆未被收錄")
     return 0
 
 
