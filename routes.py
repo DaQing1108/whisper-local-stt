@@ -1432,8 +1432,9 @@ def save_to_obsidian_route():
     meeting_id = meeting_id or (current_summary or {}).get("meeting_id") or uuid4().hex
     # Footer publication sends text only. Recover the original Whisper segments
     # from the current meeting so the raw Obsidian transcript keeps its timecodes.
-    if not meta.get("segments") and _last_transcript.get("meeting_id") == meeting_id:
-        meta["segments"] = _last_transcript.get("segments", [])
+    transcript_state = _last_transcript or {}
+    if not meta.get("segments") and transcript_state.get("meeting_id") == meeting_id:
+        meta["segments"] = transcript_state.get("segments", [])
     existing_path = (current_summary or {}).get("obsidian_file", "")
     was_published = bool(existing_path and Path(existing_path).exists())
     try:
