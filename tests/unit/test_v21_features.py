@@ -233,7 +233,7 @@ class TestUXImprovements:
 # ── 自動記住上次錄音/存檔設定 ─────────────────────────────────
 
 class TestLastSettingsPersistence:
-    """驗證 model/lang/mode/domain/Obsidian/Notion/混音 設定會寫入並還原 localStorage。"""
+    """驗證錄音設定會寫入並還原 localStorage；發布目的地不再是錄音設定。"""
 
     def _js(self):
         return (Path(__file__).parent.parent.parent / "static" / "app.js").read_text()
@@ -252,13 +252,13 @@ class TestLastSettingsPersistence:
         set_pill_body = js.split("function setPill(el, groupId) {")[1].split("\n}")[0]
         assert "_saveLastSetting(key, el.dataset.val)" in set_pill_body
 
-    def test_toggle_functions_persist_state(self):
-        """happy path：Obsidian / Notion 開關切換後會寫入 localStorage。"""
+    def test_publish_destinations_are_not_persisted_as_auto_save_toggles(self):
+        """Obsidian / Notion 僅能從 footer 手動發布，不保留本次自動發布開關。"""
         js = self._js()
-        toggle_notion_body = js.split("function toggleNotion() {")[1].split("\n}")[0]
-        toggle_obsidian_body = js.split("function toggleObsidian() {")[1].split("\n}")[0]
-        assert "_saveLastSetting('notionEnabled', notionEnabled)" in toggle_notion_body
-        assert "_saveLastSetting('obsidianEnabled', obsidianEnabled)" in toggle_obsidian_body
+        assert "function toggleNotion()" not in js
+        assert "function toggleObsidian()" not in js
+        assert "async function saveToObsidian()" in js
+        assert "async function uploadToNotion()" in js
 
     def test_mix_mic_toggle_persists_on_change(self):
         """happy path：混音勾選變更時寫入 localStorage。"""

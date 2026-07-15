@@ -5,15 +5,50 @@ import logging
 import os
 import re
 import threading
-import time
 from datetime import datetime
 from pathlib import Path
-
-from sse import broadcast
 
 _OBSIDIAN_PATH = os.environ.get("OBSIDIAN_MEETING_PATH", "")
 
 _MEETING_NOTES_CMD = Path.home() / ".claude" / "commands" / "meeting-notes.md"
+
+_APP_SUMMARY_SYSTEM_PROMPT = """你是 Whisper STT 內建的會議摘要助手。
+
+你的唯一任務是根據既有逐字稿，直接產出可讀、可編輯、可存檔的會議摘要。
+
+硬性規則：
+- 不要反問使用者，不要提出澄清問題，不要要求補資料
+- 不要寫「請提供」「請確認」「我需要更多資訊」這類句子
+- 資訊不足時，直接用「未知」、「未提及」或「[待補]」標示
+- 不要虛構與會者、日期、決策者、期限或數字
+- 以逐字稿原文語言輸出；若逐字稿是中文，使用繁體中文
+- 輸出內容要能直接顯示在 app 的 summary 分頁，也能直接存入 Obsidian
+
+請用以下結構輸出：
+## 摘要
+用 2-4 句整理本次會議主題、結論與目前狀態。
+
+## 決策
+- 若有明確決策，列成 bullet
+- 若沒有，寫「- 未提及明確決策」
+
+## 行動事項
+- 格式：`- [Owner 或 未知] 行動內容（Due: 日期或未提及）`
+- 若沒有，寫「- 未提及明確行動事項」
+
+## 待確認
+- 只列逐字稿中明顯尚未定案、資訊不足或後續待補的點
+- 若沒有，寫「- 無」
+"""
+
+_DESTINATION_SUMMARY_PROMPTS = {
+    "obsidian": """你是 Obsidian 知識庫的會議整理助手。請只根據逐字稿產生適合長期知識沉澱的繁體中文筆記。
+不要提問、不要虛構資訊；不確定處請標記「未提及」或「[待補]」。
+請依序使用：## 核心摘要、## 決策與脈絡、## 可連結概念、## 待追蹤。""",
+    "notion": """你是 Notion 專案協作的會議整理助手。請只根據逐字稿產生適合追蹤執行的繁體中文會議內容。
+不要提問、不要虛構資訊；不確定處請標記「未提及」或「[待補]」。
+請依序使用：## 執行摘要、## 決策、## 行動事項、## 風險與待確認；行動事項格式為 `- [Owner 或 未知] 事項（Due: 日期或未提及）`。""",
+}
 
 
 def _load_meeting_notes_prompt() -> str:
@@ -26,6 +61,17 @@ def _load_meeting_notes_prompt() -> str:
         if end != -1:
             text = text[end + 3:].lstrip()
     return text.strip()
+
+
+def build_summary_prompts(transcript: str) -> tuple[str, str]:
+    """建立 app 內 canonical summary 專用 prompts。"""
+    system_prompt = _APP_SUMMARY_SYSTEM_PROMPT
+    user_message = (
+        "請直接整理以下逐字稿為可發布的會議摘要。\n"
+        "不要提問、不要要求補件、不要回覆成 assistant 對話。\n\n"
+        f"逐字稿如下：\n{transcript}"
+    )
+    return system_prompt, user_message
 
 
 _LLM_TIMEOUT = 60  # 每次 API 呼叫最長等待秒數
@@ -96,41 +142,72 @@ def _call_llm(system_prompt: str, user_message: str) -> str:
     raise RuntimeError("未設定任何 LLM API Key（ANTHROPIC / GEMINI / OPENAI）")
 
 
-def _trigger_meeting_notes_async(fpath: Path) -> None:
-    """背景整理會議記錄，優先用 Anthropic API，失敗時 fallback 至 claude CLI。"""
-    def run() -> None:
-        try:
-            time.sleep(1)
-            logging.info("[MeetingNotes] 開始整理：%s", fpath.name)
-            broadcast("status", {"msg": f"🤖 自動整理會議記錄：{fpath.name}…"})
-
-            transcript = fpath.read_text(encoding="utf-8")
-            system_prompt = _load_meeting_notes_prompt() or (
-                "請將以下會議逐字稿整理成結構化會議記錄，包含摘要、決策記錄與行動事項。"
-            )
-            user_message = f"請整理以下會議逐字稿：\n\n{transcript}"
-
-            result = _call_llm(system_prompt, user_message)
-            logging.info("[MeetingNotes] 整理成功，輸出長度 %d", len(result))
-            out_path = fpath.parent / fpath.name.replace(".md", "_會議記錄.md")
-            out_path.write_text(result, encoding="utf-8")
-            broadcast("status", {"msg": f"✅ 會議記錄已產生：{out_path.name}"})
-
-        except Exception as e:
-            logging.warning("[MeetingNotes] 異常：%s", e)
-            broadcast("status", {"msg": f"❌ 會議記錄整理異常：{e}"})
-
-    threading.Thread(target=run, daemon=True).start()
+def _configured_llm_provider() -> str:
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    provider = "anthropic" if anthropic_key else "gemini" if gemini_key else "openai" if openai_key else ""
+    if not provider:
+        raise RuntimeError("未設定任何 LLM API Key（ANTHROPIC / GEMINI / OPENAI）")
+    return provider
 
 
-def build_notion_blocks(text: str, lang: str) -> list[dict]:
-    """組裝 Notion API block 物件列表（divider → heading → callout → paragraphs）。"""
+def build_meeting_summary(transcript: str) -> tuple[str, str]:
+    """產生會議摘要，回傳 (provider, summary_text)。"""
+    system_prompt, user_message = build_summary_prompts(transcript)
+    provider = _configured_llm_provider()
+    return provider, _call_llm(system_prompt, user_message)
+
+
+def build_destination_summary(transcript: str, destination: str) -> tuple[str, str]:
+    """以目的地專屬 prompt 從 transcript 生成衍生會議內容。"""
+    system_prompt = _DESTINATION_SUMMARY_PROMPTS.get(destination)
+    if not system_prompt:
+        raise ValueError(f"不支援的摘要目的地：{destination}")
+    provider = _configured_llm_provider()
+    user_message = f"請直接整理以下逐字稿，不要提問或要求補充。\n\n逐字稿如下：\n{transcript}"
+    return provider, _call_llm(system_prompt, user_message)
+
+
+def save_summary_to_obsidian(
+    transcript_path: str,
+    summary_text: str,
+    suffix: str = "_會議記錄",
+    meeting_id: str = "",
+) -> str:
+    """依既有 transcript 檔名規則寫出摘要檔。"""
+    if not transcript_path or not summary_text.strip():
+        return ""
+    try:
+        src = Path(transcript_path)
+        out_path = src.parent / src.name.replace(".md", f"{suffix}.md")
+        source_name = src.name
+        md = summary_text
+        if meeting_id:
+            md = f"""---
+meeting_id: \"{meeting_id}\"
+source: whisper-destination-summary
+derived_from: \"{source_name}\"
+---
+
+{summary_text}
+"""
+        out_path.write_text(md, encoding="utf-8")
+        logging.info("[Obsidian] 已存摘要：%s", out_path)
+        return str(out_path)
+    except Exception as e:
+        logging.warning("[Obsidian] 摘要存檔失敗：%s", e)
+        return ""
+
+
+def build_notion_blocks(text: str, lang: str, summary: str = "") -> list[dict]:
+    """組裝確認後的會議記錄：AI 會議內容在前，逐字稿在後。"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     blocks: list[dict] = [
         {"object": "block", "type": "divider", "divider": {}},
         {"object": "block", "type": "heading_2",
          "heading_2": {"rich_text": [{"type": "text",
-                                      "text": {"content": f"🎙️ 即時轉錄｜{now}"}}]}},
+                                      "text": {"content": f"🎙️ 會議記錄｜{now}"}}]}},
         {"object": "block", "type": "callout",
          "callout": {
              "rich_text": [{"type": "text",
@@ -139,6 +216,17 @@ def build_notion_blocks(text: str, lang: str) -> list[dict]:
              "color": "purple_background",
          }},
     ]
+    if summary.strip():
+        blocks.append({"object": "block", "type": "heading_2",
+                       "heading_2": {"rich_text": [{"type": "text", "text": {"content": "Notion AI 會議內容"}}]}})
+        for line in summary.split("\n"):
+            line = line.strip()
+            if line:
+                blocks.append({"object": "block", "type": "paragraph",
+                               "paragraph": {"rich_text": [{"type": "text", "text": {"content": line}}]}})
+        blocks.append({"object": "block", "type": "heading_2",
+                       "heading_2": {"rich_text": [{"type": "text", "text": {"content": "逐字稿"}}]}})
+
     for line in text.split("\n"):
         line = line.strip()
         if line:
@@ -148,8 +236,25 @@ def build_notion_blocks(text: str, lang: str) -> list[dict]:
     return blocks
 
 
-def save_to_obsidian(text: str, lang: str, meta: dict | None = None) -> str:
-    """把轉錄文字存成 Obsidian .md 檔，回傳檔案路徑；失敗回傳空字串。"""
+def _existing_meeting_path(vault_dir: Path, existing_path: str) -> Path | None:
+    if not existing_path:
+        return None
+    try:
+        candidate = Path(existing_path).resolve()
+        candidate.relative_to(vault_dir.resolve())
+        return candidate
+    except (OSError, ValueError):
+        return None
+
+
+def save_to_obsidian(
+    text: str,
+    lang: str,
+    meta: dict | None = None,
+    meeting_id: str = "",
+    existing_path: str = "",
+) -> str:
+    """把確認後的逐字稿與 AI 會議內容存成單一 Obsidian .md 檔。"""
     obsidian_path = os.environ.get("OBSIDIAN_MEETING_PATH", "")
     if not obsidian_path or not text.strip():
         return ""
@@ -162,7 +267,7 @@ def save_to_obsidian(text: str, lang: str, meta: dict | None = None) -> str:
         time_str = now.strftime("%H:%M")
         snippet  = re.sub(r'[\\/:*?"<>|\n]', '', text.strip()[:20]).strip()
         fname    = f"{date_str} {time_str} {snippet}.md" if snippet else f"{date_str} {time_str} 會議記錄.md"
-        fpath    = vault_dir / fname
+        fpath = _existing_meeting_path(vault_dir, existing_path) or vault_dir / fname
 
         meta = meta or {}
         duration_sec = meta.get("duration_seconds", 0)
@@ -193,6 +298,7 @@ source: whisper-local-stt
 model: {meta.get("model", "unknown")}
 domain: {meta.get("domain", "general")}
 status: raw
+meeting_id: "{meeting_id}"
 extra_terms: "{meta.get("extra_terms", "")}"
 duration: "{duration_formatted}"
 tags:
@@ -208,7 +314,6 @@ tags:
 """
         fpath.write_text(md, encoding="utf-8")
         logging.info("[Obsidian] 已存檔：%s", fpath)
-        _trigger_meeting_notes_async(fpath)
         return str(fpath)
     except Exception as e:
         logging.warning("[Obsidian] 存檔失敗：%s", e)

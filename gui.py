@@ -207,7 +207,7 @@ def main() -> None:
             _open_preferences()
 
     window = webview.create_window(
-        title        = f"Whisper AI 會議記錄 v{__version__}",
+        title        = f"Whisper STT v{__version__}",
         url          = URL,
         width        = 960,
         height       = 800,

@@ -24,16 +24,8 @@
   <span class="header-sub">本地語音 AI</span>
   <span id="app-version" style="font-size:11px;opacity:.4;margin-left:4px;font-family:var(--mono)"></span>
   <div class="header-actions">
-    <div class="toolbar-output-status" title="輸出目的地狀態">
-      <div class="tos-item">
-        <span id="notion-toggle-label" class="tos-label">Notion</span>
-        <button class="toggle" id="notion-toggle" onclick="toggleNotion()"></button>
-      </div>
-      <div class="tos-divider"></div>
-      <div class="tos-item">
-        <span id="obsidian-toggle-label" class="tos-label">Obsidian</span>
-        <button class="toggle" id="obsidian-toggle" onclick="toggleObsidian()"></button>
-      </div>
+    <div class="toolbar-output-status" title="發布目的地連線狀態">
+      <div class="tos-item"><span class="tos-label">發布目的地</span></div>
       <span class="badge" id="notion-badge" title="未連線"><span class="status-dot"></span><span id="notion-badge-text">未連線</span></span>
     </div>
     <div class="view-mode-switch" id="view-mode-switch" role="group" aria-label="版面模式">
@@ -98,7 +90,9 @@
       <span class="qb-chip" id="qb-lang">zh</span>
       <span class="qb-chip" id="qb-mode">standard</span>
       <span class="qb-chip" id="qb-domain">general</span>
-      <span class="qb-chevron" id="qb-chevron">▾</span>
+      <span class="qb-chevron" id="qb-chevron" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </span>
     </div>
     <div class="qb-expand" id="qb-expand">
       <div class="quick-group">
@@ -187,10 +181,22 @@
         <div id="transcript-box" contenteditable="true" spellcheck="false" style="outline:none;"></div>
       </div>
       <div id="panel-summary" class="tab-panel">
-        <div style="min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted);font-size:13px;font-family:var(--mono);text-align:center;padding:20px">
-          <span style="font-size:24px;opacity:0.4">✦</span>
-          <span>轉錄完成後，點擊 <strong style="color:var(--text)">AI 摘要</strong> 按鈕生成摘要</span>
-          <span style="font-size:11px;opacity:0.6">— 功能開發中，敬請期待 —</span>
+        <div id="summary-box" class="summary-box summary-empty">
+          <div id="summary-placeholder" class="summary-placeholder">
+            <span class="summary-placeholder-icon">✦</span>
+            <span id="summary-placeholder-text">尚無轉錄結果</span>
+            <span class="summary-placeholder-sub">摘要會在 transcript 完成後自動產生，之後可直接編輯。</span>
+          </div>
+          <div id="summary-meta" class="summary-meta" style="display:none;">
+            <div class="summary-meta-main">
+              <span class="summary-kicker">CANONICAL SUMMARY</span>
+              <span id="summary-provider-badge" class="summary-provider-badge"></span>
+              <span id="summary-edit-badge" class="summary-edit-badge" style="display:none;">已編輯</span>
+            </div>
+            <span id="summary-save-status" class="summary-save-status" role="status" aria-live="polite">已同步</span>
+          </div>
+          <p id="summary-editor-hint" class="summary-editor-hint" style="display:none;">Whisper App 專用摘要，可直接編輯並自動儲存；Obsidian 與 Notion 會從逐字稿產生各自的會議內容。</p>
+          <div id="summary-editor" class="summary-editor" contenteditable="true" spellcheck="false" style="display:none;"></div>
         </div>
       </div>
       <div id="panel-timeline" class="tab-panel">
@@ -216,8 +222,8 @@
           <div class="export-item" onclick="exportAs('md')">📝 .md</div>
         </div>
       </div>
-      <button class="act-btn" id="obsidian-btn" onclick="saveToObsidian()" disabled title="請先完成轉錄">Obsidian</button>
-      <button class="act-btn" id="upload-btn" onclick="uploadToNotion()" disabled title="請先完成轉錄">Notion</button>
+      <button class="act-btn" id="obsidian-btn" onclick="saveToObsidian()" disabled title="請先完成轉錄與摘要">發布至 Obsidian</button>
+      <button class="act-btn" id="upload-btn" onclick="uploadToNotion()" disabled title="請先完成轉錄與摘要">發布至 Notion</button>
       <button class="act-btn act-clear" onclick="clearTranscript()" title="清除轉錄">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
       </button>

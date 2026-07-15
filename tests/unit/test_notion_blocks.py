@@ -57,6 +57,17 @@ class TestBlockStructure:
         content = para["paragraph"]["rich_text"][0]["text"]["content"]
         assert content == text
 
+    def test_summary_is_placed_before_transcript(self):
+        blocks = build_notion_blocks("逐字稿內容", "zh", "已確認的 AI 摘要")
+        contents = [
+            block[block["type"]]["rich_text"][0]["text"]["content"]
+            for block in blocks
+            if block["type"] in {"heading_2", "paragraph"}
+        ]
+        assert contents.index("Notion AI 會議內容") < contents.index("已確認的 AI 摘要")
+        assert contents.index("已確認的 AI 摘要") < contents.index("逐字稿")
+        assert contents.index("逐字稿") < contents.index("逐字稿內容")
+
     def test_each_block_has_object_field(self):
         blocks = build_notion_blocks("測試", "zh")
         for b in blocks:

@@ -96,6 +96,15 @@ class TestNotionUpload(unittest.TestCase):
 
     def setUp(self):
         self._saved = {k: os.environ.pop(k, None) for k in ("NOTION_TOKEN", "NOTION_PAGE_ID")}
+        import routes
+        import integrations
+        routes._last_summary = None
+        self._destination_summary = patch.object(
+            integrations,
+            "build_destination_summary",
+            side_effect=lambda text, destination: ("anthropic", f"{destination} 專屬摘要：{text}"),
+        )
+        self.destination_summary_mock = self._destination_summary.start()
 
     def tearDown(self):
         for k, v in self._saved.items():
@@ -103,6 +112,15 @@ class TestNotionUpload(unittest.TestCase):
                 os.environ[k] = v
             else:
                 os.environ.pop(k, None)
+        import routes
+        routes._last_summary = None
+        self._destination_summary.stop()
+
+    @staticmethod
+    def _notion_client():
+        client = MagicMock()
+        client.pages.create.return_value = {"id": "meeting-page-id", "url": "https://notion.so/meeting-page-id"}
+        return client
 
     def test_missing_text_returns_400(self):
         resp = _client().post("/upload", json={"text": "", "language": "zh"})
@@ -120,11 +138,11 @@ class TestNotionUpload(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("頁面 ID", resp.get_json()["error"])
 
-    def test_happy_path_calls_notion_client(self):
-        """mock notion_client.Client，驗證成功路徑呼叫 blocks.children.append 並回傳 blocks 數。"""
+    def test_first_publish_creates_a_child_meeting_page(self):
+        """首次發布建立子頁，將完整會議內容放入該頁。"""
         os.environ["NOTION_TOKEN"] = "secret_test"
         os.environ["NOTION_PAGE_ID"] = "abc123"
-        mock_client_instance = MagicMock()
+        mock_client_instance = self._notion_client()
         with patch("notion_client.Client", return_value=mock_client_instance) as mock_client_cls:
             resp = _client().post(
                 "/upload",
@@ -134,15 +152,37 @@ class TestNotionUpload(unittest.TestCase):
         data = resp.get_json()
         self.assertTrue(data["ok"])
         self.assertGreater(data["blocks"], 0)
+        self.assertTrue(data["created"])
         mock_client_cls.assert_called_once_with(auth="secret_test")
-        mock_client_instance.blocks.children.append.assert_called()
+        mock_client_instance.pages.create.assert_called_once()
+        create_kwargs = mock_client_instance.pages.create.call_args.kwargs
+        self.assertEqual(create_kwargs["parent"]["page_id"], "abc123")
+        self.assertIn("children", create_kwargs)
+
+    def test_upload_includes_confirmed_summary_before_transcript(self):
+        os.environ["NOTION_TOKEN"] = "secret_test"
+        os.environ["NOTION_PAGE_ID"] = "abc123"
+        mock_client_instance = self._notion_client()
+        with patch("notion_client.Client", return_value=mock_client_instance):
+            resp = _client().post(
+                "/upload",
+                json={"text": "逐字稿內容", "summary": "確認後摘要", "language": "zh"},
+            )
+        self.assertEqual(resp.status_code, 200)
+        children = mock_client_instance.pages.create.call_args.kwargs["children"]
+        contents = [
+            block[block["type"]]["rich_text"][0]["text"]["content"]
+            for block in children
+            if block["type"] in {"heading_2", "paragraph"}
+        ]
+        self.assertLess(contents.index("notion 專屬摘要：逐字稿內容"), contents.index("逐字稿內容"))
 
     def test_notion_api_exception_returns_500(self):
         """notion_client 呼叫拋例外 → 500，錯誤訊息透傳，不洩漏 stack trace。"""
         os.environ["NOTION_TOKEN"] = "secret_test"
         os.environ["NOTION_PAGE_ID"] = "abc123"
-        mock_client_instance = MagicMock()
-        mock_client_instance.blocks.children.append.side_effect = Exception("notion API rate limited")
+        mock_client_instance = self._notion_client()
+        mock_client_instance.pages.create.side_effect = Exception("notion API rate limited")
         with patch("notion_client.Client", return_value=mock_client_instance):
             resp = _client().post(
                 "/upload",
@@ -155,15 +195,69 @@ class TestNotionUpload(unittest.TestCase):
         """request body 帶 page_id 時優先於 NOTION_PAGE_ID 環境變數。"""
         os.environ["NOTION_TOKEN"] = "secret_test"
         os.environ["NOTION_PAGE_ID"] = "env-page-id"
-        mock_client_instance = MagicMock()
+        mock_client_instance = self._notion_client()
         with patch("notion_client.Client", return_value=mock_client_instance):
             resp = _client().post(
                 "/upload",
                 json={"text": "hello", "language": "en", "page_id": "request-page-id"},
             )
         self.assertEqual(resp.status_code, 200)
-        call_kwargs = mock_client_instance.blocks.children.append.call_args
-        self.assertEqual(call_kwargs.kwargs.get("block_id"), "request-page-id")
+        call_kwargs = mock_client_instance.pages.create.call_args
+        self.assertEqual(call_kwargs.kwargs["parent"]["page_id"], "request-page-id")
+
+    def test_second_publish_rewrites_the_same_meeting_page(self):
+        os.environ["NOTION_TOKEN"] = "secret_test"
+        os.environ["NOTION_PAGE_ID"] = "abc123"
+        import routes
+        routes._save_last_summary(routes._summary_payload(
+            status="ready",
+            meeting_id="meeting-123",
+            meeting_title="會議記錄｜測試",
+            notion_page_id="meeting-page-id",
+            notion_page_url="https://notion.so/meeting-page-id",
+            generated_summary="初版摘要",
+        ))
+        mock_client_instance = self._notion_client()
+        mock_client_instance.blocks.children.list.return_value = {
+            "results": [{"id": "old-block-id"}], "has_more": False,
+        }
+        with patch("notion_client.Client", return_value=mock_client_instance):
+            resp = _client().post(
+                "/upload",
+                json={"text": "修正版逐字稿", "summary": "修正版摘要", "language": "zh", "meeting_id": "meeting-123"},
+            )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertFalse(data["created"])
+        self.assertEqual(data["notion_page_id"], "meeting-page-id")
+        mock_client_instance.pages.create.assert_not_called()
+        mock_client_instance.blocks.delete.assert_called_once_with(block_id="old-block-id")
+        mock_client_instance.blocks.children.append.assert_called()
+
+    def test_stale_meeting_id_does_not_create_a_new_notion_page(self):
+        os.environ["NOTION_TOKEN"] = "secret_test"
+        os.environ["NOTION_PAGE_ID"] = "abc123"
+        import routes
+        routes._save_last_summary(routes._summary_payload(status="ready", meeting_id="current-meeting"))
+        mock_client_instance = self._notion_client()
+        with patch("notion_client.Client", return_value=mock_client_instance):
+            response = _client().post(
+                "/upload",
+                json={"text": "舊 session", "language": "zh", "meeting_id": "stale-meeting"},
+            )
+        self.assertEqual(response.status_code, 409)
+        mock_client_instance.pages.create.assert_not_called()
+
+    def test_destination_summary_failure_does_not_write_to_notion(self):
+        os.environ["NOTION_TOKEN"] = "secret_test"
+        os.environ["NOTION_PAGE_ID"] = "abc123"
+        self.destination_summary_mock.side_effect = RuntimeError("LLM unavailable")
+        mock_client_instance = self._notion_client()
+        with patch("notion_client.Client", return_value=mock_client_instance):
+            response = _client().post("/upload", json={"text": "逐字稿", "language": "zh"})
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("Notion 會議內容產生失敗", response.get_json()["error"])
+        mock_client_instance.pages.create.assert_not_called()
 
 
 if __name__ == "__main__":

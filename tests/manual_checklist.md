@@ -1,6 +1,6 @@
-# Whisper STT v2.3.0 — 手動測試清單
+# Whisper STT v2.4.0 — 手動測試清單
 
-每次 release 前執行。預計 8-12 分鐘。
+每次 release 前執行。預計 10-15 分鐘。
 
 ---
 
@@ -8,7 +8,7 @@
 
 - [ ] App 已打包：`bash package.sh`
 - [ ] 開啟 `/Applications/Whisper STT.app`
-- [ ] 確認版本號正確（右上角 v2.3.0）
+- [ ] 確認版本號正確（右上角 v2.4.0）
 - [ ] 主畫面、偏好設定、macOS 權限提示使用同一名稱：`Whisper STT`
 
 ---
@@ -39,12 +39,10 @@
 
 ---
 
-## 4. 系統音訊 + Obsidian 存檔
+## 4. 系統音訊
 
-- [ ] 確認 Obsidian 開關已開啟（顯示「開啟」）
 - [ ] 執行系統音訊錄製（30 秒以上）→ 停止
-- [ ] 狀態列顯示「✅ 已存入 Obsidian：xxxx.md」
-- [ ] 確認 Obsidian vault 目錄中有新檔案
+- [ ] 轉錄與 App summary 皆完成，且未自動發布至外部目的地
 
 ---
 
@@ -57,16 +55,36 @@
 
 ---
 
-## 6. Notion 上傳
+## 6. Summary 自動生成與可編輯
 
-- [ ] 「自動上傳 Notion」開關開啟
-- [ ] 完成一次錄製
-- [ ] 狀態列顯示「✅ 已上傳 Notion」
-- [ ] 到 Notion 頁面確認新增了轉錄區塊
+- [ ] 完成一次 transcript 後切到 `summary` 分頁，不需再按額外按鈕就會自動出現摘要
+- [ ] summary 載入中會顯示處理狀態，完成後可看到 provider 標記
+- [ ] 直接修改 summary 文字，畫面顯示「已編輯」狀態
+- [ ] 重新整理頁面後，edited summary 仍會透過 `/api/last_summary` 還原
+- [ ] 將 summary 改回與原始 generated summary 完全相同時，「已編輯」狀態會自動消失
+- [ ] 未設定 LLM Key 時，summary 區塊顯示略過或提示狀態，不應卡住整體 transcript 流程
 
 ---
 
-## 7. 混音模式（系統音訊 + 麥克風）
+## 7. Notion 發布與覆寫
+
+- [ ] App summary 完成後，點擊 footer 的 `Notion` 發布按鈕
+- [ ] 第一次發布在設定目標下建立一個會議 child page，內含 `Notion AI 會議內容` 與逐字稿
+- [ ] 再次點擊 `Notion`，確認更新同一個 child page，而非新增第二頁
+- [ ] Notion 內容應由逐字稿產生，不會因為修改 App summary 而被覆寫
+
+---
+
+## 8. Obsidian 發布與覆寫
+
+- [ ] App summary 完成後，點擊 footer 的 `Obsidian` 發布按鈕
+- [ ] Vault 內建立一個原始逐字稿檔與一個 `*_Obsidian會議記錄.md` 檔，兩者帶有相同 `meeting_id`
+- [ ] 再次點擊 `Obsidian`，確認更新同一對檔案，而非新增重複檔案
+- [ ] Obsidian 會議內容應由逐字稿產生，不會因為修改 App summary 而被覆寫
+
+---
+
+## 9. 混音模式（系統音訊 + 麥克風）
 
 - [ ] 切換到「混音」模式
 - [ ] 開始後同時有系統音訊和說話
@@ -74,7 +92,7 @@
 
 ---
 
-## 8. UI 基本功能
+## 10. UI 基本功能
 
 - [ ] 「複製」按鈕：點擊後剪貼簿有內容
 - [ ] 「匯出」按鈕：產生 .txt 檔案
@@ -84,10 +102,13 @@
 - [ ] 未設定 Notion/Obsidian 時，完成轉錄後按鈕仍提示需先到偏好設定完成設定
 - [ ] quick-bar 展開後可看到模型、語言、模式、領域的 helper text
 - [ ] 詞庫輸入框顯示「加入本次專有名詞，按 Enter 套用」，📌 可開啟常用詞庫
+- [ ] 快速設定與常用詞庫使用相同 SVG chevron，展開時皆平順旋轉 180°
+- [ ] 將視窗縮至 720×600，toolbar、quick-bar、結果 actions 不重疊且沒有水平捲軸
+- [ ] 切換 Light / Dark theme，文字、disabled controls、提示訊息與 focus ring 均可辨識
 
-## 8.1 偏好設定分層
+## 10.1 偏好設定分層
 
-- [ ] 偏好設定標題顯示 Whisper STT v2.3.0
+- [ ] 偏好設定標題顯示 Whisper STT v2.4.0
 - [ ] Basic 基礎設定預設展開，包含 Obsidian、Notion、LLM API Key
 - [ ] Workflow 產出格式預設收合，展開後可設定後處理模板
 - [ ] Advanced / Beta 進階功能預設收合，展開後可檢查說話者分離與 App 更新
@@ -95,10 +116,18 @@
 
 ---
 
-## 9. 跨版本升級
+## 11. 跨版本升級
 
 - [ ] 升級後開啟 App，`~/Library/Application Support/WhisperSTT/.env` 中的 API Key 仍存在
 - [ ] 不需要重新輸入 API Key
+
+---
+
+## 12. 文件與故障復原
+
+- [ ] 依 `docs/INSTALLATION.md` 可完成安裝與首次轉錄
+- [ ] `docs/TROUBLESHOOTING.md` 的麥克風、螢幕錄製、port 5001 與 log 路徑正確
+- [ ] README、App 視窗、偏好設定、權限文案均只使用 `Whisper STT`
 
 ---
 

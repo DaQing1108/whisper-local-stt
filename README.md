@@ -1,13 +1,53 @@
-# 🎙️ Whisper STT 本地語音轉文字系統 v2.3.0
+# 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-11 12:07
-Phase: Whisper STT 完整架構審查與修復 + 兩輪 CI 除錯，全部收尾
-Working: 10 個 commit 全數完成並驗證：4-subagent 架構 review 修復（gui.spec 打包回歸、測試覆蓋補強、混音併發 guard、技術債清理、CLAUDE.md 決策記錄）+ CI 擴大（macOS integration-test / bundle 依賴檢查 job）+ torch 排除打包優化（bundle 731M→400M）+ 兩輪 CI 除錯（wheel 建置工具缺失、gui.spec .env 假設錯誤、既有測試斷言錯誤）。最新 commit e93f8d8 觸發的 CI run（29138838327）三個 job 全綠：unit-tests、integration-tests、bundle-dependency-check
-Next action: 無待辦，整個 review-and-fix 循環已收尾，等待使用者下一個任務
+Last checkpoint: 2026-07-15
+Phase: v2.4.0 release
+Working: canonical summary、目的地獨立 AI 會議內容與固定 meeting ID 已完成，待完成封裝與 GitHub 發布
+Next action: 以真實會議錄音驗收 App summary、Obsidian 與 Notion 的發布結果
 Blockers: none
 
 ## Checkpoint History
+### 2026-07-15｜v2.4.0 Summary 與可重複發布
+- Scope: transcript 完成後產生可編輯的 Whisper App summary；Obsidian 與 Notion 各自從 transcript 產生目的地專用 AI 會議內容；固定 `meeting_id` 讓相同 session 可安全重複發布更新。
+- User flow: 完成轉錄與 App summary 後，使用 footer 的 `Obsidian` 或 `Notion` 主動發布；Obsidian 會寫入一份原始逐字稿與一份連結的會議記錄，Notion 會建立並重寫同一個 meeting child page。
+- Verification: focused unit tests `77 passed`、Python/JavaScript syntax checks、bundle smoke test、以及真實設定下的雙次 Obsidian / Notion 端對端發布皆通過；第二次發布確認更新既有檔案與 child page。
+
+### 2026-07-15｜Canonical Summary 統一流程 + 可編輯 Summary
+- Completed: (1) 將 AI 會議摘要從 Obsidian 存檔流程抽離，改為 transcript 完成後即自動生成 canonical summary；(2) summary 分頁改為可編輯，新增 `generated_summary` / `edited_summary` / `effective_summary` 狀態模型；(3) `/api/save_to_obsidian` 改為優先寫入使用者編輯後的 summary；(4) 補齊 `GET /api/last_summary`、`POST /api/update_summary` 與 `tests/unit/test_summary_flow.py`；(5) 將 summary prompt 改為 app 內固定結構化摘要模式，不再直接沿用 `meeting-notes.md`，避免資訊不足時回澄清問題
+- Verification: `python3 -m py_compile routes.py integrations.py`、`node --check static/app.js`、`python3 -m pytest -q tests/unit/test_summary_flow.py tests/unit/test_meeting_summary_prompt.py` 全數通過（10 passed）；以 source server `PORT=5011 python3 app.py` 做 live smoke test，確認 transcript → summary 自動生成、編輯後可存回 API，且 Obsidian 寫入的是 edited summary；再以 `/Applications/Whisper STT.app` 做 bundle smoke test，確認安裝版 `summary` 會輸出固定結構的 `摘要 / 決策 / 行動事項 / 待確認`，且不再回澄清問題
+- Decision: `extra_terms` / 詞庫維持 STT 輔助邊界，不與 summary editor 狀態混用；summary provider 仍是後端直連 LLM provider，目前實際走 Anthropic Claude
+- Note: 若 port `5001` 上看到舊行為，優先排查是否仍是舊的 `.app` 在提供服務，而不是最新 source server；若 `summary` 看起來像舊資料，先檢查 `.last_summary.json` 持久化狀態是否仍殘留前一次測試結果
+
+### 2026-07-15｜確認後發布流程
+- Completed: (1) 移除 Whisper App header 中 Obsidian / Notion 的本次自動發布開關；(2) 錄音與摘要完成後，footer 的「發布至 Obsidian / Notion」才會成為唯一 App 發布動作；(3) AI 摘要產生中會鎖定發布按鈕，避免發布半成品；(4) Obsidian 改為單一會議檔，依序包含 `AI 會議內容` 與 `逐字稿`；(5) Notion 同一次發布也會以相同順序寫入兩段內容。
+- Compatibility: 後端仍保留 `save_obsidian` 給既有外部整合使用；Whisper App 不再傳送自動存檔請求。
+- Verification: 相關 unit tests `70 passed`；直接呼叫 `/api/save_to_obsidian` 驗證只寫入單一 `.md`，且不會產生 `_會議記錄.md`。
+
+### 2026-07-15｜發布版本管理：固定 Meeting ID
+- Completed: (1) transcript 完成時建立固定 `meeting_id` 與 meeting title，持久化在本次 summary state；(2) 首次發布至 Obsidian 建立會議檔，後續同一 ID 直接覆寫原檔；(3) Notion 首次發布在設定目標頁下建立會議專屬子頁，後續同一 ID 清空並重寫該子頁；(4) stale session ID 會回傳 `409`，避免意外新增發布結果；(5) 舊版無 ID 的 summary state 會在首次發布時自動升級。
+- Verification: `pytest` 相關發布流程 `75 passed`、`py_compile`、`node --check`、`git diff --check` 全數通過；重新封裝 `/Applications/Whisper STT.app`，bundle `/api/ping` 正常回應 v2.3.1，空內容發布安全回傳 `400`。
+- User verification: Notion 子頁首次建立與第二次覆寫需使用測試會議在真實 Notion 工作區確認；Notion connection 必須具備目標頁存取權，且有建立、讀取與更新內容的能力。
+
+### 2026-07-15｜目的地獨立 AI 會議內容
+- Decision: transcript 是唯一共同原始來源；Whisper App summary 保持 App 專用、可編輯的輸出，Obsidian 與 Notion 不再共用或覆寫它。
+- Completed: (1) 新增 Obsidian 知識沉澱 prompt 與 Notion 專案協作 prompt；(2) footer 發布時，各目的地直接以當前 transcript 生成自己的摘要；(3) Obsidian 發布改為兩個檔案：逐字稿與 `*_Obsidian會議記錄.md`，兩者均以 `meeting_id` 關聯；(4) Notion 會議子頁保留 `Notion AI 會議內容` 與逐字稿的獨立區塊；(5) 移除將 App summary 傳入目的地發布的程式入口與誤導文案。
+- Verification: 相關 unit tests `77 passed`、`py_compile`、`node --check`、`git diff --check` 通過；重新封裝 bundle，安裝版 ping 正常、空內容發布安全回 `400`。
+- User verification: 需要真實 LLM 與 Notion 權限環境驗證首次發布與第二次覆寫；確認 Obsidian 產生兩個檔案且 Notion 不建立重複子頁。
+
+### 2026-07-12｜v2.3.1 release hardening
+- Scope: 收合圖示目視驗收、窄視窗與 Light/Dark theme、disabled tooltip、完整測試、品牌一致性、安裝與故障排除文件
+- Added: `docs/INSTALLATION.md`、`docs/TROUBLESHOOTING.md`、`tests/unit/test_release_hardening.py`
+- Brand: 交付名稱固定為 `Whisper STT`，同步主視窗、偏好設定、bundle、PRD 與 manual checklist
+- Verification: 執行中，完成後更新本段結果
+
+### 2026-07-12 01:30｜V2.3.0 收合圖示統一 + App 重新封裝
+- Completed: (1) 將快速設定列的文字 `▾` 改為與專有名詞列相同的 14×14 SVG chevron；(2) 補齊 icon flex 對齊樣式並保留展開時 180° 旋轉；(3) 執行 `bash package.sh`，重新封裝並安裝 `/Applications/Whisper STT.app`；(4) 清除 Sparkle 子元件的 Finder extended attribute，重新套用 `WhisperSTT Local` 簽章
+- Verification: `python3 -m pytest tests/unit/test_index_html_structure.py -q` 為 16 passed；`git diff --check` 通過；安裝版 `CFBundleShortVersionString=2.3.0`；安裝包內已找到新 SVG；`codesign --verify --deep --strict` 顯示 valid on disk 且 satisfies its Designated Requirement；port 5001 無衝突
+- Files: `templates/index.html`、`static/app.css`；checkpoint 更新 `README.md`
+- Repo state: branch `main`，基準 commit `e93cd6b`；上述 UI 與 checkpoint 變更尚未 commit，既有其他未追蹤/修改檔案未納入本次操作
+- Open risk / Next: `package.sh` 安裝後可能因 Sparkle extended attribute 需要再次清除並重簽；開啟 App 進行最終目視驗收
+
 ### 2026-07-11 12:07｜CI 兩輪除錯收尾 + torch 打包優化
 - Completed: (1) 排除 torch 打包，app bundle 縮小 304M（704M→400M，commit f3baeb2），以 `sys.meta_path` import-blocking 測試驗證真實推論路徑未受影響；(2) CI 第一輪失敗修復——補上 wheel 建置工具解決 macOS runner 安裝 openai-whisper 失敗（commit bdb76f2）；(3) CI 第二輪失敗修復——gui.spec 假設 `.env` 一定存在於全新 checkout（CI 上不成立）+ 一個既有 integration test 斷言邏輯錯誤（commit e93f8d8）；(4) 確認最新 commit 觸發的 CI run 三個 job（unit-tests / integration-tests / bundle-dependency-check）全數 success
 - State: 10 個 commit 全數 push 至 origin/main，working tree 乾淨，CI 全綠，無需第三輪修復

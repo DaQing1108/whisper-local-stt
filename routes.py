@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time as _time
 import traceback
+from uuid import uuid4
 from datetime import datetime
 from pathlib import Path
 from queue import Empty, Queue
@@ -31,6 +32,8 @@ HTML_PAGE: str = ""
 # 最後一次轉錄結果 — 記憶體 + 磁碟雙重持久化
 _LAST_RESULT_FILE = Path(".last_result.json")
 _last_transcript: dict | None = None
+_LAST_SUMMARY_FILE = Path(".last_summary.json")
+_last_summary: dict | None = None
 
 
 def _load_last_transcript() -> None:
@@ -43,6 +46,16 @@ def _load_last_transcript() -> None:
             _LAST_RESULT_FILE.unlink(missing_ok=True)
 
 
+def _load_last_summary() -> None:
+    global _last_summary
+    if _LAST_SUMMARY_FILE.exists():
+        try:
+            _last_summary = json.loads(_LAST_SUMMARY_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            logging.warning("[cache] .last_summary.json 損毀，已刪除：%s", e)
+            _LAST_SUMMARY_FILE.unlink(missing_ok=True)
+
+
 def _save_last_transcript(data: dict) -> None:
     global _last_transcript
     _last_transcript = data
@@ -52,7 +65,131 @@ def _save_last_transcript(data: dict) -> None:
         logging.warning("[LastResult] 磁碟寫入失敗：%s", e)
 
 
+def _save_last_summary(data: dict) -> None:
+    global _last_summary
+    _last_summary = data
+    try:
+        _LAST_SUMMARY_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        logging.warning("[LastSummary] 磁碟寫入失敗：%s", e)
+
+
+def _summary_payload(status: str = "empty", **updates) -> dict:
+    base = {
+        "status": status,
+        "provider": "",
+        "generated_summary": "",
+        "edited_summary": "",
+        "is_summary_edited": False,
+        "generated_at": "",
+        "error": "",
+        "transcript_text": "",
+        "language": "",
+        "obsidian_file": "",
+        "summary_file": "",
+        "meeting_id": "",
+        "meeting_title": "",
+        "notion_page_id": "",
+        "notion_page_url": "",
+        "obsidian_summary_file": "",
+    }
+    base.update(updates)
+    return base
+
+
+def _effective_summary(summary: dict | None) -> str:
+    if not summary:
+        return ""
+    return (summary.get("edited_summary") or summary.get("generated_summary") or "").strip()
+
+
+def _broadcast_summary() -> None:
+    if _last_summary:
+        _sse.broadcast("summary", _last_summary)
+
+
+def _new_meeting_metadata() -> tuple[str, str]:
+    now = datetime.now()
+    return uuid4().hex, f"會議記錄｜{now.strftime('%Y-%m-%d %H:%M')}"
+
+
+def _start_summary_generation(
+    text: str,
+    lang: str,
+    obsidian_file: str = "",
+    meeting_id: str = "",
+    meeting_title: str = "",
+) -> None:
+    meeting_id = meeting_id or uuid4().hex
+    meeting_title = meeting_title or f"會議記錄｜{datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    summary_state = _summary_payload(
+        status="loading",
+        transcript_text=text,
+        language=lang,
+        obsidian_file=obsidian_file,
+        meeting_id=meeting_id,
+        meeting_title=meeting_title,
+    )
+    _save_last_summary(summary_state)
+    _broadcast_summary()
+    _sse.broadcast("status", {"msg": "🤖 AI 摘要產生中…"})
+
+    def _worker() -> None:
+        try:
+            provider, generated = integrations.build_meeting_summary(text)
+            summary_file = ""
+            if obsidian_file:
+                summary_file = integrations.save_summary_to_obsidian(obsidian_file, generated)
+            payload = _summary_payload(
+                status="ready",
+                provider=provider,
+                generated_summary=generated,
+                edited_summary="",
+                is_summary_edited=False,
+                generated_at=datetime.now().strftime("%H:%M:%S"),
+                transcript_text=text,
+                language=lang,
+                obsidian_file=obsidian_file,
+                summary_file=summary_file,
+                meeting_id=meeting_id,
+                meeting_title=meeting_title,
+            )
+            _save_last_summary(payload)
+            _broadcast_summary()
+            _sse.broadcast("status", {"msg": "✅ AI 摘要已產生"})
+        except RuntimeError as e:
+            payload = _summary_payload(
+                status="skipped",
+                error=str(e),
+                transcript_text=text,
+                language=lang,
+                obsidian_file=obsidian_file,
+                meeting_id=meeting_id,
+                meeting_title=meeting_title,
+            )
+            _save_last_summary(payload)
+            _broadcast_summary()
+            _sse.broadcast("status", {"msg": "ℹ️ 未設定 LLM，略過 AI 摘要"})
+        except Exception as e:
+            logging.warning("[MeetingSummary] 產生失敗：%s", e)
+            payload = _summary_payload(
+                status="error",
+                error=str(e),
+                transcript_text=text,
+                language=lang,
+                obsidian_file=obsidian_file,
+                meeting_id=meeting_id,
+                meeting_title=meeting_title,
+            )
+            _save_last_summary(payload)
+            _broadcast_summary()
+            _sse.broadcast("status", {"msg": f"⚠️ AI 摘要產生失敗：{e}"})
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
 _load_last_transcript()
+_load_last_summary()
 
 # 副檔名對照表
 _EXT_MAP = {
@@ -247,11 +384,14 @@ def transcribe():
                 _sse.broadcast("done",   {"ok": False, "error_code": "EMPTY_TRANSCRIPT", "error": "empty"})
                 return
 
+            meeting_id, meeting_title = _new_meeting_metadata()
             _save_last_transcript({
                 "text":     text,
                 "language": lang,
                 "time":     datetime.now().strftime("%H:%M:%S"),
                 "segments": info.get("segments", []),
+                "meeting_id": meeting_id,
+                "meeting_title": meeting_title,
             })
             _sse.broadcast("status",     {"msg": f"✅ 轉錄完成（偵測語言：{lang}）"})
             _sse.broadcast("transcript", _last_transcript)
@@ -264,6 +404,9 @@ def transcribe():
                     _sse.broadcast("status", {"msg": f"✅ 已存入 Obsidian：{Path(obsidian_file).name}"})
                 else:
                     _sse.broadcast("status", {"msg": "⚠️ Obsidian 存檔失敗"})
+
+            _start_summary_generation(text, lang, obsidian_file=obsidian_file,
+                                      meeting_id=meeting_id, meeting_title=meeting_title)
 
             _sse.broadcast("done", {"ok": True, "text": text, "language": lang,
                                     "obsidian_file": obsidian_file,
@@ -511,11 +654,14 @@ def _finish_session(session_id: str) -> None:
             "extra_terms": sess["extra_terms"], "duration_seconds": cumulative,
             "segments": all_segments}
 
+    meeting_id, meeting_title = _new_meeting_metadata()
     _save_last_transcript({
         "text":     full_text,
         "language": lang,
         "time":     datetime.now().strftime("%H:%M:%S"),
         "segments": [],
+        "meeting_id": meeting_id,
+        "meeting_title": meeting_title,
     })
     _sse.broadcast("status",     {"msg": f"✅ 全部轉錄完成（偵測語言：{lang}）"})
     _sse.broadcast("transcript", _last_transcript)
@@ -529,6 +675,9 @@ def _finish_session(session_id: str) -> None:
         else:
             _sse.broadcast("status", {"msg": "⚠️ Obsidian 存檔失敗"})
 
+    _start_summary_generation(full_text, lang, obsidian_file=obsidian_file,
+                              meeting_id=meeting_id, meeting_title=meeting_title)
+
     _sse.broadcast("done", {"ok": True, "text": full_text, "language": lang,
                             "obsidian_file": obsidian_file})
 
@@ -538,6 +687,7 @@ def upload():
     data    = request.json or {}
     text    = data.get("text", "").strip()
     lang    = data.get("language", "?")
+    meeting_id = data.get("meeting_id", "").strip()
     page_id = data.get("page_id") or os.getenv("NOTION_PAGE_ID", "")
     token   = os.getenv("NOTION_TOKEN", "")
 
@@ -547,14 +697,60 @@ def upload():
         return jsonify(error="缺少 NOTION_TOKEN，請先在 .env 設定"), 400
     if not page_id:
         return jsonify(error="缺少 Notion 頁面 ID"), 400
+    if meeting_id and _last_summary and _last_summary.get("meeting_id") and _last_summary.get("meeting_id") != meeting_id:
+        return jsonify(error="此會議已不是目前 session，請重新整理後再發布"), 409
+
+    # 舊版 state 沒有 meeting_id 時，第一次手動發布會就地升級成可回寫的發布狀態。
+    current_summary = _last_summary
+    meeting_id = meeting_id or (current_summary or {}).get("meeting_id") or uuid4().hex
+    meeting_title = (current_summary or {}).get("meeting_title") or f"會議記錄｜{datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    notion_page_id = (current_summary or {}).get("notion_page_id", "")
+    try:
+        _, notion_summary = integrations.build_destination_summary(text, "notion")
+    except RuntimeError as e:
+        return jsonify(error=f"Notion 會議內容產生失敗：{e}"), 502
 
     try:
         from notion_client import Client
         notion  = Client(auth=token)
-        blocks  = integrations.build_notion_blocks(text, lang)
-        for i in range(0, len(blocks), 100):
-            notion.blocks.children.append(block_id=page_id, children=blocks[i:i+100])
-        return jsonify(ok=True, blocks=len(blocks))
+        blocks = integrations.build_notion_blocks(text, lang, notion_summary)
+        created = not bool(notion_page_id)
+        if created:
+            page = notion.pages.create(
+                parent={"page_id": page_id},
+                properties={"title": {"title": [{"type": "text", "text": {"content": meeting_title}}]}},
+                children=blocks[:100],
+            )
+            notion_page_id = page["id"]
+            notion_page_url = page.get("url", "")
+            for i in range(100, len(blocks), 100):
+                notion.blocks.children.append(block_id=notion_page_id, children=blocks[i:i + 100])
+        else:
+            cursor = None
+            while True:
+                kwargs = {"block_id": notion_page_id, "page_size": 100}
+                if cursor:
+                    kwargs["start_cursor"] = cursor
+                listed = notion.blocks.children.list(**kwargs)
+                for block in listed.get("results", []):
+                    notion.blocks.delete(block_id=block["id"])
+                if not listed.get("has_more"):
+                    break
+                cursor = listed.get("next_cursor")
+            for i in range(0, len(blocks), 100):
+                notion.blocks.children.append(block_id=notion_page_id, children=blocks[i:i + 100])
+            notion_page_url = (current_summary or {}).get("notion_page_url", "")
+
+        if current_summary:
+            updated = dict(current_summary)
+            updated["meeting_id"] = meeting_id
+            updated["meeting_title"] = meeting_title
+            updated["notion_page_id"] = notion_page_id
+            updated["notion_page_url"] = notion_page_url
+            _save_last_summary(updated)
+            _broadcast_summary()
+        return jsonify(ok=True, blocks=len(blocks), meeting_id=meeting_id,
+                       notion_page_id=notion_page_id, created=created)
     except Exception as e:
         return jsonify(error=str(e)), 500
 
@@ -945,7 +1141,15 @@ def system_audio_stop():
             lang = sess.get("language", "zh")
             if full_text:
                 ts = datetime.now().strftime("%H:%M:%S")
-                _save_last_transcript({"text": full_text, "language": lang, "time": ts, "segments": []})
+                meeting_id, meeting_title = _new_meeting_metadata()
+                _save_last_transcript({
+                    "text": full_text,
+                    "language": lang,
+                    "time": ts,
+                    "segments": [],
+                    "meeting_id": meeting_id,
+                    "meeting_title": meeting_title,
+                })
                 _sse.broadcast("transcript", {"text": full_text, "language": lang, "time": ts, "segments": []})
                 obsidian_file = ""
                 if sess.get("save_obsidian") and os.environ.get("OBSIDIAN_MEETING_PATH"):
@@ -964,6 +1168,8 @@ def system_audio_stop():
                     obsidian_file = integrations.save_to_obsidian(full_text, lang, info)
                     if obsidian_file:
                         _sse.broadcast("status", {"msg": f"✅ 已存入 Obsidian：{Path(obsidian_file).name}"})
+                _start_summary_generation(full_text, lang, obsidian_file=obsidian_file,
+                                          meeting_id=meeting_id, meeting_title=meeting_title)
                 _sse.broadcast("done", {"ok": True, "text": full_text, "language": lang, "obsidian_file": obsidian_file})
             else:
                 _sse.broadcast("done", {"ok": False, "error_code": "EMPTY_TRANSCRIPT", "error": "empty"})
@@ -1102,6 +1308,38 @@ def last_transcript():
     return jsonify(ok=False)
 
 
+@bp.route("/api/last_summary", methods=["GET"])
+@cross_origin(origins=_PLUGIN_ORIGINS)
+def last_summary():
+    if _last_summary:
+        return jsonify(ok=True, **_last_summary, effective_summary=_effective_summary(_last_summary))
+    return jsonify(ok=False)
+
+
+@bp.route("/api/update_summary", methods=["POST"])
+def update_summary():
+    global _last_summary
+    if not _last_summary:
+        return jsonify(error="尚無摘要可更新"), 404
+
+    data = request.json or {}
+    edited_summary = (data.get("edited_summary") or "").strip()
+    generated_summary = (_last_summary.get("generated_summary") or "").strip()
+    if not edited_summary:
+        return jsonify(error="摘要內容不能為空"), 400
+
+    updated = dict(_last_summary)
+    if edited_summary == generated_summary:
+        updated["edited_summary"] = ""
+        updated["is_summary_edited"] = False
+    else:
+        updated["edited_summary"] = edited_summary
+        updated["is_summary_edited"] = True
+    _save_last_summary(updated)
+    _broadcast_summary()
+    return jsonify(ok=True, effective_summary=_effective_summary(updated), **updated)
+
+
 @bp.route("/api/export", methods=["GET"])
 def export_transcript():
     """匯出最後一次轉錄結果為 .srt / .md / .txt。"""
@@ -1181,13 +1419,38 @@ def save_to_obsidian_route():
     text = data.get("text", "").strip()
     lang = data.get("lang", "zh")
     meta = data.get("meta", {})
+    meeting_id = data.get("meeting_id", "").strip()
 
     if not text:
         return jsonify(error="沒有內容可存"), 400
+    if meeting_id and _last_summary and _last_summary.get("meeting_id") and _last_summary.get("meeting_id") != meeting_id:
+        return jsonify(error="此會議已不是目前 session，請重新整理後再發布"), 409
 
-    fpath = _save(text, lang, meta)
+    current_summary = _last_summary
+    meeting_id = meeting_id or (current_summary or {}).get("meeting_id") or uuid4().hex
+    existing_path = (current_summary or {}).get("obsidian_file", "")
+    was_published = bool(existing_path and Path(existing_path).exists())
+    try:
+        _, obsidian_summary = integrations.build_destination_summary(text, "obsidian")
+    except RuntimeError as e:
+        return jsonify(error=f"Obsidian 會議內容產生失敗：{e}"), 502
+    fpath = _save(text, lang, meta, meeting_id=meeting_id, existing_path=existing_path)
     if not fpath:
         return jsonify(error="OBSIDIAN_MEETING_PATH 未設定或寫入失敗"), 500
+    summary_path = integrations.save_summary_to_obsidian(
+        fpath, obsidian_summary, suffix="_Obsidian會議記錄", meeting_id=meeting_id,
+    )
+    if not summary_path:
+        return jsonify(error="Obsidian 會議內容寫入失敗"), 500
+
+    if current_summary:
+        updated = dict(current_summary)
+        updated["meeting_id"] = meeting_id
+        updated["obsidian_file"] = fpath
+        updated["obsidian_summary_file"] = summary_path
+        _save_last_summary(updated)
+        _broadcast_summary()
 
     import os
-    return jsonify(ok=True, filename=os.path.basename(fpath), path=fpath)
+    return jsonify(ok=True, filename=os.path.basename(fpath), path=fpath,
+                   summary_path=summary_path, meeting_id=meeting_id, updated=was_published)

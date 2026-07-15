@@ -513,6 +513,99 @@
     content: '轉錄結果會出現在這裡…';
     color: var(--muted); font-style: italic;
   }
+  .summary-box {
+    min-height: 350px; max-height: 600px;
+    overflow-y: auto;
+    background: var(--surface2);
+    border-radius: 10px;
+    padding: 20px;
+    font-size: 15px; line-height: 1.8;
+    color: var(--text);
+    border: 1px inset rgba(255,255,255,0.02);
+  }
+  .summary-placeholder {
+    min-height: 260px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 13px;
+    font-family: var(--mono);
+    text-align: center;
+    padding: 20px;
+  }
+  .summary-placeholder-icon { font-size: 24px; opacity: 0.4; }
+  .summary-placeholder-sub { font-size: 11px; opacity: 0.65; }
+  .summary-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .summary-meta-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .summary-kicker {
+    color: var(--accent2);
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+  }
+  .summary-provider-badge, .summary-edit-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+    background: rgba(255,255,255,0.02);
+  }
+  .summary-edit-badge {
+    color: var(--accent2);
+    border-color: rgba(29,158,117,0.35);
+  }
+  .summary-save-status {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .summary-save-status::before { content: '●'; margin-right: 5px; font-size: 8px; }
+  .summary-save-status.is-synced { color: var(--accent2); }
+  .summary-save-status.is-pending, .summary-save-status.is-saving { color: #d79a38; }
+  .summary-save-status.is-error { color: #dc6c5a; }
+  .summary-editor-hint {
+    margin: -4px 0 14px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.55;
+  }
+  .summary-editor {
+    min-height: 260px;
+    white-space: pre-wrap;
+    outline: none;
+    letter-spacing: 0.1px;
+    padding: 14px 16px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.012);
+    transition: border-color .15s, background .15s;
+  }
+  .summary-editor:focus {
+    border-color: rgba(29,158,117,0.45);
+    background: rgba(29,158,117,0.035);
+  }
+  .summary-box.summary-loading .summary-placeholder-icon {
+    animation: summaryPulse 1.2s ease-in-out infinite;
+  }
+  @keyframes summaryPulse {
+    0%, 100% { opacity: 0.35; transform: scale(1); }
+    50% { opacity: 0.8; transform: scale(1.04); }
+  }
   .transcript-entry {
     margin-bottom: 16px;
     animation: slideUpFade 0.4s ease-out forwards;
@@ -687,10 +780,12 @@
   .qb-chevron {
     margin-left: auto;
     color: var(--text);
-    font-size: 14px;
     opacity: 0.6;
     transition: transform .2s, opacity .15s;
     flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .qb-summary:hover .qb-chevron { opacity: 1; }
   .quick-bar.expanded .qb-chevron { transform: rotate(180deg); }
@@ -861,6 +956,20 @@
     .header-sub { display: none; }
     .tos-label { display: none; }
     .toolbar-output-status { padding: 4px; gap: 4px; }
+    .header-actions { gap: 6px; min-width: 0; }
+    .workspace-actions { gap: 6px; }
+    .act-btn { padding: 7px 11px; }
+    .qb-summary { flex-wrap: wrap; }
+    .qb-chevron { margin-left: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      scroll-behavior: auto !important;
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .01ms !important;
+    }
   }
 
   /* ── View Modes (driven by body[data-view-mode], set in JS) ──

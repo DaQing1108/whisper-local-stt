@@ -83,14 +83,6 @@ function restoreLastSettings() {
       pill.classList.add('active')
     }
   })
-  if (s.obsidianEnabled) {
-    obsidianEnabled = true
-    document.getElementById('obsidian-toggle')?.classList.add('on')
-  }
-  if (s.notionEnabled) {
-    notionEnabled = true
-    document.getElementById('notion-toggle')?.classList.add('on')
-  }
   const mixMic = document.getElementById('mix-mic-toggle')
   if (mixMic && s.mixMic) mixMic.checked = true
 }
@@ -126,6 +118,114 @@ function switchTab(tabName, btn) {
   if (panel) panel.classList.add('active')
 }
 
+function _summaryEffectiveText(state) {
+  if (!state) return ''
+  return (state.edited_summary || state.generated_summary || '').trim()
+}
+
+function setSummarySaveStatus(status, message) {
+  const el = document.getElementById('summary-save-status')
+  if (!el) return
+  el.className = `summary-save-status${status ? ` is-${status}` : ''}`
+  el.textContent = message
+}
+
+function renderSummaryState(state) {
+  lastSummaryState = state
+  const box = document.getElementById('summary-box')
+  const placeholder = document.getElementById('summary-placeholder')
+  const placeholderText = document.getElementById('summary-placeholder-text')
+  const meta = document.getElementById('summary-meta')
+  const providerBadge = document.getElementById('summary-provider-badge')
+  const editBadge = document.getElementById('summary-edit-badge')
+  const hint = document.getElementById('summary-editor-hint')
+  const editor = document.getElementById('summary-editor')
+  if (!box || !placeholder || !placeholderText || !meta || !providerBadge || !editBadge || !hint || !editor) return
+
+  box.className = 'summary-box'
+  const status = state?.status || 'empty'
+  const effective = _summaryEffectiveText(state)
+  if (status === 'loading') {
+    box.classList.add('summary-loading')
+    placeholder.style.display = 'flex'
+    meta.style.display = 'none'
+    hint.style.display = 'none'
+    editor.style.display = 'none'
+    placeholderText.textContent = 'AI 摘要產生中'
+    _syncActionButtons()
+    return
+  }
+  if (status === 'skipped') {
+    placeholder.style.display = 'flex'
+    meta.style.display = 'none'
+    hint.style.display = 'none'
+    editor.style.display = 'none'
+    placeholderText.textContent = '尚未設定 LLM，無法產生摘要'
+    _syncActionButtons()
+    return
+  }
+  if (status === 'error') {
+    placeholder.style.display = 'flex'
+    meta.style.display = 'none'
+    hint.style.display = 'none'
+    editor.style.display = 'none'
+    placeholderText.textContent = '摘要生成失敗，請稍後重試'
+    _syncActionButtons()
+    return
+  }
+  if (status !== 'ready' || !effective) {
+    placeholder.style.display = 'flex'
+    meta.style.display = 'none'
+    hint.style.display = 'none'
+    editor.style.display = 'none'
+    placeholderText.textContent = lastText ? '等待 AI 摘要' : '尚無轉錄結果'
+    _syncActionButtons()
+    return
+  }
+
+  placeholder.style.display = 'none'
+  meta.style.display = 'flex'
+  hint.style.display = 'block'
+  editor.style.display = 'block'
+  providerBadge.textContent = `AI 摘要｜${state.provider || 'LLM'}`
+  editBadge.style.display = state.is_summary_edited ? 'inline-flex' : 'none'
+  setSummarySaveStatus('synced', state.is_summary_edited ? '編輯內容已同步' : 'AI 摘要已同步')
+  if (document.activeElement !== editor) editor.textContent = effective
+  _syncActionButtons()
+}
+
+async function loadLastSummary() {
+  try {
+    const r = await fetch('/api/last_summary')
+    const d = await r.json()
+    if (d.ok) renderSummaryState(d)
+    else renderSummaryState({ status: lastText ? 'empty' : 'empty' })
+  } catch(e) {}
+}
+
+async function saveEditedSummary() {
+  const editor = document.getElementById('summary-editor')
+  if (!editor || !lastSummaryState || lastSummaryState.status !== 'ready') return
+  const edited = editor.textContent.trim()
+  const currentEffective = _summaryEffectiveText(lastSummaryState)
+  const generated = (lastSummaryState.generated_summary || '').trim()
+  if (!edited) return
+  if (edited === currentEffective && edited !== generated) return
+  setSummarySaveStatus('saving', '儲存中')
+  try {
+    const res = await fetch('/api/update_summary', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ edited_summary: edited }),
+    })
+    const d = await res.json()
+    if (res.ok) renderSummaryState(d)
+    else setSummarySaveStatus('error', '儲存失敗，請重試')
+  } catch(e) {
+    setSummarySaveStatus('error', '儲存失敗，請重試')
+  }
+}
+
 // ── 錯誤碼對照表（P0-5）──────────────────────────────────────
 const ERROR_MESSAGES = {
   FFMPEG_MISSING:          'ffmpeg 未安裝。請執行 brew install ffmpeg，或重新執行 setup.sh',
@@ -146,7 +246,8 @@ let timerInterval    = null
 let timerSec         = 0
 let lastText         = ''
 let lastLang         = ''
-let notionEnabled    = false
+let lastSummaryState = null
+let _summarySaveTimer = null
 let diarizeEnabled   = localStorage.getItem('diarize-enabled') === 'true'
 let _wakeLock        = null
 
@@ -178,7 +279,7 @@ async function _flushChunk(isLast = false) {
       form.append('language',    getPillValue('lang-pill-group'))
       form.append('domain',      getPillValue('domain-pill-group'))
       form.append('extra_terms', document.getElementById('extra-terms').value)
-      form.append('obsidian',    obsidianEnabled ? 'true' : 'false')
+      form.append('obsidian',    'false')
       try {
         await fetch('/api/finish-session', { method: 'POST', body: form })
       } catch(e) {}
@@ -203,7 +304,7 @@ async function _flushChunk(isLast = false) {
   form.append('language',    getPillValue('lang-pill-group'))
   form.append('domain',      getPillValue('domain-pill-group'))
   form.append('extra_terms', document.getElementById('extra-terms').value)
-  form.append('obsidian',    obsidianEnabled ? 'true' : 'false')
+  form.append('obsidian',    'false')
   form.append('mode',        getPillValue('mode-pill-group'))
 
   _pendingChunks++
@@ -249,7 +350,6 @@ async function _acquireWakeLock() {
 function _releaseWakeLock() {
   if (_wakeLock) { _wakeLock.release(); _wakeLock = null }
 }
-let obsidianEnabled = false
 let obsidianReady = false
 let _configHealth = { permissions: { screen_recording: 'unknown', microphone: 'unknown' } }
 
@@ -366,6 +466,7 @@ async function _onSSEReconnected() {
       else setStatus('✅ 伺服器連線恢復', 'ok')
     }
   } catch(e) {}
+  await loadLastSummary()
 }
 
 // ── SSE ──────────────────────────────────────────────────────
@@ -406,6 +507,10 @@ function _initSSE() {
     _exportSegments = d.segments || []
     _syncExportBtn()
     saveToHistory(d.text, d.language, d.segments || [])
+  })
+  evtSrc.addEventListener('summary', e => {
+    const d = JSON.parse(e.data)
+    renderSummaryState(d)
   })
   evtSrc.onopen = () => {
     const isReconnect = _sseEverConnected && !_sseConnected
@@ -484,6 +589,9 @@ function _initSSE() {
     }
     syncUploadBtn()
     setStatus('✅ 轉錄完成', 'ok')
+    if (!lastSummaryState || ['empty', 'skipped', 'error'].includes(lastSummaryState.status)) {
+      renderSummaryState({ status: 'loading' })
+    }
 
     if (diarizeEnabled && d.audio_path) {
       setStatus('🔍 說話者分離分析中…（首次執行需下載模型）')
@@ -513,9 +621,7 @@ function _initSSE() {
       }
     }
 
-    if (notionEnabled && notionReady) {
-      await doUpload(lastText, d.language)
-    }
+    _syncActionButtons()
   })
   return evtSrc
 }
@@ -560,6 +666,7 @@ window.onload = async () => {
       }
     } catch(e) {}
   }
+  await loadLastSummary()
 };
 
 // 錄音中或轉錄中關閉/離開頁面時警告
@@ -745,21 +852,6 @@ async function checkConfig() {
   } catch(e) {}
 }
 
-// ── Notion toggle ─────────────────────────────────────────────
-function toggleNotion() {
-  notionEnabled = !notionEnabled
-  const btn = document.getElementById('notion-toggle')
-  btn.className = 'toggle' + (notionEnabled ? ' on' : '')
-  _saveLastSetting('notionEnabled', notionEnabled)
-}
-
-function toggleObsidian() {
-  obsidianEnabled = !obsidianEnabled
-  const btn = document.getElementById('obsidian-toggle')
-  btn.className = 'toggle' + (obsidianEnabled ? ' on' : '')
-  _saveLastSetting('obsidianEnabled', obsidianEnabled)
-}
-
 function toggleDiarize() {
   diarizeEnabled = !diarizeEnabled
   localStorage.setItem('diarize-enabled', diarizeEnabled)
@@ -819,7 +911,7 @@ async function startSystemAudio() {
   const resp = await fetch('/api/system-audio/start', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ model, language, domain, extra_terms: extra, with_mic: withMic, save_obsidian: obsidianEnabled })
+    body: JSON.stringify({ model, language, domain, extra_terms: extra, with_mic: withMic, save_obsidian: false })
   })
   const data = await resp.json()
   if (!resp.ok) {
@@ -1001,7 +1093,7 @@ async function uploadFileBlob(blob, filename='upload.webm') {
   form.append('language', getPillValue('lang-pill-group'))
   form.append('domain', getPillValue('domain-pill-group'))
   form.append('extra_terms', document.getElementById('extra-terms').value)
-  form.append('obsidian', obsidianEnabled ? 'true' : 'false')
+  form.append('obsidian', 'false')
   form.append('diarize',  diarizeEnabled  ? 'true' : 'false')
 
   setBtnState('processing')
@@ -1121,26 +1213,27 @@ document.getElementById('file-input')?.addEventListener('change', (e) => {
 
 // ── Upload ────────────────────────────────────────────────────
 async function uploadToNotion() {
-  if (!lastText) return
+  const text = _currentTranscriptText()
+  if (!text) return
   if (!notionReady) {
     setStatus('⚠️ 請先到偏好設定完成 Notion Token 與 Page ID', 'warn')
     return
   }
-  await doUpload(lastText, lastLang)
+  await doUpload(text, lastLang, lastSummaryState?.meeting_id || '')
 }
 
-async function doUpload(text, lang) {
+async function doUpload(text, lang, meetingId = '') {
   const pageId = null  // 使用偏好設定中儲存的預設頁面
   setStatus('📤 上傳至 Notion…')
   try {
     const r = await fetch('/upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, language: lang, page_id: pageId }),
+    body: JSON.stringify({ text, language: lang, meeting_id: meetingId, page_id: pageId }),
     })
     const d = await r.json()
     if (!r.ok) throw new Error(d.error)
-    setStatus(`✅ 已上傳至 Notion（${d.blocks} blocks）`, 'ok')
+    setStatus(`✅ 已${d.created ? '建立' : '更新'} Notion 會議頁（${d.blocks} blocks）`, 'ok')
   } catch(e) {
     setStatus(`❌ 上傳失敗：${e.message}`, 'error')
   }
@@ -1246,30 +1339,38 @@ function _setActionState(id, enabled, enabledTitle, disabledTitle) {
 
 function _syncActionButtons() {
   const hasText = !!lastText
+  const summaryPending = lastSummaryState?.status === 'loading'
+  const readyToPublish = hasText && !summaryPending
   _setActionState('copy-btn', hasText, '複製逐字稿到剪貼簿', '完成轉錄後可複製')
   _setActionState('export-btn', hasText, '匯出 .txt / .md / .srt', '完成轉錄後可匯出')
   const ob = document.getElementById('obsidian-btn')
   if (ob) {
-    const enabled = hasText && obsidianReady
+    const enabled = readyToPublish && obsidianReady
     ob.disabled = !enabled
-    ob.title = hasText
-      ? (obsidianReady ? '存入偏好設定中的 Obsidian 路徑' : '請先到偏好設定填寫 Obsidian Vault 路徑')
-      : '完成轉錄後可存入 Obsidian'
+    ob.title = !hasText
+      ? '完成轉錄後可發布'
+      : (summaryPending ? '等待 AI 摘要完成後即可發布'
+        : (obsidianReady ? '發布目前確認的逐字稿與 AI 會議內容' : '請先到偏好設定填寫 Obsidian Vault 路徑'))
   }
   const up = document.getElementById('upload-btn')
   if (up) {
-    const enabled = hasText && notionReady
+    const enabled = readyToPublish && notionReady
     up.disabled = !enabled
-    up.title = hasText
-      ? (notionReady ? '上傳到偏好設定中的 Notion 頁面' : '請先到偏好設定完成 Notion Token 與 Page ID')
-      : '完成轉錄後可上傳 Notion'
+    up.title = !hasText
+      ? '完成轉錄後可發布'
+      : (summaryPending ? '等待 AI 摘要完成後即可發布'
+        : (notionReady ? '發布目前確認的逐字稿與 AI 會議內容' : '請先到偏好設定完成 Notion Token 與 Page ID'))
   }
 }
 
+function _currentTranscriptText() {
+  const box = document.getElementById('transcript-box')
+  const entries = Array.from(box?.querySelectorAll('.transcript-text') || [])
+  return entries.length ? entries.map(el => el.textContent).join('\n').trim() : lastText.trim()
+}
+
 async function saveToObsidian() {
-  // Use only .transcript-text elements to exclude timestamp/language labels
-  const entries = Array.from(document.getElementById('transcript-box').querySelectorAll('.transcript-text'))
-  const text = entries.length ? entries.map(el => el.textContent).join('\n').trim() : lastText.trim()
+  const text = _currentTranscriptText()
   if (!text) return
   if (!obsidianReady) {
     setStatus('⚠️ 請先到偏好設定填寫 Obsidian Vault 路徑', 'warn')
@@ -1278,7 +1379,7 @@ async function saveToObsidian() {
 
   const btn = document.getElementById('obsidian-btn')
   btn.disabled = true
-  btn.textContent = '🟣 存入中...'
+  btn.textContent = '🟣 發布中...'
 
   try {
     const res = await fetch('/api/save_to_obsidian', {
@@ -1287,19 +1388,20 @@ async function saveToObsidian() {
       body: JSON.stringify({
         text,
         lang: lastLang || 'zh',
+        meeting_id: lastSummaryState?.meeting_id || '',
         meta: {}
       })
     })
     const d = await res.json()
     if (d.ok) {
-      setStatus(`🟣 已存入 Obsidian，LLM 整理中：${d.filename}`, 'ok')
+      setStatus(`🟣 已${d.updated ? '更新' : '發布'}至 Obsidian：${d.filename}`, 'ok')
     } else {
       setStatus(`❌ 存入失敗：${d.error}`, 'error')
     }
   } catch(e) {
     setStatus(`❌ 網路錯誤：${e.message}`, 'error')
   } finally {
-    btn.textContent = '🟣 存入 Obsidian'
+    btn.textContent = '發布至 Obsidian'
     _syncActionButtons()
   }
 }
@@ -1372,6 +1474,8 @@ function clearTranscript() {
   document.getElementById('local-audio-player').src = ''
   lastText = ''
   lastLang = ''
+  lastSummaryState = { status: 'empty' }
+  renderSummaryState(lastSummaryState)
   _exportSegments = []
   localStorage.removeItem(SESSION_KEY)
   syncUploadBtn()
@@ -1790,5 +1894,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // 記住上次的混音模式選擇
   document.getElementById('mix-mic-toggle')?.addEventListener('change', e => {
     _saveLastSetting('mixMic', e.target.checked)
+  })
+  document.getElementById('summary-editor')?.addEventListener('input', () => {
+    if (!lastSummaryState || lastSummaryState.status !== 'ready') return
+    const editor = document.getElementById('summary-editor')
+    const edited = editor ? editor.textContent.trim() : ''
+    const generated = (lastSummaryState.generated_summary || '').trim()
+    const badge = document.getElementById('summary-edit-badge')
+    if (badge) badge.style.display = !!edited && edited !== generated ? 'inline-flex' : 'none'
+    setSummarySaveStatus('pending', '等待儲存')
+    if (_summarySaveTimer) clearTimeout(_summarySaveTimer)
+    _summarySaveTimer = setTimeout(() => saveEditedSummary(), 500)
   })
 })
