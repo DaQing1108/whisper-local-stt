@@ -1,4 +1,4 @@
-# Whisper STT v2.4.0 安裝指南
+# Whisper STT v2.4.1 安裝指南
 
 ## 執行摘要
 

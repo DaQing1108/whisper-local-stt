@@ -13,10 +13,10 @@
   <string>com.local.whisper-stt</string>
 
   <key>CFBundleVersion</key>
-  <string>2.4.0</string>
+  <string>2.4.1</string>
 
   <key>CFBundleShortVersionString</key>
-  <string>2.4.0</string>
+  <string>2.4.1</string>
 
   <key>CFBundleExecutable</key>
   <string>whisper-launcher</string>

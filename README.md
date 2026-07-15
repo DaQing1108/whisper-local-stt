@@ -1,13 +1,24 @@
-# 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
+# 🎙️ Whisper STT 本地語音轉文字系統 v2.4.1
 
 ## Current State
 Last checkpoint: 2026-07-15
-Phase: v2.4.0 release
-Working: canonical summary、目的地獨立 AI 會議內容與固定 meeting ID 已完成，待完成封裝與 GitHub 發布
-Next action: 以真實會議錄音驗收 App summary、Obsidian 與 Notion 的發布結果
+Phase: v2.4.1 timecode and CI patch
+Working: 修復 footer 發布遺失 timecode，以及 v2.4.0 CI 的 hermetic test failures
+Next action: 完成 v2.4.1 封裝、CI 與 GitHub patch release
 Blockers: none
 
 ## Checkpoint History
+### 2026-07-15｜Checkpoint Publish：v2.4.1 Timecode Patch
+- Status: source patch 已完成，尚未封裝或發布；目前 branch 為 `codex/fix-v2-4-1-timecodes`。
+- Completed: 修復 footer 發布漏傳 `segments`、chunk 與系統音訊完成 state 未持久化 segments；Obsidian 原始逐字稿可恢復 `[MM:SS]` timecode。
+- Verification: full unit suite `216 passed`；CI 同款 integration suite `16 passed`，包含先前失敗的 `/api/save_to_obsidian` test。
+- Boundary: 本 checkpoint 不包含 `.claude` 設定、handoff、規劃草稿、音檔、log 或現有 Obsidian 會議檔；既有缺少 segments 的檔案無法安全回填真實 timecode。
+- Next: 重新封裝 `v2.4.1`、執行 bundle smoke test、推送 patch 並確認 GitHub CI。
+
+### 2026-07-15｜v2.4.1 Timecode 與 CI Patch
+- Fixed: footer 發布會從同一 `meeting_id` 的 backend state 回填 Whisper segments；chunk 與系統音訊完成時也會持久化 segments，因此 Obsidian 原始逐字稿恢復 `[MM:SS]` timecode。
+- CI: 在 `WHISPER_TEST=1` 且無 LLM provider 的整合測試中使用 deterministic destination summary；release test 不再讀取未追蹤的本機 ProductSpec。
+
 ### 2026-07-15｜v2.4.0 Summary 與可重複發布
 - Scope: transcript 完成後產生可編輯的 Whisper App summary；Obsidian 與 Notion 各自從 transcript 產生目的地專用 AI 會議內容；固定 `meeting_id` 讓相同 session 可安全重複發布更新。
 - User flow: 完成轉錄與 App summary 後，使用 footer 的 `Obsidian` 或 `Notion` 主動發布；Obsidian 會寫入一份原始逐字稿與一份連結的會議記錄，Notion 會建立並重寫同一個 meeting child page。

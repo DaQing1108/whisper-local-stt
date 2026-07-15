@@ -1,4 +1,4 @@
-# Whisper STT v2.4.0 故障排除
+# Whisper STT v2.4.1 故障排除
 
 ## 執行摘要
 
