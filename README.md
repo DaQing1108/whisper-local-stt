@@ -11,8 +11,9 @@ Blockers: none
 ### 2026-07-15｜Checkpoint Publish：v2.4.0 已發布
 - Status: `v2.4.0` 已推送至 GitHub；release commit 為 `d8b3e46`，tag `v2.4.0`，GitHub Release 已建立。
 - Verification: focused release suite `98 passed`，pre-push full unit suite `215 passed`；重新封裝 `/Applications/Whisper STT.app` 後，`/api/ping` 回應 `v2.4.0`，嚴格 codesign verification 通過。
+- Remote CI: GitHub Actions run `29389994076` failed on two test assumptions: integration test 未提供 LLM 卻期待 Obsidian destination summary 成功；release hardening test 依賴未納入 Git 的 `WhisperAI_ProductSpec_v1.md`。
 - Boundary: checkpoint 僅記錄 README、GitHub checkpoint branch/PR 與 Notion append；不納入 `.claude` 設定、草稿、音檔、log 或 API credentials。
-- Next: 以真實會議錄音進行使用者驗收，確認 App summary、Obsidian 雙檔與 Notion child page 的內容品質。
+- Next: 先建立 v2.4.1 CI patch 修正兩個測試邊界，再以真實會議錄音進行使用者驗收。
 
 ### 2026-07-15｜v2.4.0 Summary 與可重複發布
 - Scope: transcript 完成後產生可編輯的 Whisper App summary；Obsidian 與 Notion 各自從 transcript 產生目的地專用 AI 會議內容；固定 `meeting_id` 讓相同 session 可安全重複發布更新。
