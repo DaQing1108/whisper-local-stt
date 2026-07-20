@@ -50,6 +50,7 @@ struct ContentView: View {
     @State var captureStartedAt: Date?
     @State var presentNextCompletedResult = false
     @State var selectedSection: SidebarSection? = .capture
+    @State var languageDraft = ""
 
     var body: some View {
         NavigationSplitView {

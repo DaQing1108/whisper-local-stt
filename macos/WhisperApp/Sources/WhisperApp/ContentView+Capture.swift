@@ -60,15 +60,17 @@ extension ContentView {
                         ForEach(AppSettingsStore.supportedModels, id: \.self) { Text($0) }
                     }
                     Menu("語言快速選擇") {
-                        Button("Auto") { settings.language = "" }
-                        Button("中文 / 繁中") { settings.language = "zh" }
-                        Button("English") { settings.language = "en" }
-                        Button("Japanese") { settings.language = "ja" }
+                        Button("Auto") { settings.language = ""; languageDraft = "" }
+                        Button("中文 / 繁中") { settings.language = "zh"; languageDraft = "zh" }
+                        Button("English") { settings.language = "en"; languageDraft = "en" }
+                        Button("Japanese") { settings.language = "ja"; languageDraft = "ja" }
                     }
-                    TextField("Auto 或 ISO code（zh / en / ja）", text: Binding(
-                        get: { settings.language }, set: { settings.language = $0 }
-                    ))
-                    .textFieldStyle(.roundedBorder)
+                    TextField("Auto 或 ISO code（zh / en / ja）", text: $languageDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { settings.language = languageDraft }
+                        .onChange(of: settings.language, initial: true) { _, newValue in
+                            if languageDraft != newValue { languageDraft = newValue }
+                        }
                 }
                 HStack {
                     Label(worker.modelReadinessMessage, systemImage: modelReadinessSymbol)
