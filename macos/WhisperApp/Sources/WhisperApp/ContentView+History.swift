@@ -154,8 +154,12 @@ extension ContentView {
             let output = try ObsidianExportService().export(
                 entry,
                 summary: summaries.summary(for: entry.id),
+                existingPath: entry.obsidianNotePath.map { URL(fileURLWithPath: $0) },
                 to: URL(fileURLWithPath: settings.obsidianVaultPath, isDirectory: true)
             )
+            // Best-effort: the note is already written; a failure here just means the next
+            // publish won't find this path and will create a new note instead of updating it.
+            try? history.updateObsidianNotePath(id: entry.id, path: output.path)
             obsidianStatus = "Saved to Obsidian: \(output.lastPathComponent)"
         } catch {
             obsidianStatus = "Obsidian export failed: \(error.localizedDescription)"

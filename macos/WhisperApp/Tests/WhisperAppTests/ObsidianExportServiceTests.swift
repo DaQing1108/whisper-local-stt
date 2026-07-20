@@ -80,6 +80,90 @@ struct ObsidianExportServiceTests {
     }
 
     @Test
+    func republishingWithExistingPathOverwritesTheSameNoteInPlace() throws {
+        let vault = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let service = ObsidianExportService(now: { Date(timeIntervalSince1970: 0) })
+        let entry = TranscriptionHistoryEntry(
+            audioPath: "/tmp/meeting.wav", model: "base", language: nil, text: "first version"
+        )
+        let firstOutput = try service.export(entry, summary: nil, existingPath: nil, to: vault)
+
+        var republished = entry
+        republished.text = "second version"
+        let secondOutput = try service.export(
+            republished, summary: nil, existingPath: firstOutput, to: vault
+        )
+
+        #expect(secondOutput == firstOutput)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: vault.path).count == 1)
+        let markdown = try String(contentsOf: secondOutput, encoding: .utf8)
+        #expect(markdown.contains("second version"))
+        #expect(!markdown.contains("first version"))
+    }
+
+    @Test
+    func existingPathOutsideVaultFallsBackToCreatingANewNote() throws {
+        let vault = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let outsidePath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("outside-\(UUID().uuidString).md")
+        let service = ObsidianExportService()
+        let entry = TranscriptionHistoryEntry(
+            audioPath: "/tmp/meeting.wav", model: "base", language: nil, text: "content"
+        )
+
+        let output = try service.export(entry, summary: nil, existingPath: outsidePath, to: vault)
+
+        #expect(output.deletingLastPathComponent() == vault.standardizedFileURL)
+        #expect(!FileManager.default.fileExists(atPath: outsidePath.path))
+    }
+
+    @Test
+    func segmentsArePreservedAsTimecodedLinesWhenPresent() throws {
+        let vault = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let entry = TranscriptionHistoryEntry(
+            audioPath: "/tmp/meeting.wav", model: "base", language: nil, text: "fallback text",
+            segments: [
+                TranscriptionSegment(start: 0, end: 2, text: "第一段"),
+                TranscriptionSegment(start: 65, end: 70, text: "第二段"),
+            ]
+        )
+
+        let output = try ObsidianExportService().export(entry, to: vault)
+
+        let markdown = try String(contentsOf: output, encoding: .utf8)
+        #expect(markdown.contains("[00:00] 第一段"))
+        #expect(markdown.contains("[01:05] 第二段"))
+        #expect(!markdown.contains("fallback text"))
+    }
+
+    @Test
+    func existingPathInsideVaultSubfolderIsRecognizedAndOverwritten() throws {
+        let vault = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let subfolder = vault.appendingPathComponent("Meetings", isDirectory: true)
+        try FileManager.default.createDirectory(at: subfolder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let notePath = subfolder.appendingPathComponent("existing-note.md")
+        try Data("old content".utf8).write(to: notePath)
+        let service = ObsidianExportService()
+        let entry = TranscriptionHistoryEntry(
+            audioPath: "/tmp/meeting.wav", model: "base", language: nil, text: "new content"
+        )
+
+        let output = try service.export(entry, summary: nil, existingPath: notePath, to: vault)
+
+        #expect(output == notePath)
+        let markdown = try String(contentsOf: output, encoding: .utf8)
+        #expect(markdown.contains("new content"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: vault.path) == ["Meetings"])
+    }
+
+    @Test
     func rejectsSymlinkVaultWithoutWritingIntoItsTarget() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let outside = root.appendingPathComponent("outside", isDirectory: true)

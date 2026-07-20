@@ -18,6 +18,7 @@ struct TranscriptionHistoryEntry: Codable, Identifiable, Equatable, Sendable {
     let durationSeconds: Double?
     let domain: String
     let extraTerms: String
+    var obsidianNotePath: String?
 
     init(
         id: UUID = UUID(),
@@ -29,7 +30,8 @@ struct TranscriptionHistoryEntry: Codable, Identifiable, Equatable, Sendable {
         segments: [TranscriptionSegment] = [],
         durationSeconds: Double? = nil,
         domain: String = "general",
-        extraTerms: String = ""
+        extraTerms: String = "",
+        obsidianNotePath: String? = nil
     ) {
         self.id = id
         self.completedAt = completedAt
@@ -41,10 +43,12 @@ struct TranscriptionHistoryEntry: Codable, Identifiable, Equatable, Sendable {
         self.durationSeconds = durationSeconds
         self.domain = domain
         self.extraTerms = extraTerms
+        self.obsidianNotePath = obsidianNotePath
     }
 
     enum CodingKeys: String, CodingKey {
         case id, completedAt, audioPath, model, language, text, segments, durationSeconds, domain, extraTerms
+        case obsidianNotePath
     }
 
     init(from decoder: Decoder) throws {
@@ -59,6 +63,7 @@ struct TranscriptionHistoryEntry: Codable, Identifiable, Equatable, Sendable {
         durationSeconds = try values.decodeIfPresent(Double.self, forKey: .durationSeconds)
         domain = try values.decodeIfPresent(String.self, forKey: .domain) ?? "general"
         extraTerms = try values.decodeIfPresent(String.self, forKey: .extraTerms) ?? ""
+        obsidianNotePath = try values.decodeIfPresent(String.self, forKey: .obsidianNotePath)
     }
 }
 
@@ -149,12 +154,27 @@ final class TranscriptionHistoryStore {
             segments: segments,
             durationSeconds: durationSeconds,
             domain: existing.domain,
-            extraTerms: existing.extraTerms
+            extraTerms: existing.extraTerms,
+            obsidianNotePath: existing.obsidianNotePath
         )
         do {
             try persist()
             writeError = nil
             return entries[index]
+        } catch {
+            entries = previous
+            writeError = error.localizedDescription
+            throw error
+        }
+    }
+
+    func updateObsidianNotePath(id: UUID, path: String) throws {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        let previous = entries
+        entries[index].obsidianNotePath = path
+        do {
+            try persist()
+            writeError = nil
         } catch {
             entries = previous
             writeError = error.localizedDescription

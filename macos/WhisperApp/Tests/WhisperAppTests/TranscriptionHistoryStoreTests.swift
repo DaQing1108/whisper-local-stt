@@ -23,6 +23,26 @@ struct TranscriptionHistoryStoreTests {
     }
 
     @Test
+    func updateResultPreservesObsidianNotePathAndUpdateObsidianNotePathPersists() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("history.json")
+        let store = TranscriptionHistoryStore(fileURL: url)
+        let audio = directory.appendingPathComponent("meeting.wav")
+        let entry = try store.recordCompleted(audioURL: audio, model: "base", language: "zh", text: "會議完成")
+
+        try store.updateObsidianNotePath(id: entry.id, path: "/Vault/note.md")
+        #expect(store.entries[0].obsidianNotePath == "/Vault/note.md")
+
+        _ = try store.updateResult(id: entry.id, text: "更新後文字", segments: [], durationSeconds: nil)
+        #expect(store.entries[0].obsidianNotePath == "/Vault/note.md")
+
+        let restored = TranscriptionHistoryStore(fileURL: url)
+        #expect(restored.entries[0].obsidianNotePath == "/Vault/note.md")
+    }
+
+    @Test
     func corruptHistoryIsReportedWithoutInventingEntries() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("history-\(UUID()).json")
         try Data("not-json".utf8).write(to: url)
@@ -46,6 +66,7 @@ struct TranscriptionHistoryStoreTests {
         object.removeValue(forKey: "durationSeconds")
         object.removeValue(forKey: "domain")
         object.removeValue(forKey: "extraTerms")
+        object.removeValue(forKey: "obsidianNotePath")
         let legacy = try JSONSerialization.data(withJSONObject: object)
         let decoded = try JSONDecoder().decode(TranscriptionHistoryEntry.self, from: legacy)
 
@@ -53,6 +74,7 @@ struct TranscriptionHistoryStoreTests {
         #expect(decoded.durationSeconds == nil)
         #expect(decoded.domain == "general")
         #expect(decoded.extraTerms.isEmpty)
+        #expect(decoded.obsidianNotePath == nil)
     }
 
     @Test

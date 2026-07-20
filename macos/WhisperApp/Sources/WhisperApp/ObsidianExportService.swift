@@ -27,26 +27,49 @@ struct ObsidianExportService: Sendable {
     }
 
     func export(_ entry: TranscriptionHistoryEntry, to vaultURL: URL) throws -> URL {
-        try export(entry, summary: nil, to: vaultURL)
+        try export(entry, summary: nil, existingPath: nil, to: vaultURL)
     }
 
     func export(
         _ entry: TranscriptionHistoryEntry, summary: MeetingSummary?, to vaultURL: URL
     ) throws -> URL {
+        try export(entry, summary: summary, existingPath: nil, to: vaultURL)
+    }
+
+    /// Republishing the same entry updates `existingPath` in place instead of creating a new
+    /// note, mirroring integrations.py's save_to_obsidian: only checks the path still resolves
+    /// inside the vault, not whether the file currently exists — write-or-overwrite either way.
+    func export(
+        _ entry: TranscriptionHistoryEntry, summary: MeetingSummary?, existingPath: URL?, to vaultURL: URL
+    ) throws -> URL {
         // Revalidate at the operation boundary; do not trust a path persisted earlier.
         let vault = try validateVault(vaultURL)
-        let sourceName = URL(fileURLWithPath: entry.audioPath).deletingPathExtension().lastPathComponent
-        let stem = sanitize(sourceName.isEmpty ? "Transcription" : sourceName)
-        let prefix = "\(Self.timestamp.string(from: now())) \(stem) \(entry.id.uuidString.prefix(8))"
-        var output: URL
-        repeat {
-            output = vault.appendingPathComponent("\(prefix) \(UUID().uuidString).md").standardizedFileURL
-        } while FileManager.default.fileExists(atPath: output.path)
-        guard output.deletingLastPathComponent() == vault else {
-            throw ObsidianExportError.outputEscapedVault
+        let output: URL
+        if let existingPath, isWithinVault(existingPath, vault: vault) {
+            output = existingPath
+        } else {
+            let sourceName = URL(fileURLWithPath: entry.audioPath).deletingPathExtension().lastPathComponent
+            let stem = sanitize(sourceName.isEmpty ? "Transcription" : sourceName)
+            let prefix = "\(Self.timestamp.string(from: now())) \(stem) \(entry.id.uuidString.prefix(8))"
+            var candidate: URL
+            repeat {
+                candidate = vault.appendingPathComponent("\(prefix) \(UUID().uuidString).md").standardizedFileURL
+            } while FileManager.default.fileExists(atPath: candidate.path)
+            guard candidate.deletingLastPathComponent() == vault else {
+                throw ObsidianExportError.outputEscapedVault
+            }
+            output = candidate
         }
         try Data(markdown(for: entry, summary: summary).utf8).write(to: output, options: .atomic)
         return output
+    }
+
+    /// Any depth under the vault counts, matching integrations.py's Path.relative_to check —
+    /// a note the user has organized into a vault subfolder must still be recognized on republish.
+    private func isWithinVault(_ url: URL, vault: URL) -> Bool {
+        let resolved = url.resolvingSymlinksInPath().standardizedFileURL.path
+        let vaultPrefix = vault.path.hasSuffix("/") ? vault.path : vault.path + "/"
+        return resolved.hasPrefix(vaultPrefix)
     }
 
     private func markdown(for entry: TranscriptionHistoryEntry, summary: MeetingSummary?) -> String {
@@ -68,8 +91,20 @@ struct ObsidianExportService: Sendable {
 
         \(summarySection)
 
-        \(entry.text)
+        \(transcriptBody(for: entry))
         """
+    }
+
+    /// Matches integrations.py's save_to_obsidian exactly: bracketed [MM:SS] lines (not
+    /// [HH:MM:SS] — that format belongs to TranscriptionExportService's separate "Timecoded
+    /// TXT" export) only when segments exist, otherwise plain text with no timestamp prefix.
+    private func transcriptBody(for entry: TranscriptionHistoryEntry) -> String {
+        guard !entry.segments.isEmpty else { return entry.text }
+        return entry.segments.map { segment in
+            let wholeSeconds = max(0, Int(segment.start.rounded(.down)))
+            let timestamp = String(format: "%02d:%02d", wholeSeconds / 60, wholeSeconds % 60)
+            return "[\(timestamp)] \(segment.text.trimmingCharacters(in: .whitespacesAndNewlines))"
+        }.joined(separator: "\n")
     }
 
     private func sanitize(_ value: String) -> String {
