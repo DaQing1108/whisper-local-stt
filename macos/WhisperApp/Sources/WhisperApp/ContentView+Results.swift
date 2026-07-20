@@ -13,6 +13,8 @@ extension ContentView {
                     Button("取消", role: .destructive) { try? worker.cancel() }
                         .disabled(worker.activeJobID == nil)
                 }
+                Text(worker.llmPunctuationEnabled ? "✨ 語意校對：已啟用" : "🔇 語意校對：未設定 API Key，已跳過")
+                    .font(.caption2).foregroundStyle(.secondary)
                 ProgressView(value: worker.progress)
                 TextEditor(text: Binding(
                     get: { transcriptDraft },

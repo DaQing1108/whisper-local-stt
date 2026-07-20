@@ -84,6 +84,88 @@ struct WorkerSupervisorTests {
     }
 
     @Test
+    func injectsKeychainCredentialIntoWorkerEnvironmentAndEnablesLLMPunctuation() async throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let audio = temporary.appendingPathComponent("sample.wav")
+        try Data("audio".utf8).write(to: audio)
+        let workerScript = temporary.appendingPathComponent("llm_env_echo.py")
+        try llmEnvEchoWorkerScript.write(to: workerScript, atomically: true, encoding: .utf8)
+        let supervisor = WorkerSupervisor()
+        let fakeKey = "sk-test-anthropic-fake-key-1234567890"
+        supervisor.llmCredentialLoader = { provider in provider == .anthropic ? fakeKey : nil }
+
+        try supervisor.start(
+            pythonURL: URL(fileURLWithPath: "/usr/bin/python3"),
+            workerURL: workerScript, workingDirectory: temporary
+        )
+        try await waitUntil { supervisor.state == .ready }
+        #expect(supervisor.llmPunctuationEnabled)
+        _ = try supervisor.transcribe(audioURL: audio, modelName: "base")
+        try await waitUntil { supervisor.jobStatus == "Completed" }
+
+        #expect(supervisor.partialText == "skip_llm=False anthropic_seen=True openai_seen=False")
+        // The key must never surface anywhere observable outside process.environment.
+        #expect(!supervisor.diagnostics.contains(fakeKey))
+        supervisor.stop()
+    }
+
+    @Test
+    func injectsOpenAICredentialWhenAnthropicIsNotConfigured() async throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let audio = temporary.appendingPathComponent("sample.wav")
+        try Data("audio".utf8).write(to: audio)
+        let workerScript = temporary.appendingPathComponent("llm_env_echo_openai.py")
+        try llmEnvEchoWorkerScript.write(to: workerScript, atomically: true, encoding: .utf8)
+        let supervisor = WorkerSupervisor()
+        let fakeKey = "sk-test-openai-fake-key-1234567890"
+        supervisor.llmCredentialLoader = { provider in provider == .openAI ? fakeKey : nil }
+
+        try supervisor.start(
+            pythonURL: URL(fileURLWithPath: "/usr/bin/python3"),
+            workerURL: workerScript, workingDirectory: temporary
+        )
+        try await waitUntil { supervisor.state == .ready }
+        #expect(supervisor.llmPunctuationEnabled)
+        _ = try supervisor.transcribe(audioURL: audio, modelName: "base")
+        try await waitUntil { supervisor.jobStatus == "Completed" }
+
+        #expect(supervisor.partialText == "skip_llm=False anthropic_seen=False openai_seen=True")
+        supervisor.stop()
+    }
+
+    @Test
+    func withoutStoredCredentialSkipsLLMAndLeavesWorkerEnvironmentUnset() async throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let audio = temporary.appendingPathComponent("sample.wav")
+        try Data("audio".utf8).write(to: audio)
+        let workerScript = temporary.appendingPathComponent("llm_env_echo_none.py")
+        try llmEnvEchoWorkerScript.write(to: workerScript, atomically: true, encoding: .utf8)
+        let supervisor = WorkerSupervisor()
+        supervisor.llmCredentialLoader = { _ in nil }
+
+        try supervisor.start(
+            pythonURL: URL(fileURLWithPath: "/usr/bin/python3"),
+            workerURL: workerScript, workingDirectory: temporary
+        )
+        try await waitUntil { supervisor.state == .ready }
+        #expect(!supervisor.llmPunctuationEnabled)
+        _ = try supervisor.transcribe(audioURL: audio, modelName: "base")
+        try await waitUntil { supervisor.jobStatus == "Completed" }
+
+        #expect(supervisor.partialText == "skip_llm=True anthropic_seen=False openai_seen=False")
+        supervisor.stop()
+    }
+
+    @Test
     func discoversWorkerByWalkingUpFromSwiftPackage() throws {
         let packageDirectory = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -268,6 +350,25 @@ struct WorkerSupervisorTests {
                 emit(command["request_id"], "model_status", {"model_name":"base","status":"cached","cached":True,"loaded":False})
             elif command["command"] == "warmup_model":
                 emit(command["request_id"], "model_ready", {"model_name":"base","status":"ready","cached":True,"loaded":True})
+        """
+    }
+
+    private var llmEnvEchoWorkerScript: String {
+        """
+        import json, os, sys
+        def emit(request_id, event, payload):
+            print(json.dumps({"protocol":"whisper.worker","version":1,"type":"event","request_id":request_id,"event":event,"payload":payload}), flush=True)
+        emit("worker", "ready", {"status":"ready"})
+        for line in sys.stdin:
+            command = json.loads(line)
+            if command["command"] == "transcribe":
+                request_id = command["request_id"]
+                skip_llm = command["payload"].get("skip_llm")
+                anthropic_seen = bool(os.environ.get("ANTHROPIC_API_KEY"))
+                openai_seen = bool(os.environ.get("OPENAI_API_KEY"))
+                emit(request_id, "accepted", {"job_id":"job-1","status":"queued"})
+                emit(request_id, "progress", {"job_id":"job-1","done":1,"total":1,"text":f"skip_llm={skip_llm} anthropic_seen={anthropic_seen} openai_seen={openai_seen}"})
+                emit(request_id, "completed", {"job_id":"job-1","text":"測試完成","language":"zh","info":{"segments":[],"duration_seconds":1.0}})
         """
     }
 

@@ -95,6 +95,11 @@ final class WorkerSupervisor {
     private(set) var modelReadiness = "unknown"
     private(set) var modelReadinessMessage = "Model status not checked"
     private(set) var modelOperationInProgress = false
+    private(set) var llmPunctuationEnabled = false
+    /// Injectable so tests don't touch the real Keychain; defaults to the real credential store.
+    var llmCredentialLoader: (MeetingSummaryProvider) -> String? = {
+        try? LLMCredentialStore(provider: $0).load()
+    }
     var jobTerminalHandler: (@MainActor @Sendable (String?) -> Void)?
     var jobLostHandler: (@MainActor @Sendable (String) -> Void)?
     var workerReadyHandler: (@MainActor @Sendable () -> Void)?
@@ -156,6 +161,25 @@ final class WorkerSupervisor {
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
+
+        // Process.environment REPLACES the inherited environment when set at all, so start
+        // from the current environment and only layer keys on top — never send them via the
+        // JSONL payload or any log-observable path.
+        // Only OpenAI/Anthropic have Keychain storage today (MeetingSummaryProvider has no
+        // .gemini case); the Worker also accepts GEMINI_API_KEY but there's no way for a user
+        // to configure one in this app yet, so it's intentionally not forwarded here.
+        var childEnvironment = ProcessInfo.processInfo.environment
+        var punctuationEnabled = false
+        if let anthropicKey = llmCredentialLoader(.anthropic), !anthropicKey.isEmpty {
+            childEnvironment["ANTHROPIC_API_KEY"] = anthropicKey
+            punctuationEnabled = true
+        }
+        if let openAIKey = llmCredentialLoader(.openAI), !openAIKey.isEmpty {
+            childEnvironment["OPENAI_API_KEY"] = openAIKey
+            punctuationEnabled = true
+        }
+        process.environment = childEnvironment
+        llmPunctuationEnabled = punctuationEnabled
 
         let output = stdoutPipe.fileHandleForReading
         let errorOutput = stderrPipe.fileHandleForReading
@@ -270,7 +294,7 @@ final class WorkerSupervisor {
         var payload: [String: JSONValue] = [
             "audio_path": .string(audioURL.path),
             "model_name": .string(modelName),
-            "skip_llm": .bool(true),
+            "skip_llm": .bool(!llmPunctuationEnabled),
         ]
         if let language, !language.isEmpty { payload["language"] = .string(language) }
         if !domain.isEmpty { payload["domain"] = .string(domain) }
