@@ -1,13 +1,29 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-15
-Phase: v2.4.0 release
-Working: canonical summary、目的地獨立 AI 會議內容與固定 meeting ID 已完成，待完成封裝與 GitHub 發布
-Next action: 以真實會議錄音驗收 App summary、Obsidian 與 Notion 的發布結果
-Blockers: none
+Last checkpoint: 2026-07-20 21:40
+Phase: Whisper Swift 已知缺口逐項修復
+Working: language TextField 持久化、混音模式 15 秒分段轉錄、Notion append crash-safety 三項缺口皆已修復並通過 discipline-loop 驗證；本機 `~/Applications/Whisper Swift.app` 已重建簽署並確認可啟動
+Next action: 使用者以真實 Notion token 手動驗收 append crash-safety（AC-5）；之後處理 Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）
+Blockers: Gate E 需使用者提供 Apple Developer 憑證與第二台乾淨 Mac，尚未開始
 
 ## Checkpoint History
+### 2026-07-20 21:40｜Notion append ambiguous-outcome crash-safety
+- Scope: `NotionClient.swift` 新增 `clearsAmbiguousLock` 分類（依 `NotionClientError` case 判斷該錯誤是否保證從未送達或已被 Notion 乾淨拒絕）；`ContentView+History.swift` 的 `appendToNotion` 改為在 `Task` 啟動前同步呼叫 `markNotionOutcomeAmbiguous`（原本只在觀察到 `.ambiguousOutcome` 後才鎖定），修正 App 在請求真正在途時被強制關閉／crash 導致鎖定遺失、重啟後可重試造成重複 append 的風險。
+- Review 修復：獨立 code-reviewer agent 首輪抓到 1 個 HIGH（`NotionCredentialStore` 的 Keychain 讀取失敗屬於 `NotionCredentialError`、不在 `NotionClientError` 分類內，導致這類「從未送達」的錯誤反而永久鎖住條目）與 1 個 MEDIUM（手動解鎖按鈕在正常上傳中途也會出現），兩者皆已修復並經同一 agent 重審確認無新問題。
+- Verification: `swift build` 乾淨；`swift test` 135/135 通過（含新增 7 個 parameterized 分類測試）；重建並重簽 `~/Applications/Whisper Swift.app`（iCloud xattr 依既有 workaround 處理），啟動確認 WhisperApp 主行程與 WhisperWorker 子行程正常運行無 crash。
+- User verification: 需以真實 Notion token 手動測試一次 append，確認行為符合預期（邏輯未變，僅补充 AC-5）。
+- Repo state: branch `codex/swiftui-python-poc`，本次改動涵蓋 `NotionClient.swift`／`ContentView+History.swift`／`NotionClientTests.swift`。
+
+### 2026-07-20 20:30｜混音模式 15 秒分段轉錄
+- Scope: `MixedAudioRecordingController` 從整段錄製才轉錄，改為比照 System Audio 模式的 `RotatingCaptureSession` + `OrderedChunkSubmissionQueue` 架構，每 15 秒切一段並依序送出轉錄、累積 timecode 逐字稿。
+- Review 修復：獨立 code-reviewer agent 抓到 1 個 CRITICAL（`stop()` 重試在真正失敗後再次成功時，`finalFlush()` 被呼叫兩次，第二次拋出的 `alreadyFinalized` 被誤判為寫入錯誤，導致已完成的錄音檔被刪除——真實資料遺失風險）與 1 個 HIGH（`rotateChunk()` 寫入失敗只標記 `.failed` 但沒有停止擷取，麥克風／系統音訊會無限期持續錄製），皆已修復並重審確認。
+- Verification: `swift build`／`swift test` 全綠；使用者以真實混音錄音手動驗收確認正常（"混音測試正常"）。
+
+### 2026-07-20 19:50｜whisper.language 持久化修復
+- Scope: 修正語言 TextField 在輸入過程中被 `didSet` 提前寫回 UserDefaults 預設值、導致重啟後語言設定被清空的問題；改為草稿 state + `onSubmit`/`onChange` 才同步寫入。
+- Verification: `swift build`／`swift test` 全綠；於真實執行中的 App 手動輸入、重啟驗證設定保留。
+
 ### 2026-07-20｜Whisper Swift 系統音訊、AI 摘要與生產力流程
 - Scope: 完成 SwiftUI + Python Worker 的系統音訊／混音轉錄、15 秒分段、timecode、可編輯歷史結果、OpenAI／Anthropic Claude 摘要、Obsidian／Notion 發布入口，以及音訊模式、模型、語言、領域與摘要 Provider 的最後設定保存。
 - Verification: Swift regression `126/126 passed`；Anthropic focused tests `7/7 passed`；真實 system-audio chunk 以無效 language `08` 驗證會正規化為 `auto` 並完成中文 timecoded transcript；多輪獨立 code review 均 `APPROVE`；bundled Worker Gate B 與最終 `/Users/daqingliao/Applications/Whisper Swift.app` strict codesign 通過。

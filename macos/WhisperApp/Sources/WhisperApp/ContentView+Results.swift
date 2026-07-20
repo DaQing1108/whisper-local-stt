@@ -18,6 +18,7 @@ extension ContentView {
                     get: { transcriptDraft },
                     set: { transcriptDraft = $0; isDraftDirty = true }
                 ))
+                    .lineSpacing(8)
                     .overlay(alignment: .topLeading) {
                         if transcriptDraft.isEmpty {
                             Text("完成錄音或選擇音訊檔後，逐字稿會顯示在這裡。")
