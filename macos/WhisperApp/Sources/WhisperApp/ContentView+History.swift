@@ -35,7 +35,7 @@ extension ContentView {
                                 Button("Append 至既有 Notion Page") { appendToNotion(entry) }
                                     .disabled(settings.notionPageID.isEmpty || notionUploadInProgress
                                               || settings.isNotionOutcomeAmbiguous(entryID: entry.id))
-                                if settings.isNotionOutcomeAmbiguous(entryID: entry.id) {
+                                if settings.isNotionOutcomeAmbiguous(entryID: entry.id) && !notionUploadInProgress {
                                     Button("已確認 Notion，允許重試") {
                                         settings.clearNotionOutcomeAmbiguous(entryID: entry.id)
                                         notionStatus = "已解除重試鎖定"
@@ -167,6 +167,9 @@ extension ContentView {
               !settings.isNotionOutcomeAmbiguous(entryID: entry.id) else { return }
         notionUploadInProgress = true
         notionStatus = "Uploading to Notion…"
+        // Optimistically lock before the request is even sent, so a crash mid-request still
+        // leaves the entry locked on relaunch instead of risking a duplicate append.
+        settings.markNotionOutcomeAmbiguous(entryID: entry.id)
         Task {
             defer { notionUploadInProgress = false }
             do {
@@ -180,9 +183,15 @@ extension ContentView {
                 settings.clearNotionOutcomeAmbiguous(entryID: entry.id)
                 notionStatus = "Appended to Notion"
             } catch NotionClientError.ambiguousOutcome {
-                settings.markNotionOutcomeAmbiguous(entryID: entry.id)
                 notionStatus = "Notion may have accepted this entry. Verify the page before enabling retry."
             } catch {
+                // NotionCredentialError (Keychain read failure) always happens before any
+                // network request is made, so it's always safe to clear like NotionClientError
+                // cases where clearsAmbiguousLock is true.
+                if error is NotionCredentialError
+                    || (error as? NotionClientError)?.clearsAmbiguousLock == true {
+                    settings.clearNotionOutcomeAmbiguous(entryID: entry.id)
+                }
                 notionStatus = "Notion upload failed: \(error.localizedDescription)"
             }
         }

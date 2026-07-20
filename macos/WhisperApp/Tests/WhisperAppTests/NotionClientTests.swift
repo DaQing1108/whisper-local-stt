@@ -127,4 +127,20 @@ struct NotionClientTests {
             try await client.append(entry, pageID: "0123456789abcdef0123456789abcdef", token: "token")
         }
     }
+
+    @Test(arguments: [
+        NotionClientError.missingToken,
+        .invalidPageID,
+        .contentTooLarge,
+        .httpStatus(400),
+        .httpStatus(404),
+    ])
+    func errorsThatNeverReachOrAreCleanlyRejectedByNotionClearTheAmbiguousLock(_ error: NotionClientError) {
+        #expect(error.clearsAmbiguousLock)
+    }
+
+    @Test(arguments: [NotionClientError.ambiguousOutcome, .invalidResponse])
+    func errorsWithUncertainDeliveryKeepTheAmbiguousLock(_ error: NotionClientError) {
+        #expect(!error.clearsAmbiguousLock)
+    }
 }

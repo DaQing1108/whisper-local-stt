@@ -7,6 +7,21 @@ enum NotionClientError: Error, Equatable {
     case httpStatus(Int)
     case contentTooLarge
     case ambiguousOutcome
+
+    /// Whether this error guarantees the append request never reached Notion (or reached it and
+    /// was cleanly rejected), so an optimistic ambiguous-outcome lock set before the request is
+    /// safe to clear immediately. `.ambiguousOutcome` and `.invalidResponse` are excluded: the
+    /// former is ambiguous by definition, and the latter means the network layer returned
+    /// something after the request was already sent, so we can't be certain Notion never
+    /// processed it.
+    var clearsAmbiguousLock: Bool {
+        switch self {
+        case .missingToken, .invalidPageID, .contentTooLarge, .httpStatus:
+            true
+        case .invalidResponse, .ambiguousOutcome:
+            false
+        }
+    }
 }
 
 protocol NotionHTTPTransport: Sendable {
