@@ -211,6 +211,7 @@ extension ContentView {
     }
 
     func startMixedAudioRecording() {
+        mixedAudioHistoryEntryID = nil
         Task {
             do {
                 let url = FileManager.default.temporaryDirectory
@@ -224,14 +225,26 @@ extension ContentView {
 
     func stopMixedAudioRecording() {
         captureStartedAt = nil
+        presentNextCompletedResult = true
         Task {
             do {
                 selectedFile = try await mixedAudioRecording.stopAndTranscribe(
                     modelName: settings.defaultModel, language: settings.language,
                     domain: settings.domain, extraTerms: effectiveExtraTerms
                 )
+                if let id = mixedAudioHistoryEntryID,
+                   let sessionURL = mixedAudioRecording.sessionFinalizedURL {
+                    _ = try history.updateResult(
+                        id: id,
+                        text: mixedAudioRecording.transcriptText,
+                        segments: mixedAudioRecording.transcriptSegments,
+                        durationSeconds: mixedAudioRecording.transcriptDurationSeconds,
+                        audioURL: sessionURL
+                    )
+                }
                 errorMessage = nil
             } catch {
+                presentNextCompletedResult = false
                 selectedFile = mixedAudioRecording.lastFinalizedURL
                 errorMessage = error.localizedDescription
             }
@@ -347,10 +360,16 @@ extension ContentView {
     }
 
     var mixedAudioRecordingStatusText: String {
-        switch mixedAudioRecording.state {
+        if let queueError = mixedAudioRecording.submissionQueue.errorMessage {
+            return "Mixed audio transcription paused: \(queueError). Restart Worker to retry."
+        }
+        if mixedAudioRecording.isDraining {
+            return "Transcribing remaining mixed audio chunks…"
+        }
+        return switch mixedAudioRecording.state {
         case .idle: "Mixed audio idle"
         case .starting: "Starting mic + system audio…"
-        case .recording: "Recording mic + system audio…"
+        case .recording: "Recording mic + system audio — \(mixedAudioRecording.finalizedChunkURLs.count) chunks finalized"
         case .stopping: "Stopping mixed audio…"
         case .failed(let message): "Mixed audio error: \(message)"
         }

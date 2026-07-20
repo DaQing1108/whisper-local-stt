@@ -33,8 +33,17 @@ struct WhisperDesktopApp: App {
             backend: systemAudioBackend,
             transcriber: worker
         )
-        worker.transcriptionCompletedHandler = { [weak history, weak systemAudioRecording] completed in
-            guard systemAudioRecording?.ownsChunk(completed.audioURL) != true else { return }
+        let mixedAudioRecording = MixedAudioRecordingController(
+            microphonePermission: SystemMicrophonePermissionProvider(),
+            screenPermission: systemAudioPermission,
+            microphoneBackend: AVAudioEngineCaptureBackend(),
+            systemBackend: ScreenCaptureKitAudioBackend(),
+            scheduler: TimerChunkRotationScheduler(),
+            transcriber: worker
+        )
+        worker.transcriptionCompletedHandler = { [weak history, weak systemAudioRecording, weak mixedAudioRecording] completed in
+            guard systemAudioRecording?.ownsChunk(completed.audioURL) != true,
+                  mixedAudioRecording?.ownsChunk(completed.audioURL) != true else { return }
             _ = try? history?.recordCompleted(
                 audioURL: completed.audioURL,
                 model: completed.modelName,
@@ -65,14 +74,7 @@ struct WhisperDesktopApp: App {
         _liveRecording = State(initialValue: LiveRecordingController(transcriber: worker))
         _systemAudioPermission = State(initialValue: systemAudioPermission)
         _systemAudioRecording = State(initialValue: systemAudioRecording)
-        _mixedAudioRecording = State(initialValue: MixedAudioRecordingController(
-            microphonePermission: SystemMicrophonePermissionProvider(),
-            screenPermission: systemAudioPermission,
-            microphoneBackend: AVAudioEngineCaptureBackend(),
-            systemBackend: ScreenCaptureKitAudioBackend(),
-            scheduler: TimerChunkRotationScheduler(),
-            transcriber: worker
-        ))
+        _mixedAudioRecording = State(initialValue: mixedAudioRecording)
     }
 
     var body: some Scene {

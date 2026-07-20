@@ -254,6 +254,57 @@ extension ContentView {
             }
             return
         }
+        if mixedAudioRecording.acceptCompletedChunk(
+            completed.audioURL,
+            text: completed.text,
+            segments: completed.segments,
+            durationSeconds: completed.durationSeconds
+        ) {
+            presentNextCompletedResult = false
+            do {
+                let entry: TranscriptionHistoryEntry
+                if let id = mixedAudioHistoryEntryID,
+                   let updated = try history.updateResult(
+                       id: id,
+                       text: mixedAudioRecording.transcriptText,
+                       segments: mixedAudioRecording.transcriptSegments,
+                       durationSeconds: mixedAudioRecording.transcriptDurationSeconds,
+                       audioURL: mixedAudioRecording.sessionFinalizedURL
+                   ) {
+                    entry = updated
+                } else {
+                    entry = try history.recordCompleted(
+                        audioURL: mixedAudioRecording.sessionFinalizedURL ?? completed.audioURL,
+                        model: completed.modelName,
+                        language: completed.language,
+                        text: mixedAudioRecording.transcriptText,
+                        segments: mixedAudioRecording.transcriptSegments,
+                        durationSeconds: mixedAudioRecording.transcriptDurationSeconds,
+                        domain: completed.domain,
+                        extraTerms: completed.extraTerms
+                    )
+                }
+                mixedAudioHistoryEntryID = entry.id
+                restore(entry)
+                errorMessage = nil
+            } catch {
+                currentEntryID = nil
+                transientEntry = TranscriptionHistoryEntry(
+                    audioPath: completed.audioURL.path,
+                    model: completed.modelName,
+                    language: completed.language,
+                    text: mixedAudioRecording.transcriptText,
+                    segments: mixedAudioRecording.transcriptSegments,
+                    durationSeconds: mixedAudioRecording.transcriptDurationSeconds,
+                    domain: completed.domain,
+                    extraTerms: completed.extraTerms
+                )
+                transcriptDraft = mixedAudioRecording.transcriptText
+                isDraftDirty = false
+                errorMessage = "History update failed: \(error.localizedDescription)"
+            }
+            return
+        }
         guard CaptureUIRules.shouldPresentCompletedResult(
             isDraftDirty: isDraftDirty,
             explicitlyRequestedPresentation: presentNextCompletedResult

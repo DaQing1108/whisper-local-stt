@@ -31,6 +31,7 @@ struct ContentView: View {
     @State var notionUploadInProgress = false
     @State var currentEntryID: UUID?
     @State var systemAudioHistoryEntryID: UUID?
+    @State var mixedAudioHistoryEntryID: UUID?
     @State var transientEntry: TranscriptionHistoryEntry?
     @State var transcriptDraft = ""
     @State var isDraftDirty = false
