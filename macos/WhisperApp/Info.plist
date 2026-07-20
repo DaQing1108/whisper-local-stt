@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key><string>zh_TW</string>
+    <key>CFBundleExecutable</key><string>WhisperApp</string>
+    <key>CFBundleIdentifier</key><string>com.via.whisper-swiftui</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>Whisper Swift</string>
+    <key>CFBundleDisplayName</key><string>Whisper Swift</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSMicrophoneUsageDescription</key><string>Whisper Swift 需要麥克風權限進行語音轉錄。</string>
+    <key>NSScreenCaptureUsageDescription</key><string>Whisper Swift 需要螢幕錄製權限以擷取 Mac 播放的系統音訊。</string>
+</dict>
+</plist>
