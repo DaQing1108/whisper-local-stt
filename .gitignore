@@ -25,6 +25,8 @@ outputs/
 .DS_Store?
 *.zip
 .last_result.json
+.last_summary.json
+.build/
 build/
 dist/
 *.app/

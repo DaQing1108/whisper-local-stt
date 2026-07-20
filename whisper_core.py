@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -43,8 +44,17 @@ class TranscriptionError(Exception):
         super().__init__(message)
 
 from llm_post import has_llm_key, llm_punctuate
-from sse import broadcast
 from transcribe_common import clean_segments
+from transcription_events import EventSink, NULL_EVENT_SINK
+from transcription_jobs import CancellationToken, TranscriptionCancelled
+from cancellable_process import run_cancellable
+
+
+def _normalize_language_code(language: Optional[str]) -> Optional[str]:
+    value = str(language or "").strip().lower()
+    if value in {"", "auto", "__auto__"}:
+        return None
+    return value if re.fullmatch(r"[a-z]{2,3}", value) else None
 
 # ── ffmpeg 路徑解析（lazy，呼叫時才找，避免 import 時 PATH 尚未設好）────
 os.environ["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "")
@@ -254,14 +264,15 @@ def _punctuate_segments(segments: list) -> str:
 
 
 def _transcribe_mlx_subprocess(
-    wav_path: str, model_name: str, language: Optional[str], initial_prompt: str = ""
+    wav_path: str, model_name: str, language: Optional[str], initial_prompt: str = "",
+    cancellation: Optional[CancellationToken] = None,
 ) -> dict:
     import json as _json
     repo     = MLX_REPOS.get(model_name, MLX_REPOS["small"])
     lang_arg = language or "__auto__"
-    proc = subprocess.run(
+    proc = run_cancellable(
         [sys.executable, "-c", _MLX_SCRIPT, wav_path, repo, lang_arg, initial_prompt],
-        capture_output=True, text=True, timeout=7200,
+        cancellation=cancellation,
     )
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip().splitlines()[-1] if proc.stderr else "mlx failed")
@@ -360,16 +371,17 @@ def _get_system_python_mlx() -> str | None:
 
 
 def _transcribe_mlx_system_subprocess(
-    wav_path: str, model_name: str, language: Optional[str], initial_prompt: str = ""
+    wav_path: str, model_name: str, language: Optional[str], initial_prompt: str = "",
+    cancellation: Optional[CancellationToken] = None,
 ) -> dict:
     """frozen .app 用：系統 python3 で mlx_whisper 転写 → メモリ分離 + Apple Silicon 加速。"""
     import json as _json
     py      = _get_system_python_mlx()
     repo    = MLX_REPOS.get(model_name, MLX_REPOS["small"])
     lang_arg = language or "__auto__"
-    proc = subprocess.run(
+    proc = run_cancellable(
         [py, "-c", _MLX_SCRIPT, wav_path, repo, lang_arg, initial_prompt],
-        capture_output=True, text=True, timeout=7200,
+        cancellation=cancellation,
     )
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip().splitlines()[-1] if proc.stderr else "mlx subprocess failed")
@@ -380,15 +392,16 @@ def _transcribe_mlx_system_subprocess(
 
 
 def _transcribe_fw_subprocess(
-    wav_path: str, model_name: str, language: Optional[str], initial_prompt: str = ""
+    wav_path: str, model_name: str, language: Optional[str], initial_prompt: str = "",
+    cancellation: Optional[CancellationToken] = None,
 ) -> dict:
     """frozen .app 用：系統 python3 で faster-whisper 転写 → WKWebView とメモリ分離。"""
     import json as _json
     py       = _get_system_python()
     lang_arg = language or "__auto__"
-    proc = subprocess.run(
+    proc = run_cancellable(
         [py, "-c", _FW_SUBPROCESS_SCRIPT, wav_path, model_name, lang_arg, initial_prompt],
-        capture_output=True, text=True, timeout=7200,
+        cancellation=cancellation,
     )
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip().splitlines()[-1] if proc.stderr else "fw subprocess failed")
@@ -398,37 +411,53 @@ def _transcribe_fw_subprocess(
     return _json.loads(last_line[-1])
 
 
-def _transcribe_file(wav_path: str, model_name: str, opts: dict) -> dict:
-    """優先 mlx-whisper；frozen 時は system subprocess で分離；fallback faster-whisper。"""
-    language       = opts.get("language") or None
+def _transcribe_frozen_worker_subprocess(
+    wav_path: str, model_name: str, language: Optional[str], initial_prompt: str = "",
+    cancellation: Optional[CancellationToken] = None,
+) -> dict:
+    """Run inference through the same bundled Worker executable, never system Python."""
+    import json as _json
+    lang_arg = language or "__auto__"
+    proc = run_cancellable(
+        [sys.executable, "--inference-child", wav_path, model_name, lang_arg, initial_prompt],
+        cancellation=cancellation,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() if proc.stderr else "inference child failed")
+    last_line = [line for line in proc.stdout.strip().splitlines() if line.startswith("{")]
+    if not last_line:
+        raise RuntimeError("inference child produced no JSON")
+    return _json.loads(last_line[-1])
+
+
+def _transcribe_file(
+    wav_path: str, model_name: str, opts: dict,
+    cancellation: Optional[CancellationToken] = None,
+) -> dict:
+    """Prefer MLX in development; frozen Worker uses its bundled inference child."""
+    language       = _normalize_language_code(opts.get("language"))
     initial_prompt = opts.get("initial_prompt", "")
 
-    # frozen .app: 系統 python3 subprocess（メモリ分離）で優先 mlx → fallback fw
+    # Frozen Worker self-spawns, preserving hard cancellation without system Python.
     if getattr(sys, "frozen", False):
-        if _get_system_python_mlx():
-            try:
-                data = _transcribe_mlx_system_subprocess(wav_path, model_name, language, initial_prompt)
-                segs = clean_segments(data.get("segments", []))
-                text = _punctuate_segments(segs) if segs else data.get("text", "").strip()
-                return {"text": text, "language": data.get("language", "?"), "segments": segs}
-            except Exception as e:
-                print(f"[Whisper] mlx subprocess 失敗（{e}），切換 fw subprocess", flush=True)
-        if _get_system_python():
-            try:
-                data = _transcribe_fw_subprocess(wav_path, model_name, language, initial_prompt)
-                segs = clean_segments(data.get("segments", []))
-                text = _punctuate_segments(segs) if segs else data.get("text", "").strip()
-                return {"text": text, "language": data.get("language", "?"), "segments": segs}
-            except Exception as e:
-                print(f"[Whisper] fw subprocess 失敗（{e}），in-process fallback", file=sys.stderr, flush=True)
+        data = _transcribe_frozen_worker_subprocess(
+            wav_path, model_name, language, initial_prompt, cancellation,
+        )
+        segs = clean_segments(data.get("segments", []))
+        text = _punctuate_segments(segs) if segs else data.get("text", "").strip()
+        return {"text": text, "language": data.get("language", "?"), "segments": segs}
 
     # 開發模式：mlx subprocess → fallback in-process faster-whisper
     if _HAS_MLX:
         try:
-            data = _transcribe_mlx_subprocess(wav_path, model_name, language, initial_prompt)
+            data = _transcribe_mlx_subprocess(
+                wav_path, model_name, language, initial_prompt, cancellation,
+            )
             segs = clean_segments(data.get("segments", []))
             text = _punctuate_segments(segs) if segs else data.get("text", "").strip()
             return {"text": text, "language": data.get("language", "?"), "segments": segs}
+        except TranscriptionCancelled:
+            raise
         except Exception as e:
             print(f"[Whisper] mlx 失敗（{e}），切換 faster-whisper", flush=True)
 
@@ -459,6 +488,8 @@ def run_whisper(
     language: Optional[str],
     progress_cb=None,
     keep_wav: bool = False,
+    event_sink: Optional[EventSink] = None,
+    cancellation: Optional[CancellationToken] = None,
     **kwargs,
 ) -> tuple[str, str, dict]:
     """
@@ -466,17 +497,30 @@ def run_whisper(
     回傳 (full_text, detected_lang, info_dict)。
     若 keep_wav=True，轉換後的 WAV 不刪除，路徑存於 info["wav_path"]。
     """
+    emit = event_sink or NULL_EVENT_SINK
+    if cancellation:
+        cancellation.raise_if_cancelled()
+
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp_in:
         tmp_in.write(audio_bytes)
         tmp_in_path = tmp_in.name
 
     tmp_wav = tmp_in_path + ".wav"
     try:
-        subprocess.run(
-            [_get_ffmpeg(), "-y", "-i", tmp_in_path,
-             "-ar", "16000", "-ac", "1", "-f", "wav", tmp_wav],
-            check=True, capture_output=True,
-        )
+        ffmpeg_command = [
+            _get_ffmpeg(), "-y", "-i", tmp_in_path,
+            "-ar", "16000", "-ac", "1", "-f", "wav", tmp_wav,
+        ]
+        conversion = run_cancellable(ffmpeg_command, cancellation=cancellation)
+        if conversion.returncode != 0:
+            raise subprocess.CalledProcessError(
+                conversion.returncode,
+                ffmpeg_command,
+                output=conversion.stdout,
+                stderr=conversion.stderr,
+            )
+        if cancellation:
+            cancellation.raise_if_cancelled()
 
         with wave.open(tmp_wav, 'r') as wf:
             total_frames = wf.getnframes()
@@ -489,10 +533,11 @@ def run_whisper(
         # 分段錄音：用前段結尾覆蓋 initial_prompt 增加連貫性
         if kwargs.get("initial_prompt_override"):
             prompt = kwargs["initial_prompt_override"]
-        print(f"[Whisper] prompt={repr(prompt[:60])}, lang={language}", flush=True)
+        normalized_language = _normalize_language_code(language)
+        print(f"[Whisper] prompt={repr(prompt[:60])}, lang={normalized_language or 'auto'}", flush=True)
 
         # language：明確指定 zh；auto 時也預設 zh（台灣繁體中文錄音）
-        effective_lang = language if (language and language != "auto") else "zh"
+        effective_lang = normalized_language or "zh"
         opts: dict = {"language": effective_lang}
         if prompt:
             opts["initial_prompt"] = prompt
@@ -505,17 +550,21 @@ def run_whisper(
         }
 
         if total_sec <= CHUNK_SECONDS:
+            if cancellation:
+                cancellation.raise_if_cancelled()
             if progress_cb:
                 progress_cb(0, 1, "")
-            broadcast("status", {
+            emit("status", {
                 "msg": f"⏳ 啟動 Whisper {model_name} 模型進行語音辨識 (由於硬體效能，這可能需花費數十秒)..."
             })
-            result    = _transcribe_file(tmp_wav, model_name, opts)
+            result    = _transcribe_file(tmp_wav, model_name, opts, cancellation)
+            if cancellation:
+                cancellation.raise_if_cancelled()
             full_text = _strip_prompt_echo(result.get("text", "").strip(), prompt)
             lang      = result.get("language", "?")
             info["segments"] = result.get("segments", [])
             if not kwargs.get("skip_llm") and has_llm_key():
-                broadcast("status", {"msg": "⏳ 語音辨識完畢，正在啟動 LLM 進行語意糾錯與標點處理..."})
+                emit("status", {"msg": "⏳ 語音辨識完畢，正在啟動 LLM 進行語意糾錯與標點處理..."})
                 full_text = llm_punctuate(full_text, extra_terms)
             return _to_traditional(full_text), lang, info
 
@@ -529,6 +578,8 @@ def run_whisper(
         with wave.open(tmp_wav, 'rb') as wf:
             params = wf.getparams()
             for i in range(n_chunks):
+                if cancellation:
+                    cancellation.raise_if_cancelled()
                 wf.setpos(i * chunk_frames)
                 frames     = wf.readframes(chunk_frames)
                 chunk_path = tmp_in_path + f"_chunk{i}.wav"
@@ -536,7 +587,9 @@ def run_whisper(
                     cw.setparams(params)
                     cw.writeframes(frames)
                 try:
-                    result   = _transcribe_file(chunk_path, model_name, opts)
+                    result   = _transcribe_file(chunk_path, model_name, opts, cancellation)
+                    if cancellation:
+                        cancellation.raise_if_cancelled()
                     seg_text = _strip_prompt_echo(result.get("text", "").strip(), prompt)
                     lang     = result.get("language", lang)
                     texts.append(seg_text)
@@ -555,7 +608,7 @@ def run_whisper(
         full_text = "\n".join(texts)
         info["segments"] = all_segments
         if not kwargs.get("skip_llm") and has_llm_key():
-            broadcast("status", {"msg": "⏳ 全文轉錄完畢，正在啟動 LLM 進行語意糾錯與標點處理..."})
+            emit("status", {"msg": "⏳ 全文轉錄完畢，正在啟動 LLM 進行語意糾錯與標點處理..."})
             full_text = llm_punctuate(full_text, extra_terms)
         return _to_traditional(full_text), lang, info
 

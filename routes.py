@@ -21,10 +21,14 @@ import sparkle_updater
 import sse as _sse
 from constants import ENV_PATH as _ENV_PATH
 from transcribe_common import DOMAIN_LABELS, is_hallucination as _is_hallucination
+from transcription_service import TranscriptionRequest, TranscriptionService
+from transcription_jobs import JobRegistry, TranscriptionCancelled
 from version import __version__
 from whisper_core import TranscriptionError, is_model_cached, run_whisper, warmup_model_async, _warmup_state, _warmup_lock
 
 bp = Blueprint("main", __name__)
+_transcription_service = TranscriptionService(run_whisper, _sse.broadcast)
+_job_registry = JobRegistry()
 
 # HTML_PAGE 由 app.py 在建立 Blueprint 後注入
 HTML_PAGE: str = ""
@@ -333,6 +337,8 @@ def transcribe():
                 break
 
     audio_bytes = audio.read()
+    job_id = uuid4().hex
+    cancellation = _job_registry.register(job_id)
 
     def _worker():
         domain_label = DOMAIN_LABELS.get(domain, domain)
@@ -340,6 +346,7 @@ def transcribe():
         if not _sse._transcribe_sem.acquire(blocking=False):
             _sse.broadcast("status", {"msg": "⏳ 系統正在處理另一份音檔，請稍候排隊…"})
             _sse._transcribe_sem.acquire()
+        _job_registry.mark_running(job_id)
 
         try:
             _sse.broadcast("status", {"msg": f"⏳ 轉錄中（模型：{model_name}，領域：{domain_label}）…"})
@@ -357,13 +364,27 @@ def transcribe():
                     _sse.broadcast("chunk", {"text": seg_text, "chunk": done, "total": total})
 
             try:
-                text, lang, info = run_whisper(
-                    audio_bytes, ext, model_name, language,
+                transcription = _transcription_service.transcribe(TranscriptionRequest(
+                    audio_bytes=audio_bytes,
+                    ext=ext,
+                    model_name=model_name,
+                    language=language,
+                    job_id=job_id,
+                    cancellation=cancellation,
                     progress_cb=on_progress,
-                    domain=domain,
-                    extra_terms=extra_terms,
                     keep_wav=diarize_enabled,
-                )
+                    options={"domain": domain, "extra_terms": extra_terms},
+                ))
+                text, lang, info = transcription.text, transcription.language, transcription.info
+                final_job = _job_registry.finish(job_id)
+                if final_job and final_job.is_cancelled:
+                    raise TranscriptionCancelled(job_id)
+            except TranscriptionCancelled:
+                _sse.broadcast("status", {"msg": "⏹️ 轉錄已取消", "job_id": job_id})
+                _sse.broadcast("done", {
+                    "ok": False, "error_code": "CANCELLED", "error": "cancelled", "job_id": job_id,
+                })
+                return
             except BrokenPipeError:
                 _sse.broadcast("status", {"msg": "⚠️ 轉錄中斷，請重試"})
                 _sse.broadcast("done",   {"ok": False, "error_code": "BROKEN_PIPE", "error": "broken_pipe"})
@@ -414,9 +435,22 @@ def transcribe():
                                     "whisper_segments": info.get("segments", [])})
         finally:
             _sse._transcribe_sem.release()
+            _job_registry.unregister(job_id)
 
-    threading.Thread(target=_worker, daemon=True).start()
-    return jsonify(status="processing"), 202
+    try:
+        threading.Thread(target=_worker, daemon=True).start()
+    except BaseException:
+        _job_registry.unregister(job_id)
+        raise
+    return jsonify(status="processing", job_id=job_id), 202
+
+
+@bp.route("/api/jobs/<job_id>/cancel", methods=["POST"])
+def cancel_transcription_job(job_id: str):
+    snapshot = _job_registry.cancel(job_id)
+    if not snapshot:
+        return jsonify(ok=False, error="job not found", job_id=job_id), 404
+    return jsonify(ok=True, job_id=job_id, status=snapshot.status), 202
 
 
 # ── Chunked recording session state ──────────────────────────────
@@ -528,6 +562,7 @@ def upload_chunk():
                 logging.debug("[Chunk %d] 開始轉錄 bytes=%d ext=%s", chunk_index, len(audio_bytes), ext)
                 text, lang, info = _transcribe_audio(
                     audio_bytes, ext, model_name, language,
+                    event_sink=_sse.broadcast,
                     domain=domain, extra_terms=extra_terms,
                     initial_prompt_override=context or None,
                     skip_llm=True,  # LLM 在 _finish_session 全文合併後統一處理
@@ -1041,6 +1076,7 @@ def system_audio_start():
                     from whisper_core import transcribe_audio as _transcribe_audio
                     text, lang, chunk_info = _transcribe_audio(
                         wav_bytes, ".wav", model_name, language,
+                        event_sink=_sse.broadcast,
                         domain=domain, extra_terms=extra_terms,
                         initial_prompt_override=context or None,
                         skip_llm=True,  # LLM 在 stop 後全文合併統一處理
@@ -1215,9 +1251,14 @@ def transcribe_sync():
     def _worker():
         _sse._transcribe_sem.acquire()
         try:
-            text, lang, _ = run_whisper(audio_bytes, ".webm", model_name, language)
-            result["text"] = text
-            result["language"] = lang
+            transcription = _transcription_service.transcribe(TranscriptionRequest(
+                audio_bytes=audio_bytes,
+                ext=".webm",
+                model_name=model_name,
+                language=language,
+            ))
+            result["text"] = transcription.text
+            result["language"] = transcription.language
         except TranscriptionError as e:
             result["error"] = str(e)
         except Exception as e:
@@ -1280,6 +1321,7 @@ def test_inject_chunk():
                 wav_bytes, ".wav",
                 sess.get("model", "large"),
                 sess.get("language", "zh"),
+                event_sink=_sse.broadcast,
                 domain=sess.get("domain", "general"),
                 extra_terms=sess.get("extra_terms", ""),
                 skip_llm=True,

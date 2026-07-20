@@ -6,17 +6,84 @@
 happy path 與逾時/例外路徑）從未被任何測試觸發。
 """
 import base64
+import io
 import os
 import unittest
 from unittest.mock import patch, MagicMock
 
 import app as flask_app
+import routes
+from transcription_service import TranscriptionResult
 from whisper_core import TranscriptionError
 
 
 def _client():
     flask_app.app.config["TESTING"] = True
     return flask_app.app.test_client()
+
+
+class _ImmediateThread:
+    def __init__(self, target, args=(), kwargs=None, **_options):
+        self._target = target
+        self._args = args
+        self._kwargs = kwargs or {}
+
+    def start(self):
+        self._target(*self._args, **self._kwargs)
+
+
+class TestTranscribeUpload(unittest.TestCase):
+    def test_file_upload_uses_transcription_service_contract(self):
+        service_result = TranscriptionResult("上傳逐字稿", "zh", {"segments": []})
+        with patch.object(routes._transcription_service, "transcribe", return_value=service_result) as mock_run, \
+             patch("routes.threading.Thread", _ImmediateThread), \
+             patch("routes._save_last_transcript"), \
+             patch("routes._start_summary_generation"), \
+             patch("routes._sse.broadcast"):
+            resp = _client().post(
+                "/transcribe",
+                data={
+                    "audio": (io.BytesIO(b"fake-audio"), "sample.wav"),
+                    "model": "base",
+                    "language": "zh",
+                    "domain": "tech",
+                },
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(resp.status_code, 202)
+        self.assertTrue(resp.get_json()["job_id"])
+        service_request = mock_run.call_args.args[0]
+        self.assertEqual(service_request.ext, ".wav")
+        self.assertEqual(service_request.model_name, "base")
+        self.assertEqual(service_request.options["domain"], "tech")
+        self.assertIsNone(routes._job_registry.get(resp.get_json()["job_id"]))
+
+    def test_cancel_active_file_job(self):
+        token = routes._job_registry.register("active-job")
+        try:
+            resp = _client().post("/api/jobs/active-job/cancel")
+            self.assertEqual(resp.status_code, 202)
+            self.assertEqual(resp.get_json()["status"], "cancelling")
+            self.assertTrue(token.is_cancelled)
+        finally:
+            routes._job_registry.unregister("active-job")
+
+    def test_cancel_unknown_job_returns_404(self):
+        resp = _client().post("/api/jobs/missing-job/cancel")
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(resp.get_json()["ok"])
+
+    def test_thread_start_failure_cleans_registered_job(self):
+        active_before = routes._job_registry.active_count
+        with patch("routes.threading.Thread", side_effect=RuntimeError("thread failed")):
+            with self.assertRaises(RuntimeError):
+                _client().post(
+                    "/transcribe",
+                    data={"audio": (io.BytesIO(b"fake-audio"), "sample.wav")},
+                    content_type="multipart/form-data",
+                )
+        self.assertEqual(routes._job_registry.active_count, active_before)
 
 
 # ── /api/transcribe-sync ──────────────────────────────────────────
@@ -46,9 +113,10 @@ class TestTranscribeSync(unittest.TestCase):
         self.assertIn("格式錯誤", data["error"])
 
     def test_happy_path_returns_transcript(self):
-        """mock run_whisper，驗證成功路徑回傳 text/language，狀態碼 200。"""
+        """mock transcription service，驗證成功路徑回傳 text/language。"""
         fake_audio = base64.b64encode(b"\x00\x01fake-audio-bytes").decode()
-        with patch("routes.run_whisper", return_value=("測試逐字稿", "zh", [])) as mock_run:
+        service_result = TranscriptionResult("測試逐字稿", "zh", {})
+        with patch.object(routes._transcription_service, "transcribe", return_value=service_result) as mock_run:
             resp = _client().post(
                 "/api/transcribe-sync",
                 json={"audio_b64": fake_audio, "model": "base", "language": "中文"},
@@ -60,13 +128,13 @@ class TestTranscribeSync(unittest.TestCase):
         self.assertEqual(data["language"], "zh")
         # 語言別名轉換：「中文」應轉成 ISO code "zh" 才傳給 run_whisper
         mock_run.assert_called_once()
-        called_language = mock_run.call_args[0][3]
-        self.assertEqual(called_language, "zh")
+        service_request = mock_run.call_args.args[0]
+        self.assertEqual(service_request.language, "zh")
 
     def test_transcription_error_returns_500(self):
-        """run_whisper 拋 TranscriptionError → 500，錯誤訊息透傳給呼叫端。"""
+        """service 拋 TranscriptionError → 500，錯誤訊息透傳給呼叫端。"""
         fake_audio = base64.b64encode(b"fake").decode()
-        with patch("routes.run_whisper",
+        with patch.object(routes._transcription_service, "transcribe",
                    side_effect=TranscriptionError("MODEL_LOAD_FAILED", "模型載入失敗")):
             resp = _client().post(
                 "/api/transcribe-sync",
@@ -80,14 +148,14 @@ class TestTranscribeSync(unittest.TestCase):
     def test_unknown_language_alias_passthrough(self):
         """非別名表內的語言字串（例如已是 ISO code）原樣傳給 run_whisper，不誤轉。"""
         fake_audio = base64.b64encode(b"fake").decode()
-        with patch("routes.run_whisper", return_value=("hello", "en", [])) as mock_run:
+        with patch.object(routes._transcription_service, "transcribe", return_value=TranscriptionResult("hello", "en", {})) as mock_run:
             resp = _client().post(
                 "/api/transcribe-sync",
                 json={"audio_b64": fake_audio, "model": "base", "language": "en"},
             )
         self.assertEqual(resp.status_code, 200)
-        called_language = mock_run.call_args[0][3]
-        self.assertEqual(called_language, "en")
+        service_request = mock_run.call_args.args[0]
+        self.assertEqual(service_request.language, "en")
 
 
 # ── Notion /upload ─────────────────────────────────────────────────
