@@ -21,6 +21,7 @@ rm -rf "$APP" "$STAGING"
 mkdir -p "$STAGING/Contents/MacOS" "$STAGING/Contents/Resources"
 cp "$SCRATCH/release/WhisperApp" "$STAGING/Contents/MacOS/WhisperApp"
 cp "$PACKAGE_DIR/Info.plist" "$STAGING/Contents/Info.plist"
+cp "$PROJECT_DIR/AppIcon.icns" "$STAGING/Contents/Resources/AppIcon.icns"
 cp -R "$RUNTIME_DIR" "$STAGING/Contents/Resources/WhisperWorker"
 
 xattr -cr "$STAGING"
