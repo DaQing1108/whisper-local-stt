@@ -15,7 +15,9 @@ final class AppSettingsStore {
     static let summaryProviderKey = "whisper.summaryProvider"
     static let audioModeKey = "whisper.audioMode"
     static let supportedModels = ["tiny", "base", "small", "medium", "large-v3"]
-    static let supportedDomains = ["general", "education", "technology", "business", "medical", "legal"]
+    // Must match whisper_core.py's DOMAIN_TERMS keys exactly, or a selection silently
+    // resolves to an empty prompt server-side.
+    static let supportedDomains = ["general", "media", "tech", "medical", "legal"]
     static let supportedHistoryRetentions = [50, 100, 200, 500]
 
     static func normalizedLanguage(_ rawValue: String) -> String {

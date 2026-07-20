@@ -13,7 +13,7 @@ struct AppSettingsStoreTests {
         let first = AppSettingsStore(defaults: defaults)
         first.defaultModel = "small"
         first.language = "zh"
-        first.domain = "technology"
+        first.domain = "media"
         first.extraTerms = "VIA, Whisper"
         first.historyRetention = 500
         first.summaryProvider = .anthropic
@@ -26,7 +26,7 @@ struct AppSettingsStoreTests {
         let restored = AppSettingsStore(defaults: defaults)
         #expect(restored.defaultModel == "small")
         #expect(restored.language == "zh")
-        #expect(restored.domain == "technology")
+        #expect(restored.domain == "media")
         #expect(restored.extraTerms == "VIA, Whisper")
         #expect(restored.historyRetention == 500)
         #expect(restored.summaryProvider == .anthropic)
@@ -65,6 +65,23 @@ struct AppSettingsStoreTests {
         settings.language = "08"
         #expect(settings.language == "")
         #expect(defaults.string(forKey: AppSettingsStore.languageKey) == "")
+    }
+
+    @Test
+    func rejectsUnknownPersistedDomain() {
+        let suite = "WhisperAppTests-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("technology", forKey: AppSettingsStore.domainKey)
+
+        #expect(AppSettingsStore(defaults: defaults).domain == "general")
+    }
+
+    @Test
+    func supportedDomainsMatchWorkerPromptKeys() {
+        // Must stay in sync with whisper_core.py's DOMAIN_TERMS dict keys — a mismatch
+        // means a selected domain silently resolves to an empty server-side prompt.
+        #expect(Set(AppSettingsStore.supportedDomains) == ["general", "media", "tech", "medical", "legal"])
     }
 
     @Test
