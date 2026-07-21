@@ -32,7 +32,7 @@ extension ContentView {
                                 Button("載入結果") { restore(entry) }
                                 Button("發布會議筆記至 Obsidian") { exportToObsidian(entry) }
                                     .disabled(settings.obsidianVaultPath.isEmpty)
-                                Button("Append 至既有 Notion Page") { appendToNotion(entry) }
+                                Button("發布至 Notion") { publishToNotion(entry) }
                                     .disabled(settings.notionPageID.isEmpty || notionUploadInProgress
                                               || settings.isNotionOutcomeAmbiguous(entryID: entry.id))
                                 if settings.isNotionOutcomeAmbiguous(entryID: entry.id) && !notionUploadInProgress {
@@ -166,13 +166,13 @@ extension ContentView {
         }
     }
 
-    func appendToNotion(_ entry: TranscriptionHistoryEntry) {
+    func publishToNotion(_ entry: TranscriptionHistoryEntry) {
         guard !notionUploadInProgress,
               !settings.isNotionOutcomeAmbiguous(entryID: entry.id) else { return }
         notionUploadInProgress = true
-        notionStatus = "Uploading to Notion…"
+        notionStatus = "Publishing to Notion…"
         // Optimistically lock before the request is even sent, so a crash mid-request still
-        // leaves the entry locked on relaunch instead of risking a duplicate append.
+        // leaves the entry locked on relaunch instead of risking a duplicate create/append.
         settings.markNotionOutcomeAmbiguous(entryID: entry.id)
         Task {
             defer { notionUploadInProgress = false }
@@ -180,12 +180,22 @@ extension ContentView {
                 guard let token = try NotionCredentialStore().load() else {
                     throw NotionClientError.missingToken
                 }
-                try await NotionClient().append(
+                let childPageID = try await NotionClient().publish(
                     entry, summary: summaries.summary(for: entry.id),
-                    pageID: settings.notionPageID, token: token
+                    parentPageID: settings.notionPageID,
+                    existingChildPageID: entry.notionChildPageID, token: token
                 )
+                // Best-effort: the page is already written; a failure here just means the next
+                // publish won't find this id and will create a new child page instead of updating
+                // it. Surface it (rather than a silent try?) so a persistently failing disk write
+                // doesn't look like a normal success on every future publish of this entry.
+                do {
+                    try history.updateNotionChildPageID(id: entry.id, pageID: childPageID)
+                    notionStatus = "Published to Notion"
+                } catch {
+                    notionStatus = "Published to Notion, but failed to remember the page for next time: \(error.localizedDescription)"
+                }
                 settings.clearNotionOutcomeAmbiguous(entryID: entry.id)
-                notionStatus = "Appended to Notion"
             } catch NotionClientError.ambiguousOutcome {
                 notionStatus = "Notion may have accepted this entry. Verify the page before enabling retry."
             } catch {

@@ -19,6 +19,7 @@ struct TranscriptionHistoryEntry: Codable, Identifiable, Equatable, Sendable {
     let domain: String
     let extraTerms: String
     var obsidianNotePath: String?
+    var notionChildPageID: String?
 
     init(
         id: UUID = UUID(),
@@ -31,7 +32,8 @@ struct TranscriptionHistoryEntry: Codable, Identifiable, Equatable, Sendable {
         durationSeconds: Double? = nil,
         domain: String = "general",
         extraTerms: String = "",
-        obsidianNotePath: String? = nil
+        obsidianNotePath: String? = nil,
+        notionChildPageID: String? = nil
     ) {
         self.id = id
         self.completedAt = completedAt
@@ -44,11 +46,12 @@ struct TranscriptionHistoryEntry: Codable, Identifiable, Equatable, Sendable {
         self.domain = domain
         self.extraTerms = extraTerms
         self.obsidianNotePath = obsidianNotePath
+        self.notionChildPageID = notionChildPageID
     }
 
     enum CodingKeys: String, CodingKey {
         case id, completedAt, audioPath, model, language, text, segments, durationSeconds, domain, extraTerms
-        case obsidianNotePath
+        case obsidianNotePath, notionChildPageID
     }
 
     init(from decoder: Decoder) throws {
@@ -64,6 +67,7 @@ struct TranscriptionHistoryEntry: Codable, Identifiable, Equatable, Sendable {
         domain = try values.decodeIfPresent(String.self, forKey: .domain) ?? "general"
         extraTerms = try values.decodeIfPresent(String.self, forKey: .extraTerms) ?? ""
         obsidianNotePath = try values.decodeIfPresent(String.self, forKey: .obsidianNotePath)
+        notionChildPageID = try values.decodeIfPresent(String.self, forKey: .notionChildPageID)
     }
 }
 
@@ -155,7 +159,8 @@ final class TranscriptionHistoryStore {
             durationSeconds: durationSeconds,
             domain: existing.domain,
             extraTerms: existing.extraTerms,
-            obsidianNotePath: existing.obsidianNotePath
+            obsidianNotePath: existing.obsidianNotePath,
+            notionChildPageID: existing.notionChildPageID
         )
         do {
             try persist()
@@ -172,6 +177,20 @@ final class TranscriptionHistoryStore {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         let previous = entries
         entries[index].obsidianNotePath = path
+        do {
+            try persist()
+            writeError = nil
+        } catch {
+            entries = previous
+            writeError = error.localizedDescription
+            throw error
+        }
+    }
+
+    func updateNotionChildPageID(id: UUID, pageID: String) throws {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        let previous = entries
+        entries[index].notionChildPageID = pageID
         do {
             try persist()
             writeError = nil

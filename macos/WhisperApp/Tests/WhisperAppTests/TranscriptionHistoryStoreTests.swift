@@ -43,6 +43,26 @@ struct TranscriptionHistoryStoreTests {
     }
 
     @Test
+    func updateResultPreservesNotionChildPageIDAndUpdateNotionChildPageIDPersists() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("history.json")
+        let store = TranscriptionHistoryStore(fileURL: url)
+        let audio = directory.appendingPathComponent("meeting.wav")
+        let entry = try store.recordCompleted(audioURL: audio, model: "base", language: "zh", text: "會議完成")
+
+        try store.updateNotionChildPageID(id: entry.id, pageID: "notion-page-id")
+        #expect(store.entries[0].notionChildPageID == "notion-page-id")
+
+        _ = try store.updateResult(id: entry.id, text: "更新後文字", segments: [], durationSeconds: nil)
+        #expect(store.entries[0].notionChildPageID == "notion-page-id")
+
+        let restored = TranscriptionHistoryStore(fileURL: url)
+        #expect(restored.entries[0].notionChildPageID == "notion-page-id")
+    }
+
+    @Test
     func corruptHistoryIsReportedWithoutInventingEntries() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("history-\(UUID()).json")
         try Data("not-json".utf8).write(to: url)
@@ -67,6 +87,7 @@ struct TranscriptionHistoryStoreTests {
         object.removeValue(forKey: "domain")
         object.removeValue(forKey: "extraTerms")
         object.removeValue(forKey: "obsidianNotePath")
+        object.removeValue(forKey: "notionChildPageID")
         let legacy = try JSONSerialization.data(withJSONObject: object)
         let decoded = try JSONDecoder().decode(TranscriptionHistoryEntry.self, from: legacy)
 
@@ -75,6 +96,7 @@ struct TranscriptionHistoryStoreTests {
         #expect(decoded.domain == "general")
         #expect(decoded.extraTerms.isEmpty)
         #expect(decoded.obsidianNotePath == nil)
+        #expect(decoded.notionChildPageID == nil)
     }
 
     @Test
