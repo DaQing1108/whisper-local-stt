@@ -1,5 +1,14 @@
 # Whisper STT — Claude 技術約束
 
+## 分支策略（2026-07-22 決策）
+
+- 本 worktree 現在是 **`whisper-swift`** 分支（前身 `codex/swiftui-python-poc`，2026-07-22 改名，local + remote 已完成）— SwiftUI + Python Worker，**現階段主力開發分支**。
+- `main` = Whisper Classic（Python + Flask + pywebview，v2.4.x）**已凍結**：不再排入新功能，僅在使用者日常 fallback 真的出問題時才修。
+- P0/P1/P2 功能 parity 已完成（Swift 108 tests、Python 34 tests 全過，獨立 review APPROVE）。目前僅供使用者個人在本機使用（本機簽章、Gate B 已通過），**尚未推進 Gate E**（Developer ID／notarization／clean Mac 驗證）——待未來確定要對外釋出才處理。
+- 本目錄內 `docs/Whisper_Dual_Version_Git_Isolation_Plan_v1.md`（2026-07-19）主張不建永久分支、改用 tag 策略——**該文件已過時，使用者已於 2026-07-22 明確確認改用目前的分支策略（`whisper-swift` 作為長期主力分支）**，後續不要依該文件的 tag-only 建議行事。
+- 完整決策記錄見主 worktree `docs/Whisper_SwiftUI_Migration_Task_Spec_v1.md` 與 memory `project_whisper_swiftui_migration.md`。
+- ⚠️ 2026-07-22 更正：先前這裡寫「3 個 tracked 修改 + 33 個 untracked entries，含未驗證的 system-audio 診斷變更」是抄自 `Whisper_Dual_Version_Git_Isolation_Plan_v1.md`（2026-07-19）的過時描述，寫入當下沒有重新核對 `git status`。實際查證：`ContentView.swift` 乾淨，近期 commit 皆為正常 feature/fix；目前 dirty state 只有 `CLAUDE.md`、`macos/WhisperApp/Info.plist`（皆為 2026-07-22 本次工作異動）與一個既有無關的 untracked 文件 `docs/Whisper_SwiftUI_P0_Gap_Closing_Specs_v1.md`。**教訓：任何時候要引用「目前 dirty state」時，先重新跑 `git status` 確認，不要沿用文件裡的舊描述。**
+
 ## 絕對不能做（NEVER）
 
 ### 1. 不能用 pyobjc 做系統音訊擷取
