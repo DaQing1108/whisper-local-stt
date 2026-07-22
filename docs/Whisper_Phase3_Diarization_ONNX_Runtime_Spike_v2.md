@@ -80,17 +80,38 @@ their fixed GitHub Release URLs when missing, exposed via new
 `diarization_status` / `diarization_warmup` JSONL commands (kept separate from
 `model_status`/`warmup_model` rather than overloading `model_name`, since the
 two-file GitHub-asset shape doesn't fit the single-HF-repo-id shape those
-commands assume). Not yet implemented — this is a design direction to carry
-into the execution spec, not code.
+commands assume).
+
+**Update 2026-07-22: implemented and verified, item 1 is now resolved.**
+`diarization_model_runtime.py` (`DiarizationModelManager`, mirrors
+`model_runtime.ModelRuntimeManager`'s `status()`/`warmup()` shape) plus
+`tests/unit/test_diarization_model_runtime.py` (5 tests, mocked
+`urlretrieve`, all passing). Beyond mocked unit tests, this was verified with
+real network calls in an isolated scratch environment:
+- `warmup()` against the real GitHub Release URLs downloaded both models
+  (segmentation `.tar.bz2` extracted, embedding `.onnx` fetched directly) in
+  7.5s; `status()` correctly reported `cached: true` afterward.
+- The real downloaded files were loaded into an actual
+  `sherpa_onnx.OfflineSpeakerDiarization` instance (not just an empty
+  config, unlike the v1 capability-probe test) — `config.validate()` and
+  construction both succeeded, reporting `sample_rate = 16000`, which matches
+  `system_audio_capture.swift`'s existing 16kHz mono PCM output with no
+  resampling needed.
+- Full existing suite (`make test`) still 281/281 passing (276 pre-existing +
+  5 new) — no regressions from adding these two files.
+
+Not yet wired into `worker_entrypoint.py`/protocol/SwiftUI — this stays a
+standalone, independently-testable module until an execution spec covers the
+JSONL command surface and UI.
 
 ## Revisit criteria
 
-Do not treat this as approved for implementation. Before writing an execution
-spec and starting Worker/protocol/SwiftUI changes, resolve the model
-download/offline mechanism (item 1 — design direction above still needs to be
-implemented and tested) and get at least one real-recording usability check
-(item 2 — **requires a real multi-speaker recording from the user**; no audio
-fixture with multiple speakers exists in this repo, and this is the kind of
-accuracy judgment CLAUDE.md already marks as user-verified, not
+Do not treat this as approved for full implementation. Item 1 (model
+download/offline mechanism) is now resolved — implemented and verified above.
+The remaining blocker before writing an execution spec and starting
+Worker/protocol/SwiftUI changes is item 2: at least one real-recording
+usability check (**requires a real multi-speaker recording from the user**;
+no audio fixture with multiple speakers exists in this repo, and this is the
+kind of accuracy judgment CLAUDE.md already marks as user-verified, not
 Claude-automatable). Items 3–5 can be validated during implementation (Gate B
 / Gate D style evidence), not required to unblock starting the work.
