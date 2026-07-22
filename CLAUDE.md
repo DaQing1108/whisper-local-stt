@@ -9,6 +9,35 @@
 - 完整決策記錄見主 worktree `docs/Whisper_SwiftUI_Migration_Task_Spec_v1.md` 與 memory `project_whisper_swiftui_migration.md`。
 - ⚠️ 2026-07-22 更正：先前這裡寫「3 個 tracked 修改 + 33 個 untracked entries，含未驗證的 system-audio 診斷變更」是抄自 `Whisper_Dual_Version_Git_Isolation_Plan_v1.md`（2026-07-19）的過時描述，寫入當下沒有重新核對 `git status`。實際查證：`ContentView.swift` 乾淨，近期 commit 皆為正常 feature/fix；目前 dirty state 只有 `CLAUDE.md`、`macos/WhisperApp/Info.plist`（皆為 2026-07-22 本次工作異動）與一個既有無關的 untracked 文件 `docs/Whisper_SwiftUI_P0_Gap_Closing_Specs_v1.md`。**教訓：任何時候要引用「目前 dirty state」時，先重新跑 `git status` 確認，不要沿用文件裡的舊描述。**
 
+## 症狀診斷樹（Whisper Swift 專屬，2026-07-22 新增）
+
+### ⚠️ `dist/build_swiftui_app.sh` 打包安裝後，App 從 `~/Applications` 消失／被搬進垃圾桶
+
+```
+確認三件事（依序）：
+1. 這台 Mac 的「系統設定 → Apple 帳號 → iCloud → Documents」是否開啟？
+   → `defaults read com.apple.finder FXICloudDriveDocuments` 回傳 1 即為開啟
+   → 這個專案在 ~/Documents/ 底下，開啟時 dist/ 打包出來的 .app 會被 iCloud
+     Drive 同步機制重新蓋上 com.apple.quarantine，`cp -R` 會把這個屬性原封
+     不動帶到 ~/Applications
+2. `spctl --assess --type execute -vv "<app path>"` 是否顯示 `rejected`？
+   → 只要 origin 是 `WhisperSTT Local`（本機自簽章，非 Apple Developer ID），
+     這個指令永遠會顯示 rejected——這是正常現象，不代表核准沒生效，
+     不要因為看到 rejected 就以為修復失敗
+3. 每次重新 build，程式碼雜湊都會變 → 每次都是全新、從未被核准過的執行檔
+   → 使用者必須在 Finder 雙擊開啟（不要用 `open` 指令或程式化啟動）
+     → 被擋下後，去「系統設定 → 隱私權與安全性」點「仍要打開」
+     → 這一步無法用程式繞過，是 Gatekeeper 刻意要求人工同意
+```
+
+- **正確做法**：打包後用 `xattr -cr` 清一次 quarantine（防禦性動作，即使不一定是唯一原因），
+  然後明確告知使用者要手動在 Finder 雙擊 + 系統設定核准，不要嘗試用 `open`／AppleScript／
+  任何自動化方式繞過 Gatekeeper 的人工核准步驟
+- **與 Gate E 的關聯**：這是「暫不投入 Developer ID/notarization」這個決策的實際代價——
+  每次重新 build 都要使用者重新核准一次。如果這個摩擦成本變得無法接受（例如頻繁迭代測試），
+  值得重新評估是否該提前推進 Gate E，而不是繼續忍受每次重裝都要手動點「仍要打開」
+- **確認時間**：2026-07-22（Whisper Swift 版號顯示功能打包驗證時發現並排查確認）
+
 ## 絕對不能做（NEVER）
 
 ### 1. 不能用 pyobjc 做系統音訊擷取
