@@ -2,6 +2,13 @@ import Foundation
 
 enum AppIdentity {
     static let displayName = "Whisper Swift"
+
+    static var versionString: String {
+        let info = Bundle.main.infoDictionary
+        let shortVersion = info?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        let buildNumber = info?["CFBundleVersion"] as? String ?? "0"
+        return "\(shortVersion) (\(buildNumber))"
+    }
 }
 
 enum AudioInputMode: String, CaseIterable, Identifiable {

@@ -41,6 +41,13 @@ extension ContentView {
                     Button("檢查更新…") { updates.checkForUpdates() }.disabled(!updates.canCheckForUpdates)
                     Text(updates.statusMessage).font(.caption).foregroundStyle(.secondary)
                 }
+                GroupBox("關於") {
+                    HStack {
+                        Text("App 版本")
+                        Spacer()
+                        Text(AppIdentity.versionString).foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding(.top, 10)
         }
