@@ -1,13 +1,19 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.1
 
 ## Current State
-Last checkpoint: 2026-07-22 (更正：whisper-swift dirty state 描述有誤，已修正)
+Last checkpoint: 2026-07-22（追加：Whisper Swift 版本顯示功能 + Gatekeeper/iCloud 排查收尾）
 Phase: Whisper Classic vs SwiftUI 合併決策定案（後續收尾中）
-Working: SwiftUI + Python Worker candidate（`codex/swiftui-python-poc` 已改名 `whisper-swift`，local + remote 都已完成）P0/P1/P2 功能 parity 已完成並通過獨立 review（Swift 108 tests、Python 34 tests 全過，本機簽章 Gate B 已通過）；`main`（Whisper Classic v2.4.x）進入凍結維護，不再排入新功能；Whisper Swift 版號從 `0.1.0` 提升為 `0.2.0`（反映 P0-P2 已完成的實際進度，與 Classic 版號脫鉤獨立編號）
-Next action: 使用者切換日常使用到 `~/Applications/Whisper SwiftUI.app` 驗證穩定性；背景任務已啟動更新過時的 `Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md`（獨立 session 執行中）；`whisper-swift` worktree 目前只有 `CLAUDE.md`、`Info.plist` 兩個本次修改的檔案未 commit（無其他混亂 dirty state），可直接 commit
-Blockers: none（Gate E 外部條件——Developer ID／notarization／clean Mac——確認暫緩而非阻塞，僅個人使用不需要）
+Working: `whisper-swift` 分支已加入版本顯示功能（設定畫面「關於」區塊顯示 `App 版本 0.2.0 (1)`），已 build（152 tests 全過）、打包、安裝、使用者手動完成 Gatekeeper 核准並在畫面上確認看到版號；`main`（Whisper Classic v2.4.x）維持凍結維護
+Next action: 等待背景任務 `task_edee3d79`（更新過時的 `Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md`）回報結果；日常使用持續驗證 `~/Applications/Whisper Swift.app` 穩定性
+Blockers: none（Gate E 外部條件確認暫緩；新發現的 Gatekeeper/iCloud 重 build 需重新核准的摩擦已記錄在案，非阻塞但影響迭代速度）
 
 ## Checkpoint History
+### 2026-07-22（追加）｜Whisper Swift 版本顯示功能 + Gatekeeper/iCloud 排查
+- Completed: (1) 新增 `AppIdentity.versionString`（讀取 `CFBundleShortVersionString`/`CFBundleVersion`）並在設定畫面「關於」區塊顯示；(2) `swift build`/`swift test`（152 tests, 29 suites）全過；(3) 打包安裝到 `~/Applications/Whisper Swift.app` 過程中發現 app 反覆消失/被搬進垃圾桶，查證根因：這台 Mac 的 `~/Documents` 有開 iCloud Drive 同步，`dist/` 打包出的 app 被重新蓋上 `com.apple.quarantine`，加上本機自簽章（非 Developer ID）導致 `spctl --assess` 恆為 rejected，每次重 build 都需要使用者手動在系統設定核准一次；(4) 使用者完成核准，畫面確認看到版號；(5) 已將此診斷樹寫入 `whisper-swift` 的 `CLAUDE.md`；(6) 順手查證並補齊了一個無關的舊 hook 警告（task `20260702-230e` 的 step7 verification log 缺記錄，已補上）
+- State: 版本顯示功能程式碼已 commit + push（`12c5a0d`、CLAUDE.md 診斷樹 commit），`whisper-swift` 與 remote 同步；main worktree 除 README 外無其他變更
+- Next: 背景任務 `task_edee3d79` 尚未回報；持續觀察 Gatekeeper 重新核准的摩擦是否影響 Gate E 決策
+
+
 ### 2026-07-22（更正）｜whisper-swift dirty state 描述有誤
 - **錯誤說明：** 先前兩則 checkpoint 記錄（2026-07-22 兩則）都寫「`whisper-swift` worktree 有 3 個 tracked 修改 + 33 個 untracked entries，含未驗證的 system-audio 診斷變更」——這段描述抄自 2026-07-19 的 `Whisper_Dual_Version_Git_Isolation_Plan_v1.md`，早已過時，且從未在寫入當下重新對照 `git status` 核實
 - **實際查證結果：** `ContentView.swift` 完全乾淨，近期 commit 都是正常 feature/fix；目前 `whisper-swift` worktree 的 dirty state 只有 `CLAUDE.md`（本次加的分支策略段落）與 `macos/WhisperApp/Info.plist`（本次版號提升），加上一個與本次工作無關的既有 untracked 文件 `docs/Whisper_SwiftUI_P0_Gap_Closing_Specs_v1.md`
