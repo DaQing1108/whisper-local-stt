@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.1
 
 ## Current State
-Last checkpoint: 2026-07-15
-Phase: v2.4.1 timecode and CI patch
-Working: 修復 footer 發布遺失 timecode，以及 v2.4.0 CI 的 hermetic test failures
-Next action: 完成 v2.4.1 封裝、CI 與 GitHub patch release
-Blockers: none
+Last checkpoint: 2026-07-22 (跨 session 累積：branch 決策 + v2.4.1 patch)
+Phase: Whisper Classic vs SwiftUI 合併決策定案
+Working: SwiftUI + Python Worker candidate（`codex/swiftui-python-poc` 已改名 `whisper-swift`，local + remote 都已完成）P0/P1/P2 功能 parity 已完成並通過獨立 review（Swift 108 tests、Python 34 tests 全過，本機簽章 Gate B 已通過）；`main`（Whisper Classic v2.4.x）進入凍結維護，不再排入新功能
+Next action: 使用者切換日常使用到 `~/Applications/Whisper SwiftUI.app` 驗證穩定性；`whisper-swift` worktree 仍有 dirty state（3 個 tracked 修改 + 33 個 untracked entries，含未驗證的 system-audio 診斷變更）待拆分 commit
+Blockers: none（Gate E 外部條件——Developer ID／notarization／clean Mac——確認暫緩而非阻塞，僅個人使用不需要）
 
 ## Checkpoint History
+### 2026-07-22｜Whisper Classic/SwiftUI 合併決策：main 凍結、分支改名 whisper-swift
+- Completed: (1) 確認 `codex/swiftui-python-poc` 的 P0/P1/P2 parity 早已完成（此前依據的比較文件已過時）；(2) 確認 Gate E 卡在外部條件（Developer ID、clean Mac），非程式碼問題，且現階段僅個人使用不需要；(3) 依使用者最終確認，將 `main` 列為凍結維護，`codex/swiftui-python-poc` 改名為 `whisper-swift` 作為主力分支（local + remote 已執行，無 PR/CI 相依，安全）；(4) 更新兩邊 `CLAUDE.md` 記錄分支策略，並明確標注舊的 `Whisper_Dual_Version_Git_Isolation_Plan_v1.md`（tag-only 策略）已被使用者否決
+- State: 決策已定案並落地於 branch 結構；`whisper-swift` worktree 仍有未拆分的 dirty state（含未驗證的 system-audio 診斷變更），尚未處理
+- Next: 使用者驗證 SwiftUI 版日常使用穩定性；後續視需要拆分 `whisper-swift` 的 dirty commit 與更新過時的比較文件
+
 ### 2026-07-15｜Checkpoint Publish：v2.4.1 Timecode Patch
 - Status: source patch 已完成，尚未封裝或發布；目前 branch 為 `codex/fix-v2-4-1-timecodes`。
 - Completed: 修復 footer 發布漏傳 `segments`、chunk 與系統音訊完成 state 未持久化 segments；Obsidian 原始逐字稿可恢復 `[MM:SS]` timecode。
