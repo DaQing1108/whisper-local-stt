@@ -36,6 +36,12 @@ extension ContentView {
                     Button("清空") { transcriptDraft = ""; isDraftDirty = true }.disabled(transcriptDraft.isEmpty)
                     if let entry = currentEntry {
                         Button(audioPlayer?.isPlaying == true ? "暫停音訊" : "播放音訊") { togglePlayback(entry) }
+                        if !worker.diarizationAvailable && worker.diarizationStatus != "ready" {
+                            Button(worker.diarizationStatus == "loading" ? "下載模型中…" : "下載講者辨識模型") {
+                                triggerDiarizationWarmup()
+                            }
+                            .disabled(worker.diarizationOperationInProgress || worker.activeRequestID != nil)
+                        }
                         Button("辨識講者") { triggerDiarization(entry) }
                             .disabled(entry.segments.isEmpty || worker.diarizationOperationInProgress || worker.activeRequestID != nil)
                         Menu("Export") {
@@ -86,6 +92,15 @@ extension ContentView {
         } catch {
             diarizationTargetEntryID = nil
             errorMessage = "無法啟動講者辨識：\(error.localizedDescription)"
+        }
+    }
+
+    func triggerDiarizationWarmup() {
+        do {
+            try worker.diarizationWarmup()
+            errorMessage = nil
+        } catch {
+            errorMessage = "無法啟動模型下載：\(error.localizedDescription)"
         }
     }
 
