@@ -30,6 +30,9 @@ extension ContentView {
                 .background(.background, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
                 .frame(minHeight: 180, maxHeight: 300)
+                if let entry = currentEntry, !entry.segments.isEmpty {
+                    segmentListView(entry)
+                }
                 HStack {
                     Button("儲存修改") { saveDraft() }.disabled(currentEntryID == nil)
                     Button("複製") { copyDraft() }.disabled(transcriptDraft.isEmpty)
@@ -76,6 +79,43 @@ extension ContentView {
             isDraftDirty = true
             diarizationTargetEntryID = nil
         }
+        .onDisappear { stopPlaybackPolling() }
+    }
+
+    private static let playbackPollInterval: TimeInterval = 0.3
+    private static let activeSegmentHighlightOpacity: Double = 0.18
+
+    private func segmentListView(_ entry: TranscriptionHistoryEntry) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(entry.segments.enumerated()), id: \.offset) { index, segment in
+                    Button {
+                        seek(to: segment, index: index, in: entry)
+                    } label: {
+                        Text(Self.segmentLabel(segment))
+                            .font(.caption)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(
+                                index == playingSegmentIndex
+                                    ? DaylightPalette.accentActive.opacity(Self.activeSegmentHighlightOpacity) : .clear,
+                                in: RoundedRectangle(cornerRadius: 4)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .frame(minHeight: 60, maxHeight: 120)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+    }
+
+    static func segmentLabel(_ segment: TranscriptionSegment) -> String {
+        let wholeSeconds = max(0, Int(segment.start.rounded(.down)))
+        let timestamp = String(format: "%02d:%02d", wholeSeconds / 60, wholeSeconds % 60)
+        let speakerPrefix = segment.speaker.map { "[\($0)] " } ?? ""
+        return "[\(timestamp)] \(speakerPrefix)\(segment.text)"
     }
 
     static func renderSpeakerLabeled(_ segments: [TranscriptionSegment]) -> String {
@@ -241,6 +281,8 @@ extension ContentView {
         isDraftDirty = false
         audioPlayer?.stop()
         audioPlayer = nil
+        stopPlaybackPolling()
+        playingSegmentIndex = nil
     }
 
     func saveDraft() {
@@ -289,6 +331,8 @@ extension ContentView {
                 restore(entry)
                 errorMessage = nil
             } catch {
+                stopPlaybackPolling()
+                playingSegmentIndex = nil
                 currentEntryID = nil
                 transientEntry = TranscriptionHistoryEntry(
                     audioPath: completed.audioURL.path,
@@ -340,6 +384,8 @@ extension ContentView {
                 restore(entry)
                 errorMessage = nil
             } catch {
+                stopPlaybackPolling()
+                playingSegmentIndex = nil
                 currentEntryID = nil
                 transientEntry = TranscriptionHistoryEntry(
                     audioPath: completed.audioURL.path,
@@ -368,6 +414,8 @@ extension ContentView {
             restore(persisted)
             return
         }
+        stopPlaybackPolling()
+        playingSegmentIndex = nil
         currentEntryID = nil
         transientEntry = TranscriptionHistoryEntry(
             audioPath: completed.audioURL.path,
@@ -395,6 +443,43 @@ extension ContentView {
             audioPlayer?.play()
             errorMessage = nil
         } catch { errorMessage = "無法播放來源音訊：\(error.localizedDescription)" }
+    }
+
+    func seek(to segment: TranscriptionSegment, index: Int, in entry: TranscriptionHistoryEntry) {
+        do {
+            let audioURL = URL(fileURLWithPath: entry.audioPath)
+            if audioPlayer == nil || audioPlayer?.url != audioURL {
+                audioPlayer = try AVAudioPlayer(contentsOf: audioURL)
+            }
+            audioPlayer?.currentTime = segment.start
+            audioPlayer?.play()
+            playingSegmentIndex = index
+            errorMessage = nil
+            startPlaybackPolling(entry)
+        } catch { errorMessage = "無法播放來源音訊：\(error.localizedDescription)" }
+    }
+
+    func startPlaybackPolling(_ entry: TranscriptionHistoryEntry) {
+        stopPlaybackPolling()
+        playbackPollTimer = Timer.scheduledTimer(withTimeInterval: Self.playbackPollInterval, repeats: true) { _ in
+            Task { @MainActor in
+                guard let player = audioPlayer, player.isPlaying else {
+                    stopPlaybackPolling()
+                    return
+                }
+                let currentTime = player.currentTime
+                // Segments may have gaps (silence with no transcript); when currentTime falls in
+                // a gap, deliberately keep the previous highlight rather than clearing it.
+                if let match = entry.segments.firstIndex(where: { currentTime >= $0.start && currentTime < $0.end }) {
+                    playingSegmentIndex = match
+                }
+            }
+        }
+    }
+
+    func stopPlaybackPolling() {
+        playbackPollTimer?.invalidate()
+        playbackPollTimer = nil
     }
 
     func export(_ entry: TranscriptionHistoryEntry, as format: TranscriptionExportFormat) {

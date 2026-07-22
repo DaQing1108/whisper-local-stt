@@ -37,6 +37,8 @@ struct ContentView: View {
     @State var isDraftDirty = false
     @State var diarizationTargetEntryID: UUID?
     @State var audioPlayer: AVAudioPlayer?
+    @State var playingSegmentIndex: Int?
+    @State var playbackPollTimer: Timer?
     @State var exportDocument: TranscriptionExportDocument?
     @State var exportFilename = "transcript.txt"
     @State var isExporting = false
