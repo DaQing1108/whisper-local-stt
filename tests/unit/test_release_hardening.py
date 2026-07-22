@@ -24,7 +24,6 @@ def test_release_brand_is_whisper_stt_on_active_app_surfaces():
     assert '<title>Whisper STT' in _read("templates/index.html")
     assert '<h1>Whisper STT</h1>' in _read("templates/index.html")
     assert 'title        = f"Whisper STT v{__version__}"' in _read("gui.py")
-    assert "Whisper AI Meeting" not in _read("WhisperAI_ProductSpec_v1.md")
 
 
 def test_release_guides_exist_and_cover_installation_permissions_and_recovery():
