@@ -60,7 +60,9 @@
 
 ### 已知殘留風險（未在本次處理）
 
-`whisper-swift` worktree 目前仍是 dirty state：3 個 tracked 修改（`routes.py`、`whisper_core.py`、測試檔）+ 33 個 untracked entries（含整個 `macos/` Swift tree），且其中 system-audio 診斷相關變更（`ContentView.swift` 等）**未驗證、未通過測試**。本次只處理了 branch rename，未觸碰這批 dirty 內容——下次要 commit 前，必須先按原文件的 commit inventory 精神拆分乾淨，不要把未驗證的 system-audio 修改跟其他變更混在一起送出。
+⚠️ **2026-07-22 更正**：本節原本寫「`whisper-swift` worktree 是 dirty state：3 個 tracked 修改（`routes.py`、`whisper_core.py`、測試檔）+ 33 個 untracked entries，含未驗證的 system-audio 診斷變更」——這段描述直接抄自 `Whisper_Dual_Version_Git_Isolation_Plan_v1.md`（2026-07-19）的舊內容，寫入當下沒有重新核對 `git status`，是錯誤資訊。
+
+實際查證（2026-07-22）：`ContentView.swift` 完全乾淨，近期 commit（`b34c3fd`、`24f5346`、`517a1a9` 等）皆為正常 feature/fix，不是未驗證的診斷改動。目前 `whisper-swift` worktree 的 dirty state 只有 `CLAUDE.md`（本次加的分支策略段落）與 `macos/WhisperApp/Info.plist`（本次版號提升至 0.2.0），加上一個既有無關的 untracked 文件 `docs/Whisper_SwiftUI_P0_Gap_Closing_Specs_v1.md`。不需要複雜的 commit inventory 拆分，可直接 commit 這兩個檔案。
 
 ### 何時重新評估 Gate E（觸發條件）
 

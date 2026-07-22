@@ -1,13 +1,19 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.1
 
 ## Current State
-Last checkpoint: 2026-07-22 (追加：Whisper Swift 版號 + 過時文件更新任務啟動)
+Last checkpoint: 2026-07-22 (更正：whisper-swift dirty state 描述有誤，已修正)
 Phase: Whisper Classic vs SwiftUI 合併決策定案（後續收尾中）
 Working: SwiftUI + Python Worker candidate（`codex/swiftui-python-poc` 已改名 `whisper-swift`，local + remote 都已完成）P0/P1/P2 功能 parity 已完成並通過獨立 review（Swift 108 tests、Python 34 tests 全過，本機簽章 Gate B 已通過）；`main`（Whisper Classic v2.4.x）進入凍結維護，不再排入新功能；Whisper Swift 版號從 `0.1.0` 提升為 `0.2.0`（反映 P0-P2 已完成的實際進度，與 Classic 版號脫鉤獨立編號）
-Next action: 使用者切換日常使用到 `~/Applications/Whisper SwiftUI.app` 驗證穩定性；背景任務已啟動更新過時的 `Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md`（獨立 session 執行中）；`whisper-swift` worktree 仍有 dirty state（含新的 Info.plist 版號修改 + 先前的 tracked/untracked 變更）待拆分 commit
+Next action: 使用者切換日常使用到 `~/Applications/Whisper SwiftUI.app` 驗證穩定性；背景任務已啟動更新過時的 `Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md`（獨立 session 執行中）；`whisper-swift` worktree 目前只有 `CLAUDE.md`、`Info.plist` 兩個本次修改的檔案未 commit（無其他混亂 dirty state），可直接 commit
 Blockers: none（Gate E 外部條件——Developer ID／notarization／clean Mac——確認暫緩而非阻塞，僅個人使用不需要）
 
 ## Checkpoint History
+### 2026-07-22（更正）｜whisper-swift dirty state 描述有誤
+- **錯誤說明：** 先前兩則 checkpoint 記錄（2026-07-22 兩則）都寫「`whisper-swift` worktree 有 3 個 tracked 修改 + 33 個 untracked entries，含未驗證的 system-audio 診斷變更」——這段描述抄自 2026-07-19 的 `Whisper_Dual_Version_Git_Isolation_Plan_v1.md`，早已過時，且從未在寫入當下重新對照 `git status` 核實
+- **實際查證結果：** `ContentView.swift` 完全乾淨，近期 commit 都是正常 feature/fix；目前 `whisper-swift` worktree 的 dirty state 只有 `CLAUDE.md`（本次加的分支策略段落）與 `macos/WhisperApp/Info.plist`（本次版號提升），加上一個與本次工作無關的既有 untracked 文件 `docs/Whisper_SwiftUI_P0_Gap_Closing_Specs_v1.md`
+- **已處理：** 撤銷了先前基於錯誤描述拋出的背景任務建議（`task_d8e4df9b`，已 dismiss）
+- **教訓：** 讀到舊文件描述現況時，必須重新對照當下的 `git status`／`git log` 驗證，不能把文件裡的時間點狀態當成現況直接寫入新的 checkpoint 記錄
+
 ### 2026-07-22（追加）｜Whisper Swift 版號提升 + 過時文件更新任務啟動
 - Completed: (1) `macos/WhisperApp/Info.plist` 的 `CFBundleShortVersionString` 從 `0.1.0` 提升為 `0.2.0`（build 維持 `1`），反映 P0-P2 已完成的實際進度；(2) 決定 Whisper Swift 版號與 Whisper Classic（`v2.4.x`）脫鉤獨立編號，`1.0.0` 保留給 Gate E 通過、確定對外釋出的時間點；(3) 使用者已在獨立 session 啟動先前拋出的背景任務，開始更新過時的 `Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md`
 - State: 版號修改與先前的 dirty state 一起留在 `whisper-swift` worktree，尚未 commit；背景任務獨立執行中，尚未回報結果
