@@ -1,13 +1,29 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.1
 
 ## Current State
-Last checkpoint: 2026-07-22（追加：Whisper Swift 版本顯示功能 + Gatekeeper/iCloud 排查收尾）
-Phase: Whisper Classic vs SwiftUI 合併決策定案（後續收尾中）
-Working: `whisper-swift` 分支已加入版本顯示功能（設定畫面「關於」區塊顯示 `App 版本 0.2.0 (1)`），已 build（152 tests 全過）、打包、安裝、使用者手動完成 Gatekeeper 核准並在畫面上確認看到版號；`main`（Whisper Classic v2.4.x）維持凍結維護
-Next action: 等待背景任務 `task_edee3d79`（更新過時的 `Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md`）回報結果；日常使用持續驗證 `~/Applications/Whisper Swift.app` 穩定性
-Blockers: none（Gate E 外部條件確認暫緩；新發現的 Gatekeeper/iCloud 重 build 需重新核准的摩擦已記錄在案，非阻塞但影響迭代速度）
+Last checkpoint: 2026-07-22（Speaker Diarization 移植：PRD 分析 → spike → Worker/protocol/SwiftUI 整合 → 真實 App 點擊驗證）
+Phase: Whisper Swift Diarization 功能落地（核心流程已在真實 App 驗證，邊緣案例與長錄音效能待補）
+Working: `whisper-swift` 分支（HEAD `178449d`，與 origin 同步）已完整實作 Speaker Diarization——採用 sherpa-onnx（ONNX Runtime，無 torch，繞過 2026-07-18 spike 否決的 subprocess 方案）；`DiarizationModelManager` 下載機制、`worker_entrypoint.py` 的 `diarization_warmup`/`diarize` command、SwiftUI「辨識講者」+「下載講者辨識模型」按鈕皆已實作並測試（Python 293/293、Swift 154/154）。已用真人多說話者錄音驗證品質（使用者確認正確），並在真實打包安裝的 App 上實際點擊驗證整個流程（真的看到 `[Speaker A]` 標籤正確渲染）。`main`（Whisper Classic v2.4.x）維持凍結維護
+Next action: HANDOFF v2 剩餘的兩個邊緣案例待補測（編輯保護、切換紀錄保護），長錄音效能（30分鐘以上真實會議）待有需求時再測；Whisper Classic PRD 的過時內容（P1/P2 需求表未反映 Appendix B-1 實際進度）尚未修正
+Blockers: none（Gate E 外部條件確認暫緩；本次額外修復了 `.git/refs/heads/` 裡 iCloud 同步留下的壞 ref 檔案，以及兩筆舊 discipline-loop 任務缺失的 step7-verification-log 記錄，皆非阻塞性清理）
 
 ## Checkpoint History
+### 2026-07-22｜Whisper Swift Speaker Diarization 移植：分析→spike→整合→實測
+- Completed:
+  (1) 分析 Whisper Classic PRD 與 Whisper Swift PRD，發現 PRD 宣稱 Diarization「完成」但 `worker_entrypoint.py` 實際硬編碼 `available: false`；
+  (2) 原規格方向（比照 Classic 用 system Python subprocess）被 2026-07-18 既有 spike 明文否決（違反 SwiftUI AC-4「禁止 arbitrary system Python」），改研究 ONNX 路線；
+  (3) 實測驗證 sherpa-onnx（ONNX Runtime，無 torch）：PyInstaller 打包乾淨（41M，無 torch/pyannote 洩漏）、模型免授權下載、真人多說話者錄音品質使用者確認正確；
+  (4) 實作 `DiarizationModelManager`（模型下載，5 個測試 + 真實下載驗證）並 commit（`b69fe3e`）；
+  (5) 寫 handoff 規格文件（`Whisper_Phase3_Diarization_Integration_HANDOFF_v1.md`），交給另一個 Claude Code 帳號在本機同一 worktree 執行；
+  (6) 該帳號完成 Worker/protocol/SwiftUI 完整整合（commit `dc4fe04`：新增 `diarization_service.py`、`worker_entrypoint.py` 的 `diarization_warmup`/`diarize` command、SwiftUI「辨識講者」按鈕，兩輪獨立 code review 修復 3 HIGH + 1 MEDIUM），並寫 HANDOFF v2 記錄剩餘驗證項目；
+  (7) 補上 HANDOFF v2 點出的缺口——SwiftUI 沒有「下載模型」按鈕入口，新增後 build/test 皆綠；
+  (8) 實際跑 `scripts/build_worker_runtime.sh` + `scripts/build_swiftui_app.sh` 打包（修正 HANDOFF v1 誤寫的 `package.sh`——那是 Classic 的腳本），安裝到 `~/Applications/Whisper Swift.app`，使用者手動完成 Gatekeeper 核准；
+  (9) 用電腦操作工具在真實運行的 App 裡點擊「辨識講者」，親眼確認逐字稿正確渲染 `[Speaker A]` 標籤；
+  (10) 順手修復兩個無關的技術債：`.git/refs/heads/` 裡 iCloud 同步留下的壞 ref 檔案（`main 2`，導致 `git fetch` 整個失敗）、兩筆舊 discipline-loop 任務（`20260703-23aa`、`20260703-9e3c`）缺失的 `step7-verification-log.log` 記錄（造成 commit 前 hook 誤報）
+- State: `whisper-swift` HEAD `178449d`，與 origin 同步，`make test` 293/293、`swift test` 154/154 全過。HANDOFF v2 記錄的 Task 1（真實 UI 驗證）核心流程已確認，步驟 6-7（編輯保護、切換紀錄保護）與 Task 3（長錄音效能）刻意留白，非現在必須完成
+- Next: 有需求時再補 HANDOFF v2 剩餘驗證項目；Whisper Classic PRD 的過時 P1/P2 需求表尚未修正（本輪只修了 Whisper Swift PRD）
+- 可複用教訓：(a) 動工前先查現有程式碼再假設「完全沒做」——最初以為 SwiftUI 端毫無 diarization 痕跡，其實只是還沒查到；(b) computer-use 自動化點擊 SwiftUI 按鈕列時，按鈕數量變化會讓固定座標整排位移，需要每次重新定位；(c) handoff 文件裡的操作指令（如打包腳本路徑）務必先驗證過一次再寫進去，不能憑專案慣例推測
+
 ### 2026-07-22（追加）｜Whisper Swift 版本顯示功能 + Gatekeeper/iCloud 排查
 - Completed: (1) 新增 `AppIdentity.versionString`（讀取 `CFBundleShortVersionString`/`CFBundleVersion`）並在設定畫面「關於」區塊顯示；(2) `swift build`/`swift test`（152 tests, 29 suites）全過；(3) 打包安裝到 `~/Applications/Whisper Swift.app` 過程中發現 app 反覆消失/被搬進垃圾桶，查證根因：這台 Mac 的 `~/Documents` 有開 iCloud Drive 同步，`dist/` 打包出的 app 被重新蓋上 `com.apple.quarantine`，加上本機自簽章（非 Developer ID）導致 `spctl --assess` 恆為 rejected，每次重 build 都需要使用者手動在系統設定核准一次；(4) 使用者完成核准，畫面確認看到版號；(5) 已將此診斷樹寫入 `whisper-swift` 的 `CLAUDE.md`；(6) 順手查證並補齊了一個無關的舊 hook 警告（task `20260702-230e` 的 step7 verification log 缺記錄，已補上）
 - State: 版本顯示功能程式碼已 commit + push（`12c5a0d`、CLAUDE.md 診斷樹 commit），`whisper-swift` 與 remote 同步；main worktree 除 README 外無其他變更
