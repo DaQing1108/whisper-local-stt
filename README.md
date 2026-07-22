@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-15
-Phase: v2.4.0 release
-Working: canonical summary、目的地獨立 AI 會議內容與固定 meeting ID 已完成，待完成封裝與 GitHub 發布
-Next action: 以真實會議錄音驗收 App summary、Obsidian 與 Notion 的發布結果
+Last checkpoint: 2026-07-22 16:55
+Phase: SwiftUI/Classic 比較文件更正、PR #7/#8 收尾
+Working: main 已合併 PR #8（Obsidian timecodes 修復 + 累積的 docs/config 清理），PR #7（過時的 v2.4.0 checkpoint doc）已關閉；`Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md` 已同步 P0–P2 完成現況並標註過時警語，指向 `Whisper_SwiftUI_Migration_Task_Spec_v1.md` 為權威決策文件；whisper-swift worktree 補上 Settings 頁「App 版本」顯示並 push
+Next action: 無明確待辦，等待使用者下一步指示
 Blockers: none
 
 ## Checkpoint History
+### 2026-07-22 16:55｜比較文件更正、worktree 清理、PR #7/#8 收尾
+- Completed: (1) 依實際查驗 whisper-swift worktree 的 P0/P1/P2 完成證據，更正主 worktree內過時的 `Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md` 功能矩陣與決策建議；(2) 補 commit whisper-swift worktree 既有的 Settings 版本字串顯示改動；(3) 整理主 worktree 累積的未追蹤文件/設定（HANDOFF docs、product spec、`.claude` config 等）並更新 `.gitignore` 排除執行期暫存/binary；(4) 關閉過時且 CI 失敗的 PR #7；(5) 合併 PR #8 進 main；(6) 偵測專案 dev server 並寫入 `.claude/launch.json`
+- State: `main`、`whisper-swift` 兩個 worktree 皆為 clean 且已 push；PR #8 merge commit `a26a2a6f`；本機 dev server 驗證後已關閉，port 5001 已釋放
+- Next: 無（使用者尚未提出下一個任務）
+
 ### 2026-07-15｜v2.4.0 Summary 與可重複發布
 - Scope: transcript 完成後產生可編輯的 Whisper App summary；Obsidian 與 Notion 各自從 transcript 產生目的地專用 AI 會議內容；固定 `meeting_id` 讓相同 session 可安全重複發布更新。
 - User flow: 完成轉錄與 App summary 後，使用 footer 的 `Obsidian` 或 `Notion` 主動發布；Obsidian 會寫入一份原始逐字稿與一份連結的會議記錄，Notion 會建立並重寫同一個 meeting child page。

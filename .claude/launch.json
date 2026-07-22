@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "whisper-web",
+      "runtimeExecutable": "/usr/bin/python3",
+      "runtimeArgs": ["app.py"],
+      "port": 5001
+    },
+    {
+      "name": "whisper-web-test",
+      "runtimeExecutable": "/usr/bin/python3",
+      "runtimeArgs": ["app.py"],
+      "env": { "WHISPER_TEST": "1" },
+      "port": 5001
+    }
+  ]
+}
