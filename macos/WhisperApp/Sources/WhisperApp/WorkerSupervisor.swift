@@ -12,6 +12,7 @@ enum WorkerState: Equatable, Sendable {
 enum WorkerSupervisorError: Error, Equatable {
     case transcriptionAlreadyActive
     case modelOperationActive
+    case diarizationOperationActive
 }
 
 struct WorkerLaunchConfiguration: Sendable {
@@ -95,6 +96,10 @@ final class WorkerSupervisor {
     private(set) var modelReadiness = "unknown"
     private(set) var modelReadinessMessage = "Model status not checked"
     private(set) var modelOperationInProgress = false
+    private(set) var diarizationStatus = "unknown"
+    private(set) var diarizationOperationInProgress = false
+    private(set) var diarizedSegments: [TranscriptionSegment] = []
+    private(set) var diarizationFailureMessage: String?
     private(set) var llmPunctuationEnabled = false
     /// Injectable so tests don't touch the real Keychain; defaults to the real credential store.
     var llmCredentialLoader: (MeetingSummaryProvider) -> String? = {
@@ -130,6 +135,7 @@ final class WorkerSupervisor {
     }
     private var activeTranscriptionContext: ActiveTranscriptionContext?
     private var modelRequestID: String?
+    private var diarizationRequestID: String?
 
     func start(pythonURL: URL, workerURL: URL, workingDirectory: URL) throws {
         try start(configuration: WorkerLaunchConfiguration(
@@ -264,6 +270,49 @@ final class WorkerSupervisor {
             modelOperationInProgress = false
             modelReadiness = "failed"
             modelReadinessMessage = error.localizedDescription
+            throw error
+        }
+        return requestID
+    }
+
+    @discardableResult
+    func diarizationWarmup() throws -> String {
+        guard activeRequestID == nil else { throw WorkerSupervisorError.transcriptionAlreadyActive }
+        guard !diarizationOperationInProgress else { throw WorkerSupervisorError.diarizationOperationActive }
+        let requestID = UUID().uuidString
+        diarizationRequestID = requestID
+        diarizationOperationInProgress = true
+        diarizationStatus = "loading"
+        do {
+            try send(WorkerCommand(requestID: requestID, command: "diarization_warmup", payload: [:]))
+        } catch {
+            diarizationRequestID = nil
+            diarizationOperationInProgress = false
+            diarizationStatus = "failed"
+            throw error
+        }
+        return requestID
+    }
+
+    @discardableResult
+    func diarize(audioPath: String, segments: [TranscriptionSegment]) throws -> String {
+        guard activeRequestID == nil else { throw WorkerSupervisorError.transcriptionAlreadyActive }
+        guard !diarizationOperationInProgress else { throw WorkerSupervisorError.diarizationOperationActive }
+        let requestID = UUID().uuidString
+        diarizationRequestID = requestID
+        diarizationOperationInProgress = true
+        diarizationStatus = "processing"
+        do {
+            let segmentsData = try encoder.encode(segments)
+            let segmentsJSON = try decoder.decode(JSONValue.self, from: segmentsData)
+            try send(WorkerCommand(
+                requestID: requestID, command: "diarize",
+                payload: ["audio_path": .string(audioPath), "segments": segmentsJSON]
+            ))
+        } catch {
+            diarizationRequestID = nil
+            diarizationOperationInProgress = false
+            diarizationStatus = "failed"
             throw error
         }
         return requestID
@@ -433,6 +482,17 @@ final class WorkerSupervisor {
             }
             modelOperationInProgress = false
             modelRequestID = nil
+        case "diarization_ready":
+            guard event.requestID == diarizationRequestID else { return }
+            diarizationStatus = event.payload["cached"] == .bool(true) ? "ready" : "needs_download"
+            diarizationOperationInProgress = false
+            diarizationRequestID = nil
+        case "diarized":
+            guard event.requestID == diarizationRequestID else { return }
+            diarizationStatus = "ready"
+            diarizationOperationInProgress = false
+            diarizationRequestID = nil
+            diarizedSegments = Self.parseSegments(event.payload["segments"])
         case "accepted":
             guard event.requestID == activeRequestID else { return }
             activeJobID = event.payload["job_id"]?.string
@@ -488,6 +548,13 @@ final class WorkerSupervisor {
                 modelRequestID = nil
                 return
             }
+            if event.requestID == diarizationRequestID {
+                diarizationStatus = "failed"
+                diarizationFailureMessage = event.payload["message"]?.string ?? "Diarization failed"
+                diarizationOperationInProgress = false
+                diarizationRequestID = nil
+                return
+            }
             guard event.requestID == activeRequestID else { return }
             jobStatus = event.payload["message"]?.string ?? "Failed"
             activeJobID = nil
@@ -506,7 +573,7 @@ final class WorkerSupervisor {
                   let end = segment["end"]?.number,
                   let text = segment["text"]?.string,
                   start >= 0, end >= start else { return nil }
-            return TranscriptionSegment(start: start, end: end, text: text)
+            return TranscriptionSegment(start: start, end: end, text: text, speaker: segment["speaker"]?.string)
         }
     }
 

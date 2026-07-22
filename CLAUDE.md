@@ -55,6 +55,7 @@
 - **根因**：pyannote / torch / speechbrain 等套件有複雜的 data files、C extensions、版本耦合，PyInstaller 無法正確打包
 - **正確做法**：用 `/usr/bin/python3` subprocess 執行，完全繞開 bundle，結果以 JSON stdout 傳回。參考 `diarize.py` 的 `_DIARIZE_WORKER_SCRIPT` 模式
 - **Spike 原則**：引入任何新重量級依賴前，先做最小打包 spike（`pyinstaller --onedir test_import.py`）確認可打包，跑不通就改用 subprocess 模式，不要先實作再除錯
+- **例外（2026-07-22）**：`sherpa-onnx`（ONNX Runtime，不含 torch）已由 `docs/Whisper_Phase3_Diarization_ONNX_Runtime_Spike_v2.md` 驗證可乾淨打包（41MB、無 torch 洩漏），Diarization Worker command 直接 import 使用，不套用本條 subprocess 規則。本條規則的根因是 torch/pyannote/speechbrain 的複雜 data files/C extension 耦合，不適用於純 ONNX Runtime 依賴。
 
 ### 3. system_audio_capture binary 必須用穩定 identifier 簽名
 - **identifier**：`com.via.whisper-ai.audio-helper`

@@ -15,3 +15,10 @@ opencc-python-reimplemented>=0.1.7
 
 # ── GUI App ───────────────────────────────────────────────────
 pywebview>=6.2.1
+
+# ── Diarization (ONNX Runtime, no torch — see docs/Whisper_Phase3_Diarization_ONNX_Runtime_Spike_v2.md) ──
+# librosa was considered for resampling but its core modules unconditionally import numba,
+# which worker.spec excludes; soxr (a librosa dependency) resamples without that risk.
+sherpa-onnx==1.13.4
+soundfile==0.13.1
+soxr==1.1.0

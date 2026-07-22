@@ -35,6 +35,7 @@ struct ContentView: View {
     @State var transientEntry: TranscriptionHistoryEntry?
     @State var transcriptDraft = ""
     @State var isDraftDirty = false
+    @State var diarizationTargetEntryID: UUID?
     @State var audioPlayer: AVAudioPlayer?
     @State var exportDocument: TranscriptionExportDocument?
     @State var exportFilename = "transcript.txt"

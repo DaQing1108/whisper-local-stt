@@ -8,13 +8,18 @@ from typing import Mapping
 
 PROTOCOL_NAME = "whisper.worker"
 PROTOCOL_VERSION = 1
-COMMANDS = frozenset({"transcribe", "cancel", "ping", "capabilities", "model_status", "warmup_model"})
+COMMANDS = frozenset({
+    "transcribe", "cancel", "ping", "capabilities", "model_status", "warmup_model",
+    "diarization_warmup", "diarize",
+})
 EVENTS = frozenset({
     "ready", "accepted", "status", "progress", "completed",
     "failed", "cancelled", "pong", "capabilities", "model_status", "model_ready", "protocol_error",
+    "diarization_ready", "diarized",
 })
 _JOB_EVENTS = EVENTS.difference({
     "ready", "pong", "capabilities", "model_status", "model_ready", "protocol_error",
+    "diarization_ready", "diarized",
 })
 _FORBIDDEN_AUDIO_FIELDS = frozenset({"audio_b64", "audio_bytes", "audio_data", "binary"})
 
@@ -89,6 +94,12 @@ def decode_command(line: str) -> CommandEnvelope:
         model_name = payload.get("model_name")
         if not isinstance(model_name, str) or not model_name:
             raise ProtocolError("INVALID_PAYLOAD", f"{command} requires model_name")
+    elif command == "diarize":
+        audio_path = payload.get("audio_path")
+        if not isinstance(audio_path, str) or not audio_path:
+            raise ProtocolError("INVALID_PAYLOAD", "diarize requires audio_path")
+        if not isinstance(payload.get("segments"), list):
+            raise ProtocolError("INVALID_PAYLOAD", "diarize requires a segments array")
 
     return CommandEnvelope(request_id=request_id, command=command, payload=payload)
 

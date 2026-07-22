@@ -36,6 +36,8 @@ extension ContentView {
                     Button("清空") { transcriptDraft = ""; isDraftDirty = true }.disabled(transcriptDraft.isEmpty)
                     if let entry = currentEntry {
                         Button(audioPlayer?.isPlaying == true ? "暫停音訊" : "播放音訊") { togglePlayback(entry) }
+                        Button("辨識講者") { triggerDiarization(entry) }
+                            .disabled(entry.segments.isEmpty || worker.diarizationOperationInProgress || worker.activeRequestID != nil)
                         Menu("Export") {
                             ForEach(TranscriptionExportFormat.allCases) { format in
                                 Button(format.rawValue) { export(entry, as: format) }
@@ -43,6 +45,9 @@ extension ContentView {
                             }
                         }
                     }
+                }
+                if let diarizationFailureMessage = worker.diarizationFailureMessage, worker.diarizationStatus == "failed" {
+                    Text(diarizationFailureMessage).font(.caption).foregroundStyle(.red)
                 }
                 if !worker.diagnostics.isEmpty {
                     DisclosureGroup("Worker diagnostics") {
@@ -54,6 +59,34 @@ extension ContentView {
             .tint(DaylightPalette.accentActive)
         }
         .cardStyle()
+        .onChange(of: worker.diarizedSegments) { _, segments in
+            guard !segments.isEmpty else { return }
+            guard diarizationTargetEntryID != nil, diarizationTargetEntryID == currentEntry?.id else { return }
+            guard !isDraftDirty else {
+                errorMessage = "講者辨識已完成，但逐字稿已被手動編輯，未覆蓋；請用「複製」另外取用結果。"
+                return
+            }
+            transcriptDraft = Self.renderSpeakerLabeled(segments)
+            isDraftDirty = true
+            diarizationTargetEntryID = nil
+        }
+    }
+
+    static func renderSpeakerLabeled(_ segments: [TranscriptionSegment]) -> String {
+        segments.map { segment in
+            if let speaker = segment.speaker { "[\(speaker)] \(segment.text)" } else { segment.text }
+        }.joined(separator: "\n")
+    }
+
+    func triggerDiarization(_ entry: TranscriptionHistoryEntry) {
+        do {
+            diarizationTargetEntryID = entry.id
+            try worker.diarize(audioPath: entry.audioPath, segments: entry.segments)
+            errorMessage = nil
+        } catch {
+            diarizationTargetEntryID = nil
+            errorMessage = "無法啟動講者辨識：\(error.localizedDescription)"
+        }
     }
 
     var summaryWorkspace: some View {

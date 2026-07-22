@@ -16,7 +16,14 @@ from worker_protocol import EventEnvelope, ProtocolError, decode_command, encode
 
 
 class WorkerRuntime:
-    def __init__(self, transcriber: Callable, stdout: TextIO, stderr: TextIO, model_manager=None):
+    def __init__(
+        self,
+        transcriber: Callable,
+        stdout: TextIO,
+        stderr: TextIO,
+        model_manager=None,
+        diarization_manager=None,
+    ):
         self._transcriber = transcriber
         self._stdout = stdout
         self._stderr = stderr
@@ -25,6 +32,7 @@ class WorkerRuntime:
         self._threads: set[threading.Thread] = set()
         self._threads_lock = threading.Lock()
         self._model_manager = model_manager
+        self._diarization_manager = diarization_manager
 
     def emit(self, request_id: str, event: str, payload: dict) -> None:
         line = encode_event(EventEnvelope(request_id, event, payload))
@@ -42,16 +50,7 @@ class WorkerRuntime:
         if command.command == "ping":
             self.emit(command.request_id, "pong", {})
         elif command.command == "capabilities":
-            self.emit(command.request_id, "capabilities", {
-                "diarization": {
-                    "available": False,
-                    "code": "BUNDLED_RUNTIME_UNAVAILABLE",
-                    "message": (
-                        "Diarization is disabled because the packaged Worker "
-                        "does not include torch and pyannote.audio."
-                    ),
-                },
-            })
+            self.emit(command.request_id, "capabilities", {"diarization": self._diarization_capability()})
         elif command.command == "cancel":
             job_id = str(command.payload["job_id"])
             snapshot = self._registry.cancel(job_id)
@@ -69,6 +68,107 @@ class WorkerRuntime:
             self._model_status(command.request_id, str(command.payload["model_name"]))
         elif command.command == "warmup_model":
             self._warmup_model(command.request_id, str(command.payload["model_name"]))
+        elif command.command == "diarization_warmup":
+            self._diarization_warmup(command.request_id)
+        elif command.command == "diarize":
+            self._diarize(command.request_id, dict(command.payload))
+
+    def _diarization_capability(self) -> dict:
+        if self._diarization_manager is None:
+            return {
+                "available": False,
+                "code": "BUNDLED_RUNTIME_UNAVAILABLE",
+                "message": "Diarization manager is not available in this Worker build.",
+            }
+        status = self._diarization_manager.status()
+        return {
+            "available": status["cached"],
+            "code": "READY" if status["cached"] else "NEEDS_DOWNLOAD",
+            "message": (
+                "Diarization models are ready." if status["cached"]
+                else "Diarization models need to be downloaded before use."
+            ),
+        }
+
+    def _run_diarization_job(self, request_id: str, work: Callable[[], tuple[str, dict]]) -> None:
+        """Shared background-job plumbing for diarization_warmup/diarize: registers a job in
+        self._registry so it mutually excludes transcribe AND other diarization jobs (the
+        same active_count check both already use), and runs off the stdin-reading thread so
+        a slow diarize (~0.4x realtime) never blocks ping/cancel/transcribe from being read."""
+        if self._registry.active_count:
+            self.emit(request_id, "failed", {
+                "job_id": request_id, "code": "WORKER_BUSY", "message": "another job is active",
+            })
+            return
+        job_id = uuid4().hex
+        self._registry.register(job_id)
+
+        def run_job() -> None:
+            self._registry.mark_running(job_id)
+            try:
+                event, event_payload = work()
+                self.emit(request_id, event, event_payload)
+            except Exception as exc:
+                self.emit(request_id, "failed", {
+                    "job_id": job_id, "code": getattr(exc, "code", "DIARIZATION_FAILED"), "message": str(exc),
+                })
+            finally:
+                self._registry.unregister(job_id)
+                with self._threads_lock:
+                    self._threads.discard(threading.current_thread())
+
+        thread = threading.Thread(target=run_job, daemon=True, name=f"diarization-{job_id[:8]}")
+        with self._threads_lock:
+            self._threads.add(thread)
+        try:
+            thread.start()
+        except BaseException as exc:
+            with self._threads_lock:
+                self._threads.discard(thread)
+            self._registry.unregister(job_id)
+            self.emit(request_id, "failed", {
+                "job_id": job_id, "code": "THREAD_START_FAILED", "message": str(exc),
+            })
+            raise
+
+    def _diarization_warmup(self, request_id: str) -> None:
+        if self._diarization_manager is None:
+            self.emit(request_id, "failed", {
+                "job_id": request_id, "code": "MODEL_MANAGER_UNAVAILABLE", "message": "diarization manager unavailable",
+            })
+            return
+
+        def work() -> tuple[str, dict]:
+            try:
+                return "diarization_ready", self._diarization_manager.warmup()
+            except Exception as exc:
+                exc.code = "MODEL_WARMUP_FAILED"
+                raise
+
+        self._run_diarization_job(request_id, work)
+
+    def _diarize(self, request_id: str, payload: dict) -> None:
+        if self._diarization_manager is None:
+            self.emit(request_id, "failed", {
+                "job_id": request_id, "code": "MODEL_MANAGER_UNAVAILABLE", "message": "diarization manager unavailable",
+            })
+            return
+
+        def work() -> tuple[str, dict]:
+            from diarization_service import ModelNotReadyError, diarize
+
+            try:
+                segments = diarize(
+                    str(payload["audio_path"]),
+                    list(payload["segments"]),
+                    manager=self._diarization_manager,
+                )
+            except ModelNotReadyError as exc:
+                exc.code = "MODEL_NOT_READY"
+                raise
+            return "diarized", {"segments": segments}
+
+        self._run_diarization_job(request_id, work)
 
     def _model_status(self, request_id: str, model_name: str) -> None:
         if self._model_manager is None:
@@ -208,7 +308,11 @@ def main() -> int:
         return run_inference_child(sys.argv[2:])
     from whisper_core import run_whisper
     from model_runtime import ModelRuntimeManager
-    runtime = WorkerRuntime(run_whisper, sys.stdout, sys.stderr, ModelRuntimeManager())
+    from diarization_model_runtime import DiarizationModelManager
+    runtime = WorkerRuntime(
+        run_whisper, sys.stdout, sys.stderr,
+        ModelRuntimeManager(), DiarizationModelManager(),
+    )
     runtime.emit("worker", "ready", {"status": "ready"})
     for line in sys.stdin:
         if line.strip():

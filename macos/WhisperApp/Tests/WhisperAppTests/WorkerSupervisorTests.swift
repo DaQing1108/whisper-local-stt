@@ -32,7 +32,7 @@ struct WorkerSupervisorTests {
                 && supervisor.lastEvent?.requestID == capabilitiesID
         }
         #expect(!supervisor.diarizationAvailable)
-        #expect(supervisor.diarizationCapabilityMessage.contains("does not include torch"))
+        #expect(supervisor.diarizationCapabilityMessage.contains("Diarization models need to be downloaded"))
         supervisor.stop()
 
         #expect(supervisor.state == .stopped)
@@ -80,6 +80,65 @@ struct WorkerSupervisorTests {
         #expect(supervisor.modelReadinessMessage.contains("cached"))
         _ = try supervisor.warmupModel(modelName: "base")
         try await waitUntil { supervisor.modelReadiness == "ready" }
+        supervisor.stop()
+    }
+
+    @Test
+    func diarizationWarmupAndDiarizeUpdateStatusAndSegments() async throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let workerScript = temporary.appendingPathComponent("fake_worker.py")
+        try fakeWorkerScript.write(to: workerScript, atomically: true, encoding: .utf8)
+        let supervisor = WorkerSupervisor()
+
+        try supervisor.start(
+            pythonURL: URL(fileURLWithPath: "/usr/bin/python3"),
+            workerURL: workerScript, workingDirectory: temporary
+        )
+        try await waitUntil { supervisor.state == .ready }
+
+        _ = try supervisor.diarizationWarmup()
+        try await waitUntil { supervisor.diarizationStatus == "ready" }
+        #expect(!supervisor.diarizationOperationInProgress)
+
+        _ = try supervisor.diarize(
+            audioPath: "/tmp/sample.wav",
+            segments: [TranscriptionSegment(start: 0, end: 30, text: "placeholder")]
+        )
+        try await waitUntil { !supervisor.diarizedSegments.isEmpty }
+        #expect(supervisor.diarizedSegments.map(\.speaker) == ["Speaker A", "Speaker B"])
+        #expect(supervisor.diarizedSegments[1].end == 33.83)
+        supervisor.stop()
+    }
+
+    @Test
+    func diarizeRejectsWhenTranscriptionActive() async throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let audio = temporary.appendingPathComponent("sample.wav")
+        try Data("audio".utf8).write(to: audio)
+        let workerScript = temporary.appendingPathComponent("fake_worker.py")
+        try fakeWorkerScript.write(to: workerScript, atomically: true, encoding: .utf8)
+        let supervisor = WorkerSupervisor()
+
+        try supervisor.start(
+            pythonURL: URL(fileURLWithPath: "/usr/bin/python3"),
+            workerURL: workerScript, workingDirectory: temporary
+        )
+        try await waitUntil { supervisor.state == .ready }
+        _ = try supervisor.transcribe(
+            audioURL: audio, modelName: "base", language: "zh",
+            domain: "technology", extraTerms: "VIA"
+        )
+
+        #expect(throws: WorkerSupervisorError.transcriptionAlreadyActive) {
+            try supervisor.diarize(audioPath: audio.path, segments: [])
+        }
+        try await waitUntil { supervisor.jobStatus == "Completed" }
         supervisor.stop()
     }
 
@@ -350,6 +409,10 @@ struct WorkerSupervisorTests {
                 emit(command["request_id"], "model_status", {"model_name":"base","status":"cached","cached":True,"loaded":False})
             elif command["command"] == "warmup_model":
                 emit(command["request_id"], "model_ready", {"model_name":"base","status":"ready","cached":True,"loaded":True})
+            elif command["command"] == "diarization_warmup":
+                emit(command["request_id"], "diarization_ready", {"cached":True,"segmentation_cached":True,"embedding_cached":True,"status":"cached"})
+            elif command["command"] == "diarize":
+                emit(command["request_id"], "diarized", {"segments":[{"start":0.03,"end":19.12,"text":"a","speaker":"Speaker A"},{"start":19.12,"end":33.83,"text":"b","speaker":"Speaker B"}]})
         """
     }
 

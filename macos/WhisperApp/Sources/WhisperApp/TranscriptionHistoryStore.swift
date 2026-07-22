@@ -5,6 +5,14 @@ struct TranscriptionSegment: Codable, Equatable, Sendable {
     let start: Double
     let end: Double
     let text: String
+    var speaker: String?
+
+    init(start: Double, end: Double, text: String, speaker: String? = nil) {
+        self.start = start
+        self.end = end
+        self.text = text
+        self.speaker = speaker
+    }
 }
 
 struct TranscriptionHistoryEntry: Codable, Identifiable, Equatable, Sendable {
