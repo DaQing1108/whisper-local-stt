@@ -104,14 +104,42 @@ Not yet wired into `worker_entrypoint.py`/protocol/SwiftUI — this stays a
 standalone, independently-testable module until an execution spec covers the
 JSONL command surface and UI.
 
+## Item 2: real-recording usability check — PASS (2026-07-22)
+
+User supplied a real ~34s recording (two speakers, one handoff partway
+through, not a synthetic/silent fixture). Ran the actual
+`sherpa_onnx.OfflineSpeakerDiarization` pipeline (real downloaded models, not
+mocked) end-to-end:
+
+```
+[ 0.03s - 19.12s] Speaker 0
+[19.12s - 33.83s] Speaker 1
+```
+
+2 distinct speakers detected, one clean transition at 19.12s. **User confirmed
+this matches reality** (one person speaking for the first ~19s, a different
+person after) — this is the user-verified accuracy judgment CLAUDE.md already
+marks as non-automatable, and it came back positive. Processing took 13.3s
+for 33.8s of audio (~0.4x realtime) — noted as a new open item below, not a
+blocker for this usability bar.
+
+Audio was processed entirely locally in a scratch environment; not retained
+in the repo.
+
+## New open item: long-recording performance
+
+At ~0.4x realtime (observed on this sample), a 2-hour meeting would take
+roughly 47 minutes to diarize. Not evaluated on longer/noisier real meeting
+audio yet. Should be sized properly in the execution spec (e.g. whether
+diarization runs synchronously and blocks the transcript, or async
+afterward) rather than assumed acceptable from a 34s sample.
+
 ## Revisit criteria
 
-Do not treat this as approved for full implementation. Item 1 (model
-download/offline mechanism) is now resolved — implemented and verified above.
-The remaining blocker before writing an execution spec and starting
-Worker/protocol/SwiftUI changes is item 2: at least one real-recording
-usability check (**requires a real multi-speaker recording from the user**;
-no audio fixture with multiple speakers exists in this repo, and this is the
-kind of accuracy judgment CLAUDE.md already marks as user-verified, not
-Claude-automatable). Items 3–5 can be validated during implementation (Gate B
-/ Gate D style evidence), not required to unblock starting the work.
+**Both original blockers (item 1: model download mechanism, item 2:
+real-recording usability check) are now resolved.** Writing an execution
+spec for the Worker/protocol/SwiftUI integration is unblocked. That spec
+still needs to cover: the new long-recording performance question above, and
+items 3–5 from the original list (code signing, cancellation/crash-recovery,
+clean-machine evidence), which can be validated during implementation (Gate B
+/ Gate D style evidence) rather than required to start the work.
