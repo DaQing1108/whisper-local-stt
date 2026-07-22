@@ -61,10 +61,36 @@ an approved design: code signing, cancellation, and clean-machine evidence
    guarantees).
 5. **Clean-machine evidence** — untested on a machine without the dev venv.
 
+## Item 1 design direction (resolved to a proposal, not yet implemented)
+
+The bundled Worker already has a reusable shape for exactly this problem:
+`model_runtime.py`'s `ModelRuntimeManager` (`status()` / `warmup()`, backed by
+`huggingface_hub.scan_cache_dir()` / `snapshot_download()`), wired into
+`worker_entrypoint.py` via the `model_status` / `warmup_model` JSONL commands.
+faster-whisper models are cached this way today; diarization should follow the
+same *shape* (status: cached/needs_download → warmup: trigger download →
+re-check status), but cannot reuse `huggingface_hub` directly, because
+`sherpa-onnx`'s segmentation/embedding models are GitHub Release assets, not a
+Hugging Face repo ID.
+
+Proposed direction: a parallel `DiarizationModelManager` that checks for the
+two required ONNX files under an app-owned cache directory (e.g. alongside the
+existing Application Support model cache convention) and downloads them from
+their fixed GitHub Release URLs when missing, exposed via new
+`diarization_status` / `diarization_warmup` JSONL commands (kept separate from
+`model_status`/`warmup_model` rather than overloading `model_name`, since the
+two-file GitHub-asset shape doesn't fit the single-HF-repo-id shape those
+commands assume). Not yet implemented — this is a design direction to carry
+into the execution spec, not code.
+
 ## Revisit criteria
 
 Do not treat this as approved for implementation. Before writing an execution
 spec and starting Worker/protocol/SwiftUI changes, resolve the model
-download/offline mechanism (item 1) and get at least one real-recording
-usability check (item 2). Items 3–5 can be validated during implementation
-(Gate B / Gate D style evidence), not required to unblock starting the work.
+download/offline mechanism (item 1 — design direction above still needs to be
+implemented and tested) and get at least one real-recording usability check
+(item 2 — **requires a real multi-speaker recording from the user**; no audio
+fixture with multiple speakers exists in this repo, and this is the kind of
+accuracy judgment CLAUDE.md already marks as user-verified, not
+Claude-automatable). Items 3–5 can be validated during implementation (Gate B
+/ Gate D style evidence), not required to unblock starting the work.
