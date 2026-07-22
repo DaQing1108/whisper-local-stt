@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.1
 
 ## Current State
-Last checkpoint: 2026-07-22 (跨 session 累積：branch 決策 + v2.4.1 patch)
-Phase: Whisper Classic vs SwiftUI 合併決策定案
-Working: SwiftUI + Python Worker candidate（`codex/swiftui-python-poc` 已改名 `whisper-swift`，local + remote 都已完成）P0/P1/P2 功能 parity 已完成並通過獨立 review（Swift 108 tests、Python 34 tests 全過，本機簽章 Gate B 已通過）；`main`（Whisper Classic v2.4.x）進入凍結維護，不再排入新功能
-Next action: 使用者切換日常使用到 `~/Applications/Whisper SwiftUI.app` 驗證穩定性；`whisper-swift` worktree 仍有 dirty state（3 個 tracked 修改 + 33 個 untracked entries，含未驗證的 system-audio 診斷變更）待拆分 commit
+Last checkpoint: 2026-07-22 (追加：Whisper Swift 版號 + 過時文件更新任務啟動)
+Phase: Whisper Classic vs SwiftUI 合併決策定案（後續收尾中）
+Working: SwiftUI + Python Worker candidate（`codex/swiftui-python-poc` 已改名 `whisper-swift`，local + remote 都已完成）P0/P1/P2 功能 parity 已完成並通過獨立 review（Swift 108 tests、Python 34 tests 全過，本機簽章 Gate B 已通過）；`main`（Whisper Classic v2.4.x）進入凍結維護，不再排入新功能；Whisper Swift 版號從 `0.1.0` 提升為 `0.2.0`（反映 P0-P2 已完成的實際進度，與 Classic 版號脫鉤獨立編號）
+Next action: 使用者切換日常使用到 `~/Applications/Whisper SwiftUI.app` 驗證穩定性；背景任務已啟動更新過時的 `Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md`（獨立 session 執行中）；`whisper-swift` worktree 仍有 dirty state（含新的 Info.plist 版號修改 + 先前的 tracked/untracked 變更）待拆分 commit
 Blockers: none（Gate E 外部條件——Developer ID／notarization／clean Mac——確認暫緩而非阻塞，僅個人使用不需要）
 
 ## Checkpoint History
+### 2026-07-22（追加）｜Whisper Swift 版號提升 + 過時文件更新任務啟動
+- Completed: (1) `macos/WhisperApp/Info.plist` 的 `CFBundleShortVersionString` 從 `0.1.0` 提升為 `0.2.0`（build 維持 `1`），反映 P0-P2 已完成的實際進度；(2) 決定 Whisper Swift 版號與 Whisper Classic（`v2.4.x`）脫鉤獨立編號，`1.0.0` 保留給 Gate E 通過、確定對外釋出的時間點；(3) 使用者已在獨立 session 啟動先前拋出的背景任務，開始更新過時的 `Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md`
+- State: 版號修改與先前的 dirty state 一起留在 `whisper-swift` worktree，尚未 commit；背景任務獨立執行中，尚未回報結果
+- Next: 待背景任務完成後確認過時文件已更新；`whisper-swift` 的 dirty state 拆分 commit 仍待處理
+
 ### 2026-07-22｜Whisper Classic/SwiftUI 合併決策：main 凍結、分支改名 whisper-swift
 - Completed: (1) 確認 `codex/swiftui-python-poc` 的 P0/P1/P2 parity 早已完成（此前依據的比較文件已過時）；(2) 確認 Gate E 卡在外部條件（Developer ID、clean Mac），非程式碼問題，且現階段僅個人使用不需要；(3) 依使用者最終確認，將 `main` 列為凍結維護，`codex/swiftui-python-poc` 改名為 `whisper-swift` 作為主力分支（local + remote 已執行，無 PR/CI 相依，安全）；(4) 更新兩邊 `CLAUDE.md` 記錄分支策略，並明確標注舊的 `Whisper_Dual_Version_Git_Isolation_Plan_v1.md`（tag-only 策略）已被使用者否決
 - State: 決策已定案並落地於 branch 結構；`whisper-swift` worktree 仍有未拆分的 dirty state（含未驗證的 system-audio 診斷變更），尚未處理
