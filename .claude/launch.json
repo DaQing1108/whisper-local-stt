@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "whisper-dev-preview",
+      "runtimeExecutable": "/usr/bin/python3",
+      "runtimeArgs": ["/Users/daqingliao/Documents/AI-Workspace/1P_Projects/Whisper/app.py"],
+      "env": { "PORT": "5002" },
+      "port": 5002
+    }
+  ]
+}

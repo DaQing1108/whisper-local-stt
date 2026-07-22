@@ -37,3 +37,14 @@ Sparkle.framework/
 
 # Release artifacts
 release/
+
+# Git worktrees（不可作為子目錄追蹤，會與外層 repo 衝突）
+.worktrees/
+
+# 執行期暫存/日誌
+.last_summary.json
+*.log
+*.bak
+
+# PoC 編譯產物（保留原始碼，不保留 binary）
+poc_audio/capture_test
