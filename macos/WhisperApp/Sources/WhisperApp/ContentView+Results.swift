@@ -88,6 +88,7 @@ extension ContentView {
                     get: { summaryDraft },
                     set: { summaryDraft = $0; isSummaryDirty = true }
                 ))
+                .lineSpacing(8)
                 .frame(minHeight: 150, maxHeight: 260)
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
                 HStack {
