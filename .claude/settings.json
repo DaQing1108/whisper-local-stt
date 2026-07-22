@@ -1,4 +1,11 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(sleep *)",
+      "Bash(log show *)",
+      "Bash(/Users/daqingliao/Library/Python/3.9/bin/pytest tests/unit/*)"
+    ]
+  },
   "hooks": {
     "Stop": [
       {

@@ -1,5 +1,12 @@
 # Whisper STT — Claude 技術約束
 
+## 分支策略（2026-07-22 決策）
+
+- **`main`** — Whisper Classic（Python + Flask + pywebview，v2.4.x）。**已凍結**：不再排入新功能，僅在使用者日常 fallback 真的出問題時才修。
+- **`whisper-swift`**（前身 `codex/swiftui-python-poc`，2026-07-22 改名）— SwiftUI + Python Worker，**現階段主力開發分支**。P0/P1/P2 功能 parity 已完成（Swift 108 tests、Python 34 tests 全過，獨立 review APPROVE）。目前僅供使用者個人在本機使用（本機簽章、Gate B 已通過），**尚未推進 Gate E**（Developer ID／notarization／clean Mac 驗證）——待未來確定要對外釋出才處理。
+- 舊文件 `docs/Whisper_Dual_Version_Git_Isolation_Plan_v1.md`（2026-07-19）主張永久分支違反其原則、改用 tag 策略——**該文件已過時，使用者已於 2026-07-22 明確確認改用目前的分支策略**，後續不要依該文件的 tag-only 建議行事。
+- 完整決策記錄見 `docs/Whisper_SwiftUI_Migration_Task_Spec_v1.md` 與 memory `project_whisper_swiftui_migration.md`。
+
 ## 絕對不能做（NEVER）
 
 ### 1. 不能用 pyobjc 做系統音訊擷取

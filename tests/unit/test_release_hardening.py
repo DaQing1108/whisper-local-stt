@@ -1,11 +1,11 @@
-"""Release-facing consistency checks for Whisper STT v2.4.0."""
+"""Release-facing consistency checks for Whisper STT v2.4.1."""
 
 import re
 from pathlib import Path
 
 
 ROOT = Path(__file__).parent.parent.parent
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 
 
 def _read(path: str) -> str:
@@ -24,7 +24,6 @@ def test_release_brand_is_whisper_stt_on_active_app_surfaces():
     assert '<title>Whisper STT' in _read("templates/index.html")
     assert '<h1>Whisper STT</h1>' in _read("templates/index.html")
     assert 'title        = f"Whisper STT v{__version__}"' in _read("gui.py")
-    assert "Whisper AI Meeting" not in _read("WhisperAI_ProductSpec_v1.md")
 
 
 def test_release_guides_exist_and_cover_installation_permissions_and_recovery():

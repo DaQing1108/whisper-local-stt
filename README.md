@@ -1,13 +1,46 @@
-# 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
+# 🎙️ Whisper STT 本地語音轉文字系統 v2.4.1
 
 ## Current State
-Last checkpoint: 2026-07-15
-Phase: v2.4.0 release
-Working: canonical summary、目的地獨立 AI 會議內容與固定 meeting ID 已完成，待完成封裝與 GitHub 發布
-Next action: 以真實會議錄音驗收 App summary、Obsidian 與 Notion 的發布結果
-Blockers: none
+Last checkpoint: 2026-07-22（追加：Whisper Swift 版本顯示功能 + Gatekeeper/iCloud 排查收尾）
+Phase: Whisper Classic vs SwiftUI 合併決策定案（後續收尾中）
+Working: `whisper-swift` 分支已加入版本顯示功能（設定畫面「關於」區塊顯示 `App 版本 0.2.0 (1)`），已 build（152 tests 全過）、打包、安裝、使用者手動完成 Gatekeeper 核准並在畫面上確認看到版號；`main`（Whisper Classic v2.4.x）維持凍結維護
+Next action: 等待背景任務 `task_edee3d79`（更新過時的 `Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md`）回報結果；日常使用持續驗證 `~/Applications/Whisper Swift.app` 穩定性
+Blockers: none（Gate E 外部條件確認暫緩；新發現的 Gatekeeper/iCloud 重 build 需重新核准的摩擦已記錄在案，非阻塞但影響迭代速度）
 
 ## Checkpoint History
+### 2026-07-22（追加）｜Whisper Swift 版本顯示功能 + Gatekeeper/iCloud 排查
+- Completed: (1) 新增 `AppIdentity.versionString`（讀取 `CFBundleShortVersionString`/`CFBundleVersion`）並在設定畫面「關於」區塊顯示；(2) `swift build`/`swift test`（152 tests, 29 suites）全過；(3) 打包安裝到 `~/Applications/Whisper Swift.app` 過程中發現 app 反覆消失/被搬進垃圾桶，查證根因：這台 Mac 的 `~/Documents` 有開 iCloud Drive 同步，`dist/` 打包出的 app 被重新蓋上 `com.apple.quarantine`，加上本機自簽章（非 Developer ID）導致 `spctl --assess` 恆為 rejected，每次重 build 都需要使用者手動在系統設定核准一次；(4) 使用者完成核准，畫面確認看到版號；(5) 已將此診斷樹寫入 `whisper-swift` 的 `CLAUDE.md`；(6) 順手查證並補齊了一個無關的舊 hook 警告（task `20260702-230e` 的 step7 verification log 缺記錄，已補上）
+- State: 版本顯示功能程式碼已 commit + push（`12c5a0d`、CLAUDE.md 診斷樹 commit），`whisper-swift` 與 remote 同步；main worktree 除 README 外無其他變更
+- Next: 背景任務 `task_edee3d79` 尚未回報；持續觀察 Gatekeeper 重新核准的摩擦是否影響 Gate E 決策
+
+
+### 2026-07-22（更正）｜whisper-swift dirty state 描述有誤
+- **錯誤說明：** 先前兩則 checkpoint 記錄（2026-07-22 兩則）都寫「`whisper-swift` worktree 有 3 個 tracked 修改 + 33 個 untracked entries，含未驗證的 system-audio 診斷變更」——這段描述抄自 2026-07-19 的 `Whisper_Dual_Version_Git_Isolation_Plan_v1.md`，早已過時，且從未在寫入當下重新對照 `git status` 核實
+- **實際查證結果：** `ContentView.swift` 完全乾淨，近期 commit 都是正常 feature/fix；目前 `whisper-swift` worktree 的 dirty state 只有 `CLAUDE.md`（本次加的分支策略段落）與 `macos/WhisperApp/Info.plist`（本次版號提升），加上一個與本次工作無關的既有 untracked 文件 `docs/Whisper_SwiftUI_P0_Gap_Closing_Specs_v1.md`
+- **已處理：** 撤銷了先前基於錯誤描述拋出的背景任務建議（`task_d8e4df9b`，已 dismiss）
+- **教訓：** 讀到舊文件描述現況時，必須重新對照當下的 `git status`／`git log` 驗證，不能把文件裡的時間點狀態當成現況直接寫入新的 checkpoint 記錄
+
+### 2026-07-22（追加）｜Whisper Swift 版號提升 + 過時文件更新任務啟動
+- Completed: (1) `macos/WhisperApp/Info.plist` 的 `CFBundleShortVersionString` 從 `0.1.0` 提升為 `0.2.0`（build 維持 `1`），反映 P0-P2 已完成的實際進度；(2) 決定 Whisper Swift 版號與 Whisper Classic（`v2.4.x`）脫鉤獨立編號，`1.0.0` 保留給 Gate E 通過、確定對外釋出的時間點；(3) 使用者已在獨立 session 啟動先前拋出的背景任務，開始更新過時的 `Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md`
+- State: 版號修改與先前的 dirty state 一起留在 `whisper-swift` worktree，尚未 commit；背景任務獨立執行中，尚未回報結果
+- Next: 待背景任務完成後確認過時文件已更新；`whisper-swift` 的 dirty state 拆分 commit 仍待處理
+
+### 2026-07-22｜Whisper Classic/SwiftUI 合併決策：main 凍結、分支改名 whisper-swift
+- Completed: (1) 確認 `codex/swiftui-python-poc` 的 P0/P1/P2 parity 早已完成（此前依據的比較文件已過時）；(2) 確認 Gate E 卡在外部條件（Developer ID、clean Mac），非程式碼問題，且現階段僅個人使用不需要；(3) 依使用者最終確認，將 `main` 列為凍結維護，`codex/swiftui-python-poc` 改名為 `whisper-swift` 作為主力分支（local + remote 已執行，無 PR/CI 相依，安全）；(4) 更新兩邊 `CLAUDE.md` 記錄分支策略，並明確標注舊的 `Whisper_Dual_Version_Git_Isolation_Plan_v1.md`（tag-only 策略）已被使用者否決
+- State: 決策已定案並落地於 branch 結構；`whisper-swift` worktree 仍有未拆分的 dirty state（含未驗證的 system-audio 診斷變更），尚未處理
+- Next: 使用者驗證 SwiftUI 版日常使用穩定性；後續視需要拆分 `whisper-swift` 的 dirty commit 與更新過時的比較文件
+
+### 2026-07-15｜Checkpoint Publish：v2.4.1 Timecode Patch
+- Status: source patch 已完成，尚未封裝或發布；目前 branch 為 `codex/fix-v2-4-1-timecodes`。
+- Completed: 修復 footer 發布漏傳 `segments`、chunk 與系統音訊完成 state 未持久化 segments；Obsidian 原始逐字稿可恢復 `[MM:SS]` timecode。
+- Verification: full unit suite `216 passed`；CI 同款 integration suite `16 passed`，包含先前失敗的 `/api/save_to_obsidian` test。
+- Boundary: 本 checkpoint 不包含 `.claude` 設定、handoff、規劃草稿、音檔、log 或現有 Obsidian 會議檔；既有缺少 segments 的檔案無法安全回填真實 timecode。
+- Next: 重新封裝 `v2.4.1`、執行 bundle smoke test、推送 patch 並確認 GitHub CI。
+
+### 2026-07-15｜v2.4.1 Timecode 與 CI Patch
+- Fixed: footer 發布會從同一 `meeting_id` 的 backend state 回填 Whisper segments；chunk 與系統音訊完成時也會持久化 segments，因此 Obsidian 原始逐字稿恢復 `[MM:SS]` timecode。
+- CI: 在 `WHISPER_TEST=1` 且無 LLM provider 的整合測試中使用 deterministic destination summary；release test 不再讀取未追蹤的本機 ProductSpec。
+
 ### 2026-07-15｜v2.4.0 Summary 與可重複發布
 - Scope: transcript 完成後產生可編輯的 Whisper App summary；Obsidian 與 Notion 各自從 transcript 產生目的地專用 AI 會議內容；固定 `meeting_id` 讓相同 session 可安全重複發布更新。
 - User flow: 完成轉錄與 App summary 後，使用 footer 的 `Obsidian` 或 `Notion` 主動發布；Obsidian 會寫入一份原始逐字稿與一份連結的會議記錄，Notion 會建立並重寫同一個 meeting child page。

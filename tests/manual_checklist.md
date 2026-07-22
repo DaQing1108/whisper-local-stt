@@ -1,4 +1,4 @@
-# Whisper STT v2.4.0 — 手動測試清單
+# Whisper STT v2.4.1 — 手動測試清單
 
 每次 release 前執行。預計 10-15 分鐘。
 
@@ -8,7 +8,7 @@
 
 - [ ] App 已打包：`bash package.sh`
 - [ ] 開啟 `/Applications/Whisper STT.app`
-- [ ] 確認版本號正確（右上角 v2.4.0）
+- [ ] 確認版本號正確（右上角 v2.4.1）
 - [ ] 主畫面、偏好設定、macOS 權限提示使用同一名稱：`Whisper STT`
 
 ---
@@ -108,7 +108,7 @@
 
 ## 10.1 偏好設定分層
 
-- [ ] 偏好設定標題顯示 Whisper STT v2.4.0
+- [ ] 偏好設定標題顯示 Whisper STT v2.4.1
 - [ ] Basic 基礎設定預設展開，包含 Obsidian、Notion、LLM API Key
 - [ ] Workflow 產出格式預設收合，展開後可設定後處理模板
 - [ ] Advanced / Beta 進階功能預設收合，展開後可檢查說話者分離與 App 更新

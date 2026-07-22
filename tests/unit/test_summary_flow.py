@@ -143,6 +143,32 @@ class TestSaveToObsidianUsesEffectiveSummary:
         assert 'meeting_id: "' in summary_path.read_text(encoding="utf-8")
         assert "obsidian 專屬摘要：這是一段測試逐字稿" in summary_path.read_text(encoding="utf-8")
 
+    def test_footer_publish_recovers_timecodes_from_current_meeting(self, client, tmp_obsidian_vault, monkeypatch):
+        import routes
+
+        monkeypatch.setenv("OBSIDIAN_MEETING_PATH", str(tmp_obsidian_vault))
+        routes._save_last_summary(routes._summary_payload(
+            status="ready", meeting_id="meeting-timecodes", generated_summary="摘要",
+        ))
+        routes._save_last_transcript({
+            "text": "第一段\n第二段",
+            "language": "zh",
+            "segments": [
+                {"start": 5.0, "end": 7.0, "text": "第一段"},
+                {"start": 75.0, "end": 77.0, "text": "第二段"},
+            ],
+            "meeting_id": "meeting-timecodes",
+        })
+
+        response = client.post("/api/save_to_obsidian", json={
+            "text": "第一段\n第二段", "lang": "zh", "meeting_id": "meeting-timecodes", "meta": {},
+        })
+
+        assert response.status_code == 200
+        content = Path(response.get_json()["path"]).read_text(encoding="utf-8")
+        assert "[00:05] 第一段" in content
+        assert "[01:15] 第二段" in content
+
     def test_second_publish_updates_the_original_meeting_file(self, client, tmp_obsidian_vault, monkeypatch):
         import routes
 

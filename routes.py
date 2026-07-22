@@ -659,7 +659,7 @@ def _finish_session(session_id: str) -> None:
         "text":     full_text,
         "language": lang,
         "time":     datetime.now().strftime("%H:%M:%S"),
-        "segments": [],
+        "segments": all_segments,
         "meeting_id": meeting_id,
         "meeting_title": meeting_title,
     })
@@ -1141,24 +1141,26 @@ def system_audio_stop():
             lang = sess.get("language", "zh")
             if full_text:
                 ts = datetime.now().strftime("%H:%M:%S")
+                segments_by_chunk = sess.get("segments_by_chunk", {})
+                sys_segments = [
+                    seg
+                    for i in sorted(segments_by_chunk)
+                    for seg in segments_by_chunk[i]
+                ]
                 meeting_id, meeting_title = _new_meeting_metadata()
                 _save_last_transcript({
                     "text": full_text,
                     "language": lang,
                     "time": ts,
-                    "segments": [],
+                    "segments": sys_segments,
                     "meeting_id": meeting_id,
                     "meeting_title": meeting_title,
                 })
-                _sse.broadcast("transcript", {"text": full_text, "language": lang, "time": ts, "segments": []})
+                _sse.broadcast("transcript", {
+                    "text": full_text, "language": lang, "time": ts, "segments": sys_segments,
+                })
                 obsidian_file = ""
                 if sess.get("save_obsidian") and os.environ.get("OBSIDIAN_MEETING_PATH"):
-                    segments_by_chunk = sess.get("segments_by_chunk", {})
-                    sys_segments = [
-                        seg
-                        for i in sorted(segments_by_chunk)
-                        for seg in segments_by_chunk[i]
-                    ]
                     info = {
                         "time":     ts,
                         "model":    sess.get("model", "unknown"),
@@ -1418,7 +1420,7 @@ def save_to_obsidian_route():
     data = request.json or {}
     text = data.get("text", "").strip()
     lang = data.get("lang", "zh")
-    meta = data.get("meta", {})
+    meta = dict(data.get("meta") or {})
     meeting_id = data.get("meeting_id", "").strip()
 
     if not text:
@@ -1428,6 +1430,11 @@ def save_to_obsidian_route():
 
     current_summary = _last_summary
     meeting_id = meeting_id or (current_summary or {}).get("meeting_id") or uuid4().hex
+    # Footer publication sends text only. Recover the original Whisper segments
+    # from the current meeting so the raw Obsidian transcript keeps its timecodes.
+    transcript_state = _last_transcript or {}
+    if not meta.get("segments") and transcript_state.get("meeting_id") == meeting_id:
+        meta["segments"] = transcript_state.get("segments", [])
     existing_path = (current_summary or {}).get("obsidian_file", "")
     was_published = bool(existing_path and Path(existing_path).exists())
     try:
