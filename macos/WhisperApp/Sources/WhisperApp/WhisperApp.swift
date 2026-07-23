@@ -30,8 +30,10 @@ struct WhisperDesktopApp: App {
             scheduler: TimerChunkRotationScheduler(),
             transcriber: worker
         )
-        worker.transcriptionCompletedHandler = { [weak history, weak mixedAudioRecording] completed in
-            guard mixedAudioRecording?.ownsChunk(completed.audioURL) != true else { return }
+        let liveRecording = LiveRecordingController(transcriber: worker)
+        worker.transcriptionCompletedHandler = { [weak history, weak mixedAudioRecording, weak liveRecording] completed in
+            guard mixedAudioRecording?.ownsChunk(completed.audioURL) != true,
+                  liveRecording?.ownsChunk(completed.audioURL) != true else { return }
             _ = try? history?.recordCompleted(
                 audioURL: completed.audioURL,
                 model: completed.modelName,
@@ -59,7 +61,7 @@ struct WhisperDesktopApp: App {
             microphone: MicrophoneCaptureService(),
             transcriber: worker
         ))
-        _liveRecording = State(initialValue: LiveRecordingController(transcriber: worker))
+        _liveRecording = State(initialValue: liveRecording)
         _systemAudioPermission = State(initialValue: systemAudioPermission)
         _mixedAudioRecording = State(initialValue: mixedAudioRecording)
     }

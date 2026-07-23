@@ -396,6 +396,62 @@ extension ContentView {
             }
             return
         }
+        if liveRecording.acceptCompletedChunk(
+            completed.audioURL,
+            text: completed.text,
+            segments: completed.segments,
+            durationSeconds: completed.durationSeconds
+        ) {
+            presentNextCompletedResult = false
+            do {
+                let entry: TranscriptionHistoryEntry
+                if let id = liveHistoryEntryID,
+                   // Live mode has no merged full-session audio file — only per-chunk WAVs — so
+                   // audioURL is intentionally omitted here to keep audioPath pinned to the first
+                   // chunk rather than drifting to whichever chunk completed most recently, which
+                   // would silently point later segments' seek offsets at the wrong audio file.
+                   let updated = try history.updateResult(
+                       id: id,
+                       text: liveRecording.transcriptText,
+                       segments: liveRecording.transcriptSegments,
+                       durationSeconds: liveRecording.transcriptDurationSeconds
+                   ) {
+                    entry = updated
+                } else {
+                    entry = try history.recordCompleted(
+                        audioURL: completed.audioURL,
+                        model: completed.modelName,
+                        language: completed.language,
+                        text: liveRecording.transcriptText,
+                        segments: liveRecording.transcriptSegments,
+                        durationSeconds: liveRecording.transcriptDurationSeconds,
+                        domain: completed.domain,
+                        extraTerms: completed.extraTerms
+                    )
+                }
+                liveHistoryEntryID = entry.id
+                restore(entry)
+                errorMessage = nil
+            } catch {
+                stopPlaybackPolling()
+                playingSegmentIndex = nil
+                currentEntryID = nil
+                transientEntry = TranscriptionHistoryEntry(
+                    audioPath: completed.audioURL.path,
+                    model: completed.modelName,
+                    language: completed.language,
+                    text: liveRecording.transcriptText,
+                    segments: liveRecording.transcriptSegments,
+                    durationSeconds: liveRecording.transcriptDurationSeconds,
+                    domain: completed.domain,
+                    extraTerms: completed.extraTerms
+                )
+                transcriptDraft = liveRecording.transcriptText
+                isDraftDirty = false
+                errorMessage = "History update failed: \(error.localizedDescription)"
+            }
+            return
+        }
         guard CaptureUIRules.shouldPresentCompletedResult(
             isDraftDirty: isDraftDirty,
             explicitlyRequestedPresentation: presentNextCompletedResult

@@ -627,4 +627,94 @@ struct LiveRecordingControllerTests {
         #expect(controller.submissionQueue.pendingURLs == [url])
         if case .failed = controller.state {} else { Issue.record("Expected failed state after stalled job was cancelled") }
     }
+
+    @Test
+    func acceptCompletedChunkAccumulatesAcrossThreeChunksWithIncreasingOffsets() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("live-accumulate-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let urls = (1...3).map { directory.appendingPathComponent("chunk-\($0).wav") }
+        let sequence = ChunkURLSequence(urls)
+        let backend = LiveCaptureBackend()
+        let scheduler = ManualRotationScheduler()
+        let controller = LiveRecordingController(
+            permissionProvider: LivePermissionProvider(),
+            backend: backend,
+            scheduler: scheduler,
+            transcriber: LiveTranscriber(),
+            rotationInterval: 15,
+            outputURLFactory: { try sequence.next() }
+        )
+        await controller.start()
+        backend.emit(Data([0x01, 0x02]))
+        scheduler.fire()
+        backend.emit(Data([0x03, 0x04]))
+        scheduler.fire()
+        backend.emit(Data([0x05, 0x06]))
+        controller.stop()
+        #expect(controller.finalizedChunkURLs == urls)
+
+        #expect(controller.acceptCompletedChunk(urls[0], text: "第一段", durationSeconds: 15))
+        #expect(controller.transcriptText.contains("第一段"))
+        #expect(controller.transcriptDurationSeconds == 15)
+
+        #expect(controller.acceptCompletedChunk(urls[1], text: "第二段", durationSeconds: 15))
+        #expect(controller.transcriptText.contains("第一段"))
+        #expect(controller.transcriptText.contains("第二段"))
+        #expect(controller.transcriptDurationSeconds == 30)
+        #expect(controller.transcriptSegments.last?.start == 15)
+        #expect(controller.transcriptSegments.last?.end == 30)
+
+        #expect(controller.acceptCompletedChunk(urls[2], text: "第三段", durationSeconds: 15))
+        #expect(controller.transcriptText.contains("第三段"))
+        #expect(controller.transcriptDurationSeconds == 45)
+        #expect(controller.transcriptSegments.last?.start == 30)
+        #expect(controller.transcriptSegments.last?.end == 45)
+    }
+
+    @Test
+    func acceptCompletedChunkIgnoresDuplicateSubmissionForSameURL() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("live-dedup-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("chunk-1.wav")
+        let backend = LiveCaptureBackend()
+        let controller = LiveRecordingController(
+            permissionProvider: LivePermissionProvider(),
+            backend: backend,
+            scheduler: ManualRotationScheduler(),
+            transcriber: LiveTranscriber(),
+            outputURLFactory: { url }
+        )
+        await controller.start()
+        backend.emit(Data([0x01, 0x02]))
+        controller.stop()
+        #expect(controller.finalizedChunkURLs == [url])
+
+        #expect(controller.acceptCompletedChunk(url, text: "第一段", durationSeconds: 15))
+        #expect(controller.transcriptDurationSeconds == 15)
+        #expect(!controller.acceptCompletedChunk(url, text: "重複", durationSeconds: 15))
+        #expect(controller.transcriptDurationSeconds == 15)
+        #expect(!controller.transcriptText.contains("重複"))
+    }
+
+    @Test
+    func ownsChunkReturnsFalseForURLNotFinalizedByThisController() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("live-not-owned-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let unrelatedURL = directory.appendingPathComponent("unrelated.wav")
+        let controller = LiveRecordingController(
+            permissionProvider: LivePermissionProvider(),
+            backend: LiveCaptureBackend(),
+            scheduler: ManualRotationScheduler(),
+            transcriber: LiveTranscriber()
+        )
+
+        #expect(!controller.ownsChunk(unrelatedURL))
+        #expect(!controller.acceptCompletedChunk(unrelatedURL, text: "不屬於這個 controller"))
+    }
 }

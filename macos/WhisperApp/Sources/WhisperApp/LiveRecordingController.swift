@@ -228,6 +228,10 @@ final class LiveRecordingController {
     private(set) var state: LiveRecordingState = .idle
     private(set) var finalizedChunkURLs: [URL] = []
     private(set) var errorMessage: String?
+    private(set) var transcriptText = ""
+    private(set) var transcriptSegments: [TranscriptionSegment] = []
+    private(set) var transcriptDurationSeconds: Double = 0
+    private var completedChunkURLs: Set<URL> = []
 
     let submissionQueue: OrderedChunkSubmissionQueue
     var modelName: String {
@@ -296,6 +300,11 @@ final class LiveRecordingController {
         ignoreDeviceEventsUntil = nil
         recoveryWatchdog?.cancel()
         recoveryWatchdog = nil
+        finalizedChunkURLs = []
+        transcriptText = ""
+        transcriptSegments = []
+        transcriptDurationSeconds = 0
+        completedChunkURLs = []
         guard submissionQueue.isWorkerReady else {
             fail("Python Worker must be ready before live mode starts")
             return
@@ -368,6 +377,43 @@ final class LiveRecordingController {
     private func acceptFinalizedChunk(_ url: URL) {
         finalizedChunkURLs.append(url)
         submissionQueue.enqueue(url)
+    }
+
+    func ownsChunk(_ url: URL) -> Bool {
+        finalizedChunkURLs.contains(url)
+    }
+
+    @discardableResult
+    func acceptCompletedChunk(
+        _ url: URL,
+        text: String,
+        segments: [TranscriptionSegment] = [],
+        durationSeconds: Double? = nil
+    ) -> Bool {
+        guard ownsChunk(url), completedChunkURLs.insert(url).inserted else { return false }
+        let chunkText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let offset = transcriptDurationSeconds
+        let maximumSegmentEnd = segments.map(\.end).max() ?? 0
+        let chunkDuration = max(maximumSegmentEnd, durationSeconds ?? rotationInterval)
+        var offsetSegments = segments.map {
+            TranscriptionSegment(start: offset + $0.start, end: offset + $0.end, text: $0.text)
+        }
+        if offsetSegments.isEmpty, !chunkText.isEmpty {
+            offsetSegments = [TranscriptionSegment(
+                start: offset, end: offset + chunkDuration, text: chunkText
+            )]
+        }
+        transcriptSegments.append(contentsOf: offsetSegments)
+        let renderedChunk = TranscriptTimecodeFormatter.render(
+            segments: offsetSegments,
+            fallbackText: chunkText,
+            fallbackStart: offset
+        )
+        if !renderedChunk.isEmpty {
+            transcriptText = transcriptText.isEmpty ? renderedChunk : "\(transcriptText)\n\(renderedChunk)"
+        }
+        transcriptDurationSeconds += max(0, chunkDuration)
+        return true
     }
 
     private func captureFailed(_ error: Error, sessionID: UUID?) {
