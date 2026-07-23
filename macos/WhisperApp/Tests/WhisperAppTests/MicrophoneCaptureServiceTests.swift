@@ -66,6 +66,21 @@ private final class BlockingCaptureBackend: AudioCaptureBackend, @unchecked Send
     func stop() throws { group.wait() }
 }
 
+private final class ManualCaptureEventMonitor: AudioCaptureEventMonitoring {
+    private var handler: (@MainActor @Sendable (AudioCaptureSystemEvent) -> Void)?
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+    func start(handler: @escaping @MainActor @Sendable (AudioCaptureSystemEvent) -> Void) {
+        startCount += 1
+        self.handler = handler
+    }
+    func stop() {
+        stopCount += 1
+        handler = nil
+    }
+    func emit(_ event: AudioCaptureSystemEvent) { handler?(event) }
+}
+
 struct MicrophoneCaptureServiceTests {
     @Test
     func computesAccessibleNormalizedPCMLevel() {
@@ -286,5 +301,74 @@ struct MicrophoneCaptureServiceTests {
         _ = try service.stop()
 
         #expect(try Data(contentsOf: url).count == 48)
+    }
+
+    @Test @MainActor
+    func deviceConfigurationChangeRestartsBackendReusingSameSession() async throws {
+        let backend = FakeCaptureBackend()
+        let monitor = ManualCaptureEventMonitor()
+        let service = MicrophoneCaptureService(
+            permissionProvider: FakePermissionProvider(current: .granted, requestedResult: false),
+            backend: backend,
+            eventMonitor: monitor
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("device-change-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        #expect(await service.resolvePermission())
+        try service.start(outputURL: url)
+        #expect(monitor.startCount == 1)
+        backend.emit(Data([0x01, 0x02]))
+        monitor.emit(.configurationChanged)
+
+        #expect(backend.stopCount == 1)
+        #expect(backend.startCount == 2)
+        if case .recording = service.state {} else { Issue.record("Expected recording to continue") }
+
+        backend.emit(Data([0x03, 0x04]))
+        let finalized = try service.stop()
+        #expect(try Data(contentsOf: finalized).count == 48)
+        #expect(monitor.stopCount == 1)
+    }
+
+    @Test @MainActor
+    func repeatedDeviceEventsDebounceBeforeRestartingAgain() async throws {
+        let backend = FakeCaptureBackend()
+        let monitor = ManualCaptureEventMonitor()
+        let service = MicrophoneCaptureService(
+            permissionProvider: FakePermissionProvider(current: .granted, requestedResult: false),
+            backend: backend,
+            eventMonitor: monitor
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("debounce-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        #expect(await service.resolvePermission())
+        try service.start(outputURL: url)
+        monitor.emit(.deviceChanged)
+        #expect(backend.startCount == 2)
+
+        monitor.emit(.deviceChanged)
+        monitor.emit(.configurationChanged)
+        #expect(backend.startCount == 2)
+
+        _ = try service.stop()
+    }
+
+    @Test @MainActor
+    func deviceEventWhileIdleIsIgnored() async throws {
+        let backend = FakeCaptureBackend()
+        let monitor = ManualCaptureEventMonitor()
+        let service = MicrophoneCaptureService(
+            permissionProvider: FakePermissionProvider(current: .granted, requestedResult: false),
+            backend: backend,
+            eventMonitor: monitor
+        )
+
+        monitor.emit(.configurationChanged)
+
+        #expect(backend.startCount == 0)
+        #expect(backend.stopCount == 0)
+        #expect(service.state == .idle)
     }
 }

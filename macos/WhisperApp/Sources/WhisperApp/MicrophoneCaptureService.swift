@@ -238,16 +238,20 @@ final class MicrophoneCaptureService {
     private(set) var audioLevel: Double = 0
     private let permissionProvider: any MicrophonePermissionProviding
     private let backend: any AudioCaptureBackend
+    private let eventMonitor: any AudioCaptureEventMonitoring
     private var session: CaptureSession?
+    private var ignoreDeviceEventsUntil: Date?
 
     var state: RecordingState { machine.state }
 
     init(
         permissionProvider: any MicrophonePermissionProviding = SystemMicrophonePermissionProvider(),
-        backend: any AudioCaptureBackend = AVAudioEngineCaptureBackend()
+        backend: any AudioCaptureBackend = AVAudioEngineCaptureBackend(),
+        eventMonitor: any AudioCaptureEventMonitoring = SystemAudioCaptureEventMonitor()
     ) {
         self.permissionProvider = permissionProvider
         self.backend = backend
+        self.eventMonitor = eventMonitor
     }
 
     @discardableResult
@@ -278,23 +282,13 @@ final class MicrophoneCaptureService {
     func start(outputURL: URL, at date: Date = Date()) throws {
         guard machine.state == .ready else { throw RecordingStateError.invalidTransition }
         lastFinalizedURL = nil
+        ignoreDeviceEventsUntil = nil
         let session = try CaptureSession(url: outputURL)
         self.session = session
         do {
-            try backend.start(
-                onPCM: { [weak self, session] data in
-                    do { try session.append(data) }
-                    catch {
-                        Task { @MainActor in self?.captureFailed(error, sessionID: session.id) }
-                    }
-                    let level = Self.normalizedLevel(forPCM16: data)
-                    Task { @MainActor in self?.audioLevel = level }
-                },
-                onError: { [weak self, session] error in
-                    Task { @MainActor in self?.captureFailed(error, sessionID: session.id) }
-                }
-            )
+            try backend.start(onPCM: pcmHandler(for: session), onError: errorHandler(for: session))
             try machine.start(at: date)
+            eventMonitor.start { [weak self] event in self?.handleSystemEvent(event) }
         } catch {
             _ = try? session.finalize()
             self.session = nil
@@ -303,9 +297,44 @@ final class MicrophoneCaptureService {
         }
     }
 
+    private func pcmHandler(for session: CaptureSession) -> @Sendable (Data) -> Void {
+        { [weak self] data in
+            do { try session.append(data) }
+            catch {
+                Task { @MainActor in self?.captureFailed(error, sessionID: session.id) }
+            }
+            let level = Self.normalizedLevel(forPCM16: data)
+            Task { @MainActor in self?.audioLevel = level }
+        }
+    }
+
+    private func errorHandler(for session: CaptureSession) -> @Sendable (Error) -> Void {
+        { [weak self] error in
+            Task { @MainActor in self?.captureFailed(error, sessionID: session.id) }
+        }
+    }
+
+    /// Debounce window mirrors LiveRecordingController's `ignoreDeviceEventsUntil` pattern for the
+    /// same class of system notification, so a burst of device events restarts the engine once.
+    private static let deviceEventDebounceInterval: TimeInterval = 2
+
+    private func handleSystemEvent(_ event: AudioCaptureSystemEvent) {
+        guard event == .configurationChanged || event == .deviceChanged else { return }
+        guard machine.state.canStop, let session else { return }
+        if let ignoreDeviceEventsUntil, ignoreDeviceEventsUntil > Date() { return }
+        ignoreDeviceEventsUntil = Date().addingTimeInterval(Self.deviceEventDebounceInterval)
+        do {
+            try backend.stop()
+            try backend.start(onPCM: pcmHandler(for: session), onError: errorHandler(for: session))
+        } catch {
+            captureFailed(error, sessionID: session.id)
+        }
+    }
+
     @discardableResult
     func stop() throws -> URL {
         try machine.stop()
+        eventMonitor.stop()
         guard let session else {
             machine.fail(AudioCaptureError.noOutputData.localizedDescription)
             throw AudioCaptureError.noOutputData
@@ -335,6 +364,7 @@ final class MicrophoneCaptureService {
     }
 
     func reset() {
+        eventMonitor.stop()
         if let session {
             try? backend.stop()
             _ = try? session.finalize()
@@ -346,6 +376,7 @@ final class MicrophoneCaptureService {
 
     private func captureFailed(_ error: Error, sessionID: UUID) {
         guard session?.id == sessionID, machine.state.canStop else { return }
+        eventMonitor.stop()
         try? backend.stop()
         lastFinalizedURL = try? session?.finalize()
         session = nil
