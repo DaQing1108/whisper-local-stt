@@ -1,13 +1,22 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-23 10:20
-Phase: Whisper Swift Capture 分頁 UI/UX 重構（codex-handoff/codex-receive 流程驗收完成）
-Working: ContentView detail 容器改為固定頂欄＋滿版工作區，套用到全部 5 個 SidebarSection；Capture 分頁新增 compactControlBar（錄音／計時／AudioWaveformView／Settings Popover）與 Transcript/AI Summary 分段工作區（PillSegmentedControl＋浮動 Copy/Export），皆已由使用者在真實 App 上肉眼核對 mockup 並確認正常；`swift build`／`swift test` 154/154、Python `pytest` 293/293 全綠
-Next action: 無立即待辦；已另開背景任務追蹤「清空」按鈕未連動清除逐字稿段落列表的既有 UX 問題（非本次回歸）
+Last checkpoint: 2026-07-23 12:10
+Phase: Whisper Swift Capture 分頁 UI/UX 重構 — 真機走查發現的 3 個既有缺陷已修復
+Working: 真機走查(codex-receive 之後)發現並修復 3 個問題：①「清空」按鈕改名「清空文字」，明確只清編輯區草稿、不影響段落列表(播放/匯出用的原始 ASR 結果)；②開始任何新錄音時呼叫新的 `resetWorkspaceForNewCapture()`，清掉上一筆結果殘留的逐字稿與段落列表；③修正 `CaptureUIRules.stopIsEnabled` 漏掉 `.mixed` 模式的既有缺陷 — 混音模式 15 秒分段轉錄期間 worker 任務進行中會鎖死停止鍵，導致實質上無法停止錄音，現已比照 `.live`/`.system` 排除在鎖定規則外。`swift build`／`swift test` 155/155、Python `pytest` 293/293 全綠，使用者已在真實簽章版 App 上逐項複驗三個修正皆正常
+Next action: 無立即待辦
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-07-23 12:10｜真機走查修復：清空按鈕語意、新錄音殘留內容、混音模式停止鍵鎖死
+- Scope: 使用者在真實 App 上實際錄一場混音會議時發現三個問題，逐一追根因後修復：
+  1. `ContentView+Results.swift` 的「清空」按鈕改名「清空文字」——原按鈕只清 `transcriptDraft`（可編輯草稿），不影響 `entry.segments`（播放跳轉、SRT 匯出用的原始辨識結果），舊名稱讓使用者誤以為連段落列表都會清掉。
+  2. `ContentView+CaptureActions.swift` 新增 `resetWorkspaceForNewCapture()`，在 `primaryCaptureAction()` 開始任何新錄音前呼叫（邏輯與既有 `removeHistory`/`clearHistory` 的重置一致），解決「開新錄音時畫面還留著上一筆逐字稿/段落列表，要等錄完才換掉」的問題。
+  3. `AudioInputMode.swift` 的 `CaptureUIRules.stopIsEnabled` 修正：原本只排除 `.live`/`.system` 不受「worker 有任務進行中就鎖停止鍵」規則影響，但混音模式跟這兩者一樣是持續分段送轉錄任務（每 15 秒一段），沒被排除導致停止鍵實質上按不下去；既有測試 `CaptureUIRulesTests.swift` 完全沒有 `.mixed` 案例，證實是設計時的遺漏，已補上 `.mixed` 排除與對應測試。
+- Verification: `swift build`／`swift test`（155/155，含新增的 `activeChunkJobDoesNotDisableMixedStop`）；`git diff --stat` 確認只動了 4 個檔案；push 前 pre-push hook 的 Python `pytest` 293/293 全綠；使用者重新打包安裝後，在真實 App 上實際錄混音會議超過 15 秒並確認可正常停止，另外兩項也複驗正常。
+- 根因判斷：三個問題都不是這次 Capture 分頁重構造成的回歸，而是既有程式碼裡本來就存在、透過這次改版把逐字稿/段落列表放到更顯眼的單一畫面後才被使用者實際發現的缺陷（尤其 `.mixed` 停止鍵鎖死是會影響核心可用性的真實 bug）。
+
+
 ### 2026-07-23 10:20｜Capture 分頁 UI/UX 重構（codex-handoff → codex-receive）
 - Scope: 依 Notion 優化建議與使用者提供的實際 mockup 截圖，透過 task-router → spec-writer → engineering-discipline-loop（Explore＋Plan）→ codex-handoff 交給另一個 Claude Code 帳號執行，本 session 以 codex-receive 獨立驗收。改動 `ContentView.swift`（body 骨架：Capture 分頁顯示 compactControlBar／其餘 4 分頁維持 header，統一固定頂欄＋滿版 ScrollView 外殼）、`ContentView+Capture.swift`（captureCard/quickSettings 拆為 compactControlBar ＋ settingsPopoverContent，fileTranscription/batchTranscription 搬進 Popover）、`ContentView+Results.swift`（resultsWorkspace/summaryWorkspace 合併為 workspaceContainer，用既有 `PillSegmentedControl` 切換 Transcript/AI Summary，onChange/onDisappear 副作用集中到容器層避免 tab 切換失效，新增浮動 Copy/Export overlay），新增 `AudioWaveformView.swift`。
 - 獨立驗收發現並修正：執行方回報的 diff 摘要遺漏了 commit 誤將 `HANDOFF_CODEX_*.md`／`HANDOFF_CLAUDE_*_VERIFICATION.md` 一併 commit 進 repo（違反協議），已用新 commit `git rm --cached` 移除追蹤；Plan 階段自己誤寫「21 個 @Environment binding」，實際重新核對為 15 個（改版前後一致，未流失，僅為 spec 撰寫時的計數錯誤）。
