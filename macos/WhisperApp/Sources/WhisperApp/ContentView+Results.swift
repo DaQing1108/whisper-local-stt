@@ -343,59 +343,6 @@ extension ContentView {
 
     func showLatestWorkerResultIfNeeded() {
         guard let completed = worker.latestCompletedTranscription else { return }
-        if systemAudioRecording.acceptCompletedChunk(
-            completed.audioURL,
-            text: completed.text,
-            segments: completed.segments,
-            durationSeconds: completed.durationSeconds
-        ) {
-            presentNextCompletedResult = false
-            do {
-                let entry: TranscriptionHistoryEntry
-                if let id = systemAudioHistoryEntryID,
-                   let updated = try history.updateResult(
-                       id: id,
-                       text: systemAudioRecording.transcriptText,
-                       segments: systemAudioRecording.transcriptSegments,
-                       durationSeconds: systemAudioRecording.transcriptDurationSeconds,
-                       audioURL: systemAudioRecording.sessionFinalizedURL
-                   ) {
-                    entry = updated
-                } else {
-                    entry = try history.recordCompleted(
-                        audioURL: systemAudioRecording.sessionFinalizedURL ?? completed.audioURL,
-                        model: completed.modelName,
-                        language: completed.language,
-                        text: systemAudioRecording.transcriptText,
-                        segments: systemAudioRecording.transcriptSegments,
-                        durationSeconds: systemAudioRecording.transcriptDurationSeconds,
-                        domain: completed.domain,
-                        extraTerms: completed.extraTerms
-                    )
-                }
-                systemAudioHistoryEntryID = entry.id
-                restore(entry)
-                errorMessage = nil
-            } catch {
-                stopPlaybackPolling()
-                playingSegmentIndex = nil
-                currentEntryID = nil
-                transientEntry = TranscriptionHistoryEntry(
-                    audioPath: completed.audioURL.path,
-                    model: completed.modelName,
-                    language: completed.language,
-                    text: systemAudioRecording.transcriptText,
-                    segments: systemAudioRecording.transcriptSegments,
-                    durationSeconds: systemAudioRecording.transcriptDurationSeconds,
-                    domain: completed.domain,
-                    extraTerms: completed.extraTerms
-                )
-                transcriptDraft = systemAudioRecording.transcriptText
-                isDraftDirty = false
-                errorMessage = "History update failed: \(error.localizedDescription)"
-            }
-            return
-        }
         if mixedAudioRecording.acceptCompletedChunk(
             completed.audioURL,
             text: completed.text,

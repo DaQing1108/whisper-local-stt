@@ -106,6 +106,19 @@ private final class MixedTranscriber: LiveAudioTranscribing {
 
 private enum MixedTestError: Error { case failed }
 
+private final class MixedChunkURLSequence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var urls: [URL]
+    init(_ urls: [URL]) { self.urls = urls }
+    func next() throws -> URL {
+        lock.lock(); defer { lock.unlock() }
+        guard !urls.isEmpty else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        return urls.removeFirst()
+    }
+}
+
 private extension Array where Element == Int16 {
     var pcmData: Data {
         withUnsafeBytes { Data($0) }
@@ -158,6 +171,120 @@ struct MixedAudioRecordingControllerTests {
         #expect(system.stopCount == 1)
         try? FileManager.default.removeItem(at: url)
         for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+    }
+
+    @Test
+    func micDeniedWithMicrophoneExcludedStillStartsSuccessfully() async throws {
+        let mic = MixedMicrophoneBackend()
+        let system = MixedSystemBackend()
+        let controller = MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: false),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic,
+            systemBackend: system,
+            scheduler: MixedScheduler(),
+            transcriber: MixedTranscriber()
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-no-mic-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try await controller.start(outputURL: url, includeMicrophone: false)
+
+        #expect(controller.state == .recording)
+        #expect(system.startCount == 1)
+    }
+
+    @Test
+    func micDeniedWithMicrophoneIncludedStillThrows() async throws {
+        let mic = MixedMicrophoneBackend()
+        let system = MixedSystemBackend()
+        let controller = MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: false),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic,
+            systemBackend: system,
+            scheduler: MixedScheduler(),
+            transcriber: MixedTranscriber()
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-mic-required-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        await #expect(throws: MixedAudioRecordingError.self) {
+            try await controller.start(outputURL: url, includeMicrophone: true)
+        }
+        #expect(system.startCount == 0)
+    }
+
+    @Test
+    func entireMixedSessionSilentStillFinalizesSessionWithEmptyTranscript() async throws {
+        let mic = MixedMicrophoneBackend()
+        let system = MixedSystemBackend()
+        let scheduler = MixedScheduler()
+        let transcriber = MixedTranscriber()
+        let controller = MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: true),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic,
+            systemBackend: system,
+            scheduler: scheduler,
+            transcriber: transcriber,
+            flushInterval: 15
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-all-silent-\(UUID()).wav")
+        try await controller.start(outputURL: url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+        }
+
+        mic.emit(Array(repeating: Int16(5), count: 50))
+        system.emit(Array(repeating: Int16(5), count: 50))
+        scheduler.fire()
+        #expect(transcriber.submittedURLs.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: controller.finalizedChunkURLs[0].path))
+
+        let finalized = try await controller.stopAndTranscribe(modelName: "base")
+        #expect(finalized == url)
+        #expect(controller.transcriptText.isEmpty)
+        #expect(controller.transcriptDurationSeconds == Double(50) / 16_000)
+        #expect(transcriber.submittedURLs.isEmpty)
+    }
+
+    @Test
+    func mixedRotationFailureStopsCaptureAndFinalizesCurrentAudio() async throws {
+        let mic = MixedMicrophoneBackend()
+        let system = MixedSystemBackend()
+        let scheduler = MixedScheduler()
+        let transcriber = MixedTranscriber()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mixed-rotate-failure-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let chunkURL = directory.appendingPathComponent("chunk-1.wav")
+        let sequence = MixedChunkURLSequence([chunkURL])
+        let controller = MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: true),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic,
+            systemBackend: system,
+            scheduler: scheduler,
+            transcriber: transcriber,
+            chunkOutputURLFactory: { try sequence.next() }
+        )
+        let url = directory.appendingPathComponent("full-session.wav")
+
+        try await controller.start(outputURL: url)
+        mic.emit([1000, 3000])
+        system.emit([3000, 1000])
+        scheduler.fire()
+        for _ in 0..<50 where mic.stopCount == 0 {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(mic.stopCount == 1)
+        #expect(system.stopCount == 1)
+        #expect(controller.finalizedChunkURLs == [chunkURL])
+        if case .failed = controller.state {} else { Issue.record("Expected failed state") }
     }
 
     @Test

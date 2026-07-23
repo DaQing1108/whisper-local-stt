@@ -35,7 +35,6 @@ extension ContentView {
         CaptureUIRules.shouldLockMode(
             standardPendingOrActive: recording.isStarting || recording.state.canStop,
             livePendingOrActive: liveOwnsMicrophone,
-            systemPendingOrActive: systemAudioOperationInFlight,
             mixedPendingOrActive: mixedAudioOwnsCapture
         )
     }
@@ -47,7 +46,6 @@ extension ContentView {
             recording: liveRecording.state == .recording,
             recovering: liveRecording.state == .recovering
         )
-        case .system: systemAudioRecording.canStop
         case .mixed: mixedAudioRecording.hasActiveOperation
         }
     }
@@ -62,7 +60,6 @@ extension ContentView {
         return switch audioMode {
         case .standard: canStartRecording
         case .live: canStartLiveRecording
-        case .system: canStartSystemAudioRecording
         case .mixed: canStartMixedAudioRecording
         }
     }
@@ -74,8 +71,9 @@ extension ContentView {
         return switch audioMode {
         case .standard: "開始錄音"
         case .live: "開始即時轉錄"
-        case .system: "開始錄製系統音訊"
-        case .mixed: "開始錄製麥克風與系統音訊"
+        case .mixed: settings.includeMicrophoneInMixedMode
+            ? "開始錄製麥克風與系統音訊"
+            : "開始錄製系統音訊"
         }
     }
 
@@ -83,7 +81,6 @@ extension ContentView {
         switch audioMode {
         case .standard: recordingStatusText
         case .live: liveRecordingStatusText
-        case .system: systemAudioRecordingStatusText
         case .mixed: mixedAudioRecordingStatusText
         }
     }
@@ -92,8 +89,9 @@ extension ContentView {
         switch audioMode {
         case .standard: "錄完後一次轉錄，適合會議與訪談。"
         case .live: "錄音時分段轉錄，裝置切換時會自動復原。"
-        case .system: "擷取 Mac 播放的聲音，例如 Teams 或 Zoom。"
-        case .mixed: "同時錄製自己的麥克風與 Mac 系統聲音。"
+        case .mixed: settings.includeMicrophoneInMixedMode
+            ? "同時錄製自己的麥克風與 Mac 系統聲音。"
+            : "擷取 Mac 播放的聲音，例如 Teams 或 Zoom。"
         }
     }
 
@@ -102,7 +100,6 @@ extension ContentView {
             switch audioMode {
             case .standard: stopRecording()
             case .live: captureStartedAt = nil; liveRecording.stop()
-            case .system: stopSystemAudioRecording()
             case .mixed: stopMixedAudioRecording()
             }
         } else {
@@ -110,7 +107,6 @@ extension ContentView {
             switch audioMode {
             case .standard: startRecording()
             case .live: startLiveRecording()
-            case .system: startSystemAudioRecording()
             case .mixed: startMixedAudioRecording()
             }
         }
@@ -172,61 +168,15 @@ extension ContentView {
         }
     }
 
-    func startSystemAudioRecording() {
-        systemAudioHistoryEntryID = nil
-        Task {
-            systemAudioPermission.refresh()
-            guard systemAudioPermission.status == .granted ||
-                    systemAudioPermission.requestAccess() == .granted else {
-                errorMessage = systemAudioPermission.statusMessage
-                return
-            }
-            do {
-                try await systemAudioRecording.start(
-                    modelName: settings.defaultModel, language: settings.language,
-                    domain: settings.domain, extraTerms: effectiveExtraTerms
-                )
-                captureStartedAt = Date()
-                errorMessage = nil
-            }
-            catch { errorMessage = error.localizedDescription }
-        }
-    }
-
-    func stopSystemAudioRecording() {
-        captureStartedAt = nil
-        presentNextCompletedResult = true
-        Task {
-            do {
-                selectedFile = try await systemAudioRecording.stopAndTranscribe(
-                    modelName: settings.defaultModel, language: settings.language,
-                    domain: settings.domain, extraTerms: effectiveExtraTerms
-                )
-                if let id = systemAudioHistoryEntryID,
-                   let sessionURL = systemAudioRecording.sessionFinalizedURL {
-                    _ = try history.updateResult(
-                        id: id,
-                        text: systemAudioRecording.transcriptText,
-                        segments: systemAudioRecording.transcriptSegments,
-                        durationSeconds: systemAudioRecording.transcriptDurationSeconds,
-                        audioURL: sessionURL
-                    )
-                }
-                errorMessage = nil
-            } catch {
-                presentNextCompletedResult = false
-                selectedFile = systemAudioRecording.lastFinalizedURL
-                errorMessage = error.localizedDescription
-            }
-        }
-    }
-
     func startMixedAudioRecording() {
         mixedAudioHistoryEntryID = nil
         Task {
             do {
                 let url = try MixedAudioRecordingController.makeSessionOutputURL()
-                try await mixedAudioRecording.start(outputURL: url)
+                try await mixedAudioRecording.start(
+                    outputURL: url,
+                    includeMicrophone: settings.includeMicrophoneInMixedMode
+                )
                 captureStartedAt = Date()
                 errorMessage = nil
             } catch { errorMessage = error.localizedDescription }
@@ -262,7 +212,7 @@ extension ContentView {
     }
 
     var canStartRecording: Bool {
-        guard !recording.isStarting, !liveOwnsMicrophone, !systemAudioOwnsCapture, !mixedAudioOwnsCapture else { return false }
+        guard !recording.isStarting, !liveOwnsMicrophone, !mixedAudioOwnsCapture else { return false }
         return switch recording.state {
         case .idle, .recorded, .failed: true
         case .requestingPermission, .ready, .recording, .finalizing: false
@@ -276,21 +226,11 @@ extension ContentView {
 
     var canStartLiveRecording: Bool {
         guard worker.state == .ready, worker.activeRequestID == nil,
-              !recording.isStarting, !recording.state.canStop, !systemAudioOwnsCapture, !mixedAudioOwnsCapture else { return false }
+              !recording.isStarting, !recording.state.canStop, !mixedAudioOwnsCapture else { return false }
         return switch liveRecording.state {
         case .idle, .failed: true
         case .requestingPermission, .recording, .recovering, .stopping, .draining: false
         }
-    }
-
-    var canStartSystemAudioRecording: Bool {
-        CaptureUIRules.systemAudioStartIsEnabled(
-            workerReady: worker.state == .ready,
-            workerHasActiveRequest: worker.activeRequestID != nil,
-            conflictingCaptureActive: recording.isStarting || recording.state.canStop ||
-                liveOwnsMicrophone || mixedAudioOwnsCapture,
-            controllerCanStart: systemAudioRecording.canStart
-        )
     }
 
     var canStartMixedAudioRecording: Bool {
@@ -299,18 +239,8 @@ extension ContentView {
               worker.activeRequestID == nil,
               !recording.isStarting,
               !recording.state.canStop,
-              !liveOwnsMicrophone,
-              !systemAudioOwnsCapture else { return false }
+              !liveOwnsMicrophone else { return false }
         return mixedAudioRecording.canStart
-    }
-
-    var systemAudioOwnsCapture: Bool {
-        systemAudioRecording.hasActiveOperation
-    }
-
-    var systemAudioOperationInFlight: Bool {
-        systemAudioRecording.hasActiveOperation || systemAudioRecording.state == .starting ||
-            systemAudioRecording.state == .stopping
     }
 
     var mixedAudioOwnsCapture: Bool { mixedAudioRecording.hasActiveOperation }
@@ -350,22 +280,6 @@ extension ContentView {
         case .finalizing: "Finalizing recording…"
         case .recorded(let url): "Saved: \(url.lastPathComponent)"
         case .failed(let message): "Microphone error: \(message)"
-        }
-    }
-
-    var systemAudioRecordingStatusText: String {
-        if let queueError = systemAudioRecording.submissionQueue.errorMessage {
-            return "System audio transcription paused: \(queueError). Restart Worker to retry."
-        }
-        if systemAudioRecording.isDraining {
-            return "Transcribing remaining system audio chunks…"
-        }
-        return switch systemAudioRecording.state {
-        case .idle: "System audio idle"
-        case .starting: "Starting system audio…"
-        case .capturing: "Recording system audio — \(systemAudioRecording.finalizedChunkURLs.count) chunks finalized"
-        case .stopping: "Stopping system audio…"
-        case .failed(let message): "System audio error: \(message)"
         }
     }
 

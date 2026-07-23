@@ -12,14 +12,12 @@ struct CaptureUIRulesTests {
         #expect(CaptureUIRules.shouldLockMode(
             standardPendingOrActive: true,
             livePendingOrActive: false,
-            systemPendingOrActive: false,
             mixedPendingOrActive: false
         ))
         #expect(CaptureUIRules.shouldLockMode(
             standardPendingOrActive: false,
             livePendingOrActive: false,
-            systemPendingOrActive: true,
-            mixedPendingOrActive: false
+            mixedPendingOrActive: true
         ))
     }
 
@@ -33,25 +31,14 @@ struct CaptureUIRulesTests {
     @Test
     func activeChunkJobDoesNotDisableLiveStop() {
         #expect(CaptureUIRules.stopIsEnabled(mode: .live, workerHasActiveJob: true))
-        #expect(CaptureUIRules.stopIsEnabled(mode: .system, workerHasActiveJob: true))
         #expect(!CaptureUIRules.stopIsEnabled(mode: .standard, workerHasActiveJob: true))
     }
 
     @Test
     func activeChunkJobDoesNotDisableMixedStop() {
-        // Mixed mode rotates and submits a transcription job every 15s like .system,
+        // Mixed mode rotates and submits a transcription job every 15s,
         // so an in-flight job must never block the user from stopping the recording.
         #expect(CaptureUIRules.stopIsEnabled(mode: .mixed, workerHasActiveJob: true))
-    }
-
-    @Test
-    func systemAudioStartRemainsActionableWhenPermissionNeedsAttention() {
-        #expect(CaptureUIRules.systemAudioStartIsEnabled(
-            workerReady: true,
-            workerHasActiveRequest: false,
-            conflictingCaptureActive: false,
-            controllerCanStart: true
-        ))
     }
 
     @Test

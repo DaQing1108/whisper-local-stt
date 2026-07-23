@@ -14,7 +14,6 @@ enum AppIdentity {
 enum AudioInputMode: String, CaseIterable, Identifiable {
     case standard
     case live
-    case system
     case mixed
 
     var id: Self { self }
@@ -22,7 +21,6 @@ enum AudioInputMode: String, CaseIterable, Identifiable {
         switch self {
         case .standard: "標準"
         case .live: "即時"
-        case .system: "系統音訊"
         case .mixed: "混音"
         }
     }
@@ -30,7 +28,6 @@ enum AudioInputMode: String, CaseIterable, Identifiable {
         switch self {
         case .standard: "mic.fill"
         case .live: "waveform.badge.mic"
-        case .system: "macbook.and.iphone"
         case .mixed: "person.2.wave.2.fill"
         }
     }
@@ -40,10 +37,9 @@ enum CaptureUIRules {
     static func shouldLockMode(
         standardPendingOrActive: Bool,
         livePendingOrActive: Bool,
-        systemPendingOrActive: Bool,
         mixedPendingOrActive: Bool
     ) -> Bool {
-        standardPendingOrActive || livePendingOrActive || systemPendingOrActive || mixedPendingOrActive
+        standardPendingOrActive || livePendingOrActive || mixedPendingOrActive
     }
 
     static func liveIsStoppable(recording: Bool, recovering: Bool) -> Bool {
@@ -51,16 +47,7 @@ enum CaptureUIRules {
     }
 
     static func stopIsEnabled(mode: AudioInputMode, workerHasActiveJob: Bool) -> Bool {
-        mode == .live || mode == .system || mode == .mixed || !workerHasActiveJob
-    }
-
-    static func systemAudioStartIsEnabled(
-        workerReady: Bool,
-        workerHasActiveRequest: Bool,
-        conflictingCaptureActive: Bool,
-        controllerCanStart: Bool
-    ) -> Bool {
-        workerReady && !workerHasActiveRequest && !conflictingCaptureActive && controllerCanStart
+        mode == .live || mode == .mixed || !workerHasActiveJob
     }
 
     static func shouldPresentCompletedResult(

@@ -14,6 +14,7 @@ final class AppSettingsStore {
     static let historyRetentionKey = "whisper.historyRetention"
     static let summaryProviderKey = "whisper.summaryProvider"
     static let audioModeKey = "whisper.audioMode"
+    static let includeMicrophoneInMixedModeKey = "whisper.includeMicrophoneInMixedMode"
     static let supportedModels = ["tiny", "base", "small", "medium", "large-v3"]
     // Must match whisper_core.py's DOMAIN_TERMS keys exactly, or a selection silently
     // resolves to an empty prompt server-side.
@@ -74,6 +75,9 @@ final class AppSettingsStore {
     var audioMode: AudioInputMode {
         didSet { defaults.set(audioMode.rawValue, forKey: Self.audioModeKey) }
     }
+    var includeMicrophoneInMixedMode: Bool {
+        didSet { defaults.set(includeMicrophoneInMixedMode, forKey: Self.includeMicrophoneInMixedModeKey) }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -94,6 +98,9 @@ final class AppSettingsStore {
         audioMode = AudioInputMode(
             rawValue: defaults.string(forKey: Self.audioModeKey) ?? ""
         ) ?? .standard
+        includeMicrophoneInMixedMode = defaults.object(forKey: Self.includeMicrophoneInMixedModeKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.includeMicrophoneInMixedModeKey)
     }
 
     func markNotionOutcomeAmbiguous(entryID: UUID) {

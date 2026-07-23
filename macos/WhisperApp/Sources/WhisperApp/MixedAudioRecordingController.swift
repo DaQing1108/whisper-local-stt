@@ -130,7 +130,7 @@ final class MixedAudioRecordingController {
         systemBackend.setErrorHandler { [weak self] error in self?.errorBox?.record(error) }
     }
 
-    func start(outputURL: URL) async throws {
+    func start(outputURL: URL, includeMicrophone: Bool = true) async throws {
         guard !isStarting, stopTask == nil, canStart else {
             throw MixedAudioRecordingError.recordingAlreadyActive
         }
@@ -138,15 +138,17 @@ final class MixedAudioRecordingController {
         stopRequestedDuringStart = false
         state = .starting
         defer { isStarting = false }
-        let microphoneGranted: Bool
-        switch microphonePermission.status() {
-        case .granted: microphoneGranted = true
-        case .notDetermined: microphoneGranted = await microphonePermission.requestAccess()
-        case .denied, .restricted: microphoneGranted = false
-        }
-        guard microphoneGranted else {
-            state = .failed("Microphone access is required for mixed audio")
-            throw MixedAudioRecordingError.microphonePermissionDenied
+        if includeMicrophone {
+            let microphoneGranted: Bool
+            switch microphonePermission.status() {
+            case .granted: microphoneGranted = true
+            case .notDetermined: microphoneGranted = await microphonePermission.requestAccess()
+            case .denied, .restricted: microphoneGranted = false
+            }
+            guard microphoneGranted else {
+                state = .failed("Microphone access is required for mixed audio")
+                throw MixedAudioRecordingError.microphonePermissionDenied
+            }
         }
         screenPermission.refresh()
         guard screenPermission.status == .granted else {
@@ -176,11 +178,13 @@ final class MixedAudioRecordingController {
         do {
             try await systemBackend.start()
             systemActive = true
-            try microphoneBackend.start(
-                onPCM: { [weak accumulator] in accumulator?.appendMicrophone($0) },
-                onError: { [weak errorBox] error in errorBox?.record(error) }
-            )
-            microphoneActive = true
+            if includeMicrophone {
+                try microphoneBackend.start(
+                    onPCM: { [weak accumulator] in accumulator?.appendMicrophone($0) },
+                    onError: { [weak errorBox] error in errorBox?.record(error) }
+                )
+                microphoneActive = true
+            }
             scheduler.schedule(every: flushInterval) { [weak self] in self?.rotateChunk() }
             state = stopRequestedDuringStart ? .stopping : .recording
         } catch {

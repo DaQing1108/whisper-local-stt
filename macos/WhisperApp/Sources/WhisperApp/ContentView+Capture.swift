@@ -92,7 +92,12 @@ extension ContentView {
                     ))
                     .textFieldStyle(.roundedBorder)
                 }
-                if audioMode == .system || audioMode == .mixed {
+                if audioMode == .mixed {
+                    Toggle("同時錄我的聲音", isOn: Binding(
+                        get: { settings.includeMicrophoneInMixedMode },
+                        set: { settings.includeMicrophoneInMixedMode = $0 }
+                    ))
+                    .disabled(anyCaptureActive)
                     HStack {
                         Label(systemAudioPermission.statusMessage, systemImage: "rectangle.inset.filled.and.person.filled")
                             .font(.caption).foregroundStyle(.secondary)

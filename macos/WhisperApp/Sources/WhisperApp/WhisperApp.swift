@@ -7,7 +7,6 @@ struct WhisperDesktopApp: App {
     @State private var recording: StandardRecordingController
     @State private var liveRecording: LiveRecordingController
     @State private var systemAudioPermission: SystemAudioPermissionController
-    @State private var systemAudioRecording: SystemAudioRecordingController
     @State private var mixedAudioRecording: MixedAudioRecordingController
     @State private var settings: AppSettingsStore
     @State private var history: TranscriptionHistoryStore
@@ -23,16 +22,6 @@ struct WhisperDesktopApp: App {
         let settings = AppSettingsStore()
         let history = TranscriptionHistoryStore(maximumEntries: settings.historyRetention)
         let systemAudioPermission = SystemAudioPermissionController()
-        let systemAudioBackend = ScreenCaptureKitAudioBackend()
-        let systemAudioLifecycle = SystemAudioCaptureLifecycleController(
-            permission: systemAudioPermission,
-            backend: systemAudioBackend
-        )
-        let systemAudioRecording = SystemAudioRecordingController(
-            lifecycle: systemAudioLifecycle,
-            backend: systemAudioBackend,
-            transcriber: worker
-        )
         let mixedAudioRecording = MixedAudioRecordingController(
             microphonePermission: SystemMicrophonePermissionProvider(),
             screenPermission: systemAudioPermission,
@@ -41,9 +30,8 @@ struct WhisperDesktopApp: App {
             scheduler: TimerChunkRotationScheduler(),
             transcriber: worker
         )
-        worker.transcriptionCompletedHandler = { [weak history, weak systemAudioRecording, weak mixedAudioRecording] completed in
-            guard systemAudioRecording?.ownsChunk(completed.audioURL) != true,
-                  mixedAudioRecording?.ownsChunk(completed.audioURL) != true else { return }
+        worker.transcriptionCompletedHandler = { [weak history, weak mixedAudioRecording] completed in
+            guard mixedAudioRecording?.ownsChunk(completed.audioURL) != true else { return }
             _ = try? history?.recordCompleted(
                 audioURL: completed.audioURL,
                 model: completed.modelName,
@@ -73,7 +61,6 @@ struct WhisperDesktopApp: App {
         ))
         _liveRecording = State(initialValue: LiveRecordingController(transcriber: worker))
         _systemAudioPermission = State(initialValue: systemAudioPermission)
-        _systemAudioRecording = State(initialValue: systemAudioRecording)
         _mixedAudioRecording = State(initialValue: mixedAudioRecording)
     }
 
@@ -84,7 +71,6 @@ struct WhisperDesktopApp: App {
                 .environment(recording)
                 .environment(liveRecording)
                 .environment(systemAudioPermission)
-                .environment(systemAudioRecording)
                 .environment(mixedAudioRecording)
                 .environment(settings)
                 .environment(history)

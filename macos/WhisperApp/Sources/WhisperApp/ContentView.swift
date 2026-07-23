@@ -10,7 +10,6 @@ struct ContentView: View {
     @Environment(StandardRecordingController.self) var recording
     @Environment(LiveRecordingController.self) var liveRecording
     @Environment(SystemAudioPermissionController.self) var systemAudioPermission
-    @Environment(SystemAudioRecordingController.self) var systemAudioRecording
     @Environment(MixedAudioRecordingController.self) var mixedAudioRecording
     @Environment(AppSettingsStore.self) var settings
     @Environment(TranscriptionHistoryStore.self) var history
@@ -30,7 +29,6 @@ struct ContentView: View {
     @State var notionStatus: String?
     @State var notionUploadInProgress = false
     @State var currentEntryID: UUID?
-    @State var systemAudioHistoryEntryID: UUID?
     @State var mixedAudioHistoryEntryID: UUID?
     @State var transientEntry: TranscriptionHistoryEntry?
     @State var transcriptDraft = ""
