@@ -1,13 +1,56 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.1
 
 ## Current State
-Last checkpoint: 2026-07-22（追加：Whisper Swift 版本顯示功能 + Gatekeeper/iCloud 排查收尾）
-Phase: Whisper Classic vs SwiftUI 合併決策定案（後續收尾中）
-Working: `whisper-swift` 分支已加入版本顯示功能（設定畫面「關於」區塊顯示 `App 版本 0.2.0 (1)`），已 build（152 tests 全過）、打包、安裝、使用者手動完成 Gatekeeper 核准並在畫面上確認看到版號；`main`（Whisper Classic v2.4.x）維持凍結維護
-Next action: 等待背景任務 `task_edee3d79`（更新過時的 `Whisper_Legacy_vs_SwiftUI_Functional_Comparison_Spec_v1.md`）回報結果；日常使用持續驗證 `~/Applications/Whisper Swift.app` 穩定性
-Blockers: none（Gate E 外部條件確認暫緩；新發現的 Gatekeeper/iCloud 重 build 需重新核准的摩擦已記錄在案，非阻塞但影響迭代速度）
+Last checkpoint: 2026-07-23（兩個已知缺口修復 + Timeline UI 關閉決策 + PRD 收斂）
+Phase: Whisper Swift PRD 主要功能項目全數收尾，僅剩「完整快捷鍵台式 parity」（低優先序、未排入）
+Working: `whisper-swift` 分支（HEAD `fca3769`，與 origin 同步）修復兩個已登記的已知問題——(1) 混音錄音音檔存到 macOS 暫存目錄導致消失的 bug，改為比照系統音訊寫入 `~/Library/Application Support/WhisperSwiftUI/`（新增 `MixedAudioRecordingController.makeSessionOutputURL()`）；(2) `WorkerSupervisorTests` 會讀到本機真實 diarization 模型快取狀態導致斷言失效，改為 `WorkerSupervisor.start(...)` 新增 `environmentOverrides` 參數，測試隔離 `HOME` 到乾淨暫存目錄，不動既有憑證注入邏輯。`swift test` 154/154 全過。另外稽核 Whisper Classic 的「Timeline」分頁後發現它從未有真實功能（純佔位符），其設計意圖已由 segment-level seek 完整涵蓋，經使用者確認關閉此 PRD 項目。順帶稽核發現 worktree 內一份 2026-07-20 的過時文件（`docs/Whisper_SwiftUI_P0_Gap_Closing_Specs_v1.md`）誤判領域選單/LLM開關/Obsidian/Notion對齊為未完成缺口，實際上五項已於 2026-07-21～22 全部完成。Notion PRD 已同步更新（Section 4/7 現況 + 新增 Section 10 Session Log）
+Next action: 完整快捷鍵台式 parity（低優先序，尚未排入時程）；HANDOFF v2 剩餘的 Diarization 邊緣案例（編輯保護、切換紀錄保護）與長錄音效能仍待補測；Whisper Classic PRD 的過時內容尚未修正
+Blockers: none
 
 ## Checkpoint History
+### 2026-07-23｜兩個已知缺口修復 + Timeline UI 關閉決策 + PRD 收斂
+- Completed:
+  (1) 混音錄音音檔暫存目錄 bug：根因是 `ContentView+CaptureActions.swift` 的 `startMixedAudioRecording()` 直接用 `FileManager.default.temporaryDirectory` 建構輸出路徑；修法是新增 `MixedAudioRecordingController.makeSessionOutputURL()`（鏡射系統音訊既有 pattern），寫入 `~/Library/Application Support/WhisperSwiftUI/MixedAudioChunks/`；
+  (2) `WorkerSupervisorTests` 環境隔離：`WorkerSupervisor.start(...)` 新增 `environmentOverrides` 參數，測試把 subprocess 的 `HOME` 隔離到乾淨暫存目錄，讓 Python `Path.home()` 讀不到本機真實已下載的 diarization 模型快取，不動既有的 Keychain 憑證注入邏輯；
+  (3) `swift build`/`swift test` 154/154 全過，commit `fca3769` push 到 origin/whisper-swift；
+  (4) 撤下已修復的背景任務 chip（`task_d83de434`）；
+  (5) 稽核 Whisper Classic 對應的「Timeline」分頁原始碼（`templates/index.html` panel-timeline），確認它從未有真實功能，只是一個「功能開發中，敬請期待」的純佔位符，無 JS 邏輯、無 backend route；其設計意圖（含時間碼逐段記錄）已由當天稍早完成的 segment-level seek 功能完整涵蓋；使用者確認關閉此 PRD 項目，不另開 Timeline 專屬畫面；
+  (6) 程式碼稽核順帶發現 worktree 內 2026-07-20 的 `docs/Whisper_SwiftUI_P0_Gap_Closing_Specs_v1.md` 已過時——文件把領域選單、LLM 校對開關、Obsidian/Notion 發布對齊列為未完成缺口，實際上這五項（含當時列為「降級 post-GA」的 Diarization）都已完成，分別對應 commit `517a1a9`/`24b4ca1`/`1f70c1e`/`f9f12ff`（2026-07-21）與 `dc4fe04`（2026-07-22）；
+  (7) 同步更新 Notion Whisper Swift PRD：Section 3 Non-Goals 表格、Section 4 已知差距清單、Section 7 風險表格更新現況，新增 Section 10 Session Log 記錄本輪收尾
+- State: `whisper-swift` HEAD `fca3769`，與 origin 同步；`swift test` 154/154（含先前唯一已知失敗，本輪修復）；Whisper Swift PRD 主要功能項目全數收尾
+- Next: 完整快捷鍵台式 parity（低優先序）；HANDOFF v2 剩餘 Diarization 邊緣案例與長錄音效能測試
+- 可複用教訓：(a) 「已知問題、暫不修」的決策不是永久的——一旦發現修法其實不需要碰當初評估為高風險的程式碼路徑（本次是用測試專屬的 env override 隔離 HOME，而非真的去動憑證注入邏輯），值得重新評估是否現在就能低成本修掉；(b) PRD 裡「範圍待釐清」的項目，直接去查對應 Classic 功能的真實程式碼比憑空討論更快——這次一查就發現 Classic 那邊也只是個佔位符，範圍立刻就清楚了；(c) 稽核當下建立的規格文件（P0 Gap doc）不會自動保鮮，後續開發一旦超前，文件內容就可能整批過時，需要靠實際 git log/程式碼稽核來驗證，不能直接信任文件本身的「真實缺口」判定
+
+### 2026-07-23｜錄音回放校對 segment-level seek + codex-handoff/receive 流程沉澱
+- Completed:
+  (1) 確認 Whisper Swift PRD 剩餘兩項待辦（錄音回放校對、Timeline UI），錄音回放校對範圍收斂為「segment-level seek」（基礎播放/audioPath 已存在，只缺點擊跳轉+高亮），評為 L1、純 SwiftUI；
+  (2) 跑 spec-writer 產出可直接交付規格，寫成自成一體的 handoff 文件（`docs/Whisper_Recording_Playback_Seek_HANDOFF_v1.md`），確認「commit 但不 push，由接手 session 獨立驗證後才 push」的分工方式；
+  (3) 把這個分工方式與 checkpoint 步驟正式沉澱進全域指令 `codex-handoff`/`codex-receive`（iCloud 同步的 `~/Library/Mobile Documents/.../claude-config/commands/`）——新增「執行者類型」判斷（Codex 無 git 權限 vs 另一個 Claude Code 帳號可 commit 不 push）、`codex-receive` 新增 Checkpoint（README+Notion）步驟；
+  (4) 另一個 Claude Code 帳號完成實作並 commit（`ad1e18b`），本 session 執行 `/codex-receive`：獨立重跑 `swift build`/`swift test`，發現 153/154（1 個既有、跟本次無關的環境依賴測試失敗，深入查證後確認根因是 `WorkerSupervisor()` 未注入假 model manager、讀到本機真實已下載的 Diarization 模型狀態，非本次回歸，決定登記為已知問題不修）；
+  (5) 打包時撞到一個既有的 `com.apple.FinderInfo`（Sparkle nested Updater.app）codesign 卡點，清除後重新打包安裝；
+  (6) 電腦操作工具點擊驗證卡在混音錄音的音檔問題——查證後發現 4 筆 mixed-audio 紀錄的 `audioPath` 全部指向系統暫存目錄且檔案已消失（既有 bug，跟本次功能無關），改用有效的 system-audio 紀錄測試後確認 segment-seek 的跳轉與高亮都正常運作；
+  (7) 登記混音音檔遺失問題為背景任務（`task_d83de434`），供之後獨立處理；
+  (8) 驗證通過後 push `ad1e18b` 到 origin/whisper-swift
+- State: `whisper-swift` HEAD `ad1e18b`，與 origin 同步；`codex-handoff`/`codex-receive` 全域指令已更新且已用這次任務實際驗證過整套流程可行
+- Next: `task_d83de434`（混音音檔暫存目錄問題）與 WorkerSupervisorTests 環境隔離問題待排優先序
+- 可複用教訓：(a) 電腦操作點擊「沒反應」時，先查資料層根因（本次是音檔真的不存在），不要假設是 UI 邏輯壞了；(b) codex-receive 的「本機重跑驗收指令」這一步真的攔到了東西——差點就照對方回報的「跟本次無關」直接相信，深入查證後才確認真的無關，這個獨立驗證的把關價值在這次體現得很具體
+
+### 2026-07-22｜Whisper Swift Speaker Diarization 移植：分析→spike→整合→實測
+- Completed:
+  (1) 分析 Whisper Classic PRD 與 Whisper Swift PRD，發現 PRD 宣稱 Diarization「完成」但 `worker_entrypoint.py` 實際硬編碼 `available: false`；
+  (2) 原規格方向（比照 Classic 用 system Python subprocess）被 2026-07-18 既有 spike 明文否決（違反 SwiftUI AC-4「禁止 arbitrary system Python」），改研究 ONNX 路線；
+  (3) 實測驗證 sherpa-onnx（ONNX Runtime，無 torch）：PyInstaller 打包乾淨（41M，無 torch/pyannote 洩漏）、模型免授權下載、真人多說話者錄音品質使用者確認正確；
+  (4) 實作 `DiarizationModelManager`（模型下載，5 個測試 + 真實下載驗證）並 commit（`b69fe3e`）；
+  (5) 寫 handoff 規格文件（`Whisper_Phase3_Diarization_Integration_HANDOFF_v1.md`），交給另一個 Claude Code 帳號在本機同一 worktree 執行；
+  (6) 該帳號完成 Worker/protocol/SwiftUI 完整整合（commit `dc4fe04`：新增 `diarization_service.py`、`worker_entrypoint.py` 的 `diarization_warmup`/`diarize` command、SwiftUI「辨識講者」按鈕，兩輪獨立 code review 修復 3 HIGH + 1 MEDIUM），並寫 HANDOFF v2 記錄剩餘驗證項目；
+  (7) 補上 HANDOFF v2 點出的缺口——SwiftUI 沒有「下載模型」按鈕入口，新增後 build/test 皆綠；
+  (8) 實際跑 `scripts/build_worker_runtime.sh` + `scripts/build_swiftui_app.sh` 打包（修正 HANDOFF v1 誤寫的 `package.sh`——那是 Classic 的腳本），安裝到 `~/Applications/Whisper Swift.app`，使用者手動完成 Gatekeeper 核准；
+  (9) 用電腦操作工具在真實運行的 App 裡點擊「辨識講者」，親眼確認逐字稿正確渲染 `[Speaker A]` 標籤；
+  (10) 順手修復兩個無關的技術債：`.git/refs/heads/` 裡 iCloud 同步留下的壞 ref 檔案（`main 2`，導致 `git fetch` 整個失敗）、兩筆舊 discipline-loop 任務（`20260703-23aa`、`20260703-9e3c`）缺失的 `step7-verification-log.log` 記錄（造成 commit 前 hook 誤報）
+- State: `whisper-swift` HEAD `178449d`，與 origin 同步，`make test` 293/293、`swift test` 154/154 全過。HANDOFF v2 記錄的 Task 1（真實 UI 驗證）核心流程已確認，步驟 6-7（編輯保護、切換紀錄保護）與 Task 3（長錄音效能）刻意留白，非現在必須完成
+- Next: 有需求時再補 HANDOFF v2 剩餘驗證項目；Whisper Classic PRD 的過時 P1/P2 需求表尚未修正（本輪只修了 Whisper Swift PRD）
+- 可複用教訓：(a) 動工前先查現有程式碼再假設「完全沒做」——最初以為 SwiftUI 端毫無 diarization 痕跡，其實只是還沒查到；(b) computer-use 自動化點擊 SwiftUI 按鈕列時，按鈕數量變化會讓固定座標整排位移，需要每次重新定位；(c) handoff 文件裡的操作指令（如打包腳本路徑）務必先驗證過一次再寫進去，不能憑專案慣例推測
+
 ### 2026-07-22（追加）｜Whisper Swift 版本顯示功能 + Gatekeeper/iCloud 排查
 - Completed: (1) 新增 `AppIdentity.versionString`（讀取 `CFBundleShortVersionString`/`CFBundleVersion`）並在設定畫面「關於」區塊顯示；(2) `swift build`/`swift test`（152 tests, 29 suites）全過；(3) 打包安裝到 `~/Applications/Whisper Swift.app` 過程中發現 app 反覆消失/被搬進垃圾桶，查證根因：這台 Mac 的 `~/Documents` 有開 iCloud Drive 同步，`dist/` 打包出的 app 被重新蓋上 `com.apple.quarantine`，加上本機自簽章（非 Developer ID）導致 `spctl --assess` 恆為 rejected，每次重 build 都需要使用者手動在系統設定核准一次；(4) 使用者完成核准，畫面確認看到版號；(5) 已將此診斷樹寫入 `whisper-swift` 的 `CLAUDE.md`；(6) 順手查證並補齊了一個無關的舊 hook 警告（task `20260702-230e` 的 step7 verification log 缺記錄，已補上）
 - State: 版本顯示功能程式碼已 commit + push（`12c5a0d`、CLAUDE.md 診斷樹 commit），`whisper-swift` 與 remote 同步；main worktree 除 README 外無其他變更
