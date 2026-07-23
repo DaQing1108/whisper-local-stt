@@ -1,13 +1,24 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.1
 
 ## Current State
-Last checkpoint: 2026-07-23（兩個已知缺口修復 + Timeline UI 關閉決策 + PRD 收斂）
-Phase: Whisper Swift PRD 主要功能項目全數收尾，僅剩「完整快捷鍵台式 parity」（低優先序、未排入）
-Working: `whisper-swift` 分支（HEAD `fca3769`，與 origin 同步）修復兩個已登記的已知問題——(1) 混音錄音音檔存到 macOS 暫存目錄導致消失的 bug，改為比照系統音訊寫入 `~/Library/Application Support/WhisperSwiftUI/`（新增 `MixedAudioRecordingController.makeSessionOutputURL()`）；(2) `WorkerSupervisorTests` 會讀到本機真實 diarization 模型快取狀態導致斷言失效，改為 `WorkerSupervisor.start(...)` 新增 `environmentOverrides` 參數，測試隔離 `HOME` 到乾淨暫存目錄，不動既有憑證注入邏輯。`swift test` 154/154 全過。另外稽核 Whisper Classic 的「Timeline」分頁後發現它從未有真實功能（純佔位符），其設計意圖已由 segment-level seek 完整涵蓋，經使用者確認關閉此 PRD 項目。順帶稽核發現 worktree 內一份 2026-07-20 的過時文件（`docs/Whisper_SwiftUI_P0_Gap_Closing_Specs_v1.md`）誤判領域選單/LLM開關/Obsidian/Notion對齊為未完成缺口，實際上五項已於 2026-07-21～22 全部完成。Notion PRD 已同步更新（Section 4/7 現況 + 新增 Section 10 Session Log）
-Next action: 完整快捷鍵台式 parity（低優先序，尚未排入時程）；HANDOFF v2 剩餘的 Diarization 邊緣案例（編輯保護、切換紀錄保護）與長錄音效能仍待補測；Whisper Classic PRD 的過時內容尚未修正
+Last checkpoint: 2026-07-23（codex/fix-v2-4-1-timecodes 分支收斂與清理）
+Phase: 確認並收斂 `codex/fix-v2-4-1-timecodes` 分支狀態——修復內容早已透過 PR #8 squash merge 進 `main`，分支上後續累積的 2 個 checkpoint commit 手動合併補齊，分支已刪除
+Working: `main` HEAD `361e082`，與 origin 同步；`main` 與已刪除的 `codex/fix-v2-4-1-timecodes` 分支內容一致（僅少一行合併時順手修掉的重複標題）；`whisper-swift` 分支（HEAD `fca3769`）狀態不變，未受本次操作影響
+Next action: 無待辦；回到 `whisper-swift` 分支繼續「完整快捷鍵台式 parity」等既有待辦
 Blockers: none
 
 ## Checkpoint History
+### 2026-07-23｜codex/fix-v2-4-1-timecodes 分支收斂與清理
+- Completed:
+  (1) 使用者從 UI 看到 `codex/fix-v2-4-1-timecodes` 分支，詢問是否需要合併或由 codex 執行；查證發現該分支最早的兩個 commit（Obsidian 逐字稿時間碼修復）已於 2026-07-22 透過 PR #8 squash merge 進 `main`，不需 codex 再執行；
+  (2) 發現分支後續又累積了 8 個不相關的 checkpoint/docs commit（whisper-swift 遷移規劃文件、README 更新），確認後與使用者討論並取得合併進 `main` 的授權；
+  (3) 測試合併時 `git merge --abort` 意外失敗導致 `main` 暫時 staged 35 個檔案，向使用者確認後執行 `git reset --hard` 復原（commit 未受影響）；
+  (4) 依序執行：fast-forward `main` 到 `origin/main`（拿到 PR #8）→ 正式合併 `codex/fix-v2-4-1-timecodes` → 手動解決 README.md 的 Current State / Checkpoint History 合併衝突（依實際 commit 時間排序，並順手 dedupe 一行意外重複的標題）→ commit → push；
+  (5) 確認分支內容已完全併入 `main` 後，取得使用者授權，刪除本機與 origin 的 `codex/fix-v2-4-1-timecodes` 分支
+- State: `main` HEAD `361e082`，與 origin 同步；本次操作純屬 git 分支/文件整理，未觸碰任何功能程式碼，因此未跑測試
+- Next: 無；`whisper-swift` 分支的既有待辦（快捷鍵 parity、Diarization 邊緣案例、長錄音效能測試）不受影響
+- 可複用教訓：(a) GitHub squash merge 的 PR 標題不代表實際內容範圍——這次 PR #8 標題是「fix: preserve Obsidian transcript timecodes」，但 squash 進去的其實是分支上當時累積的全部 commit，之後又有新 commit 加在分支上；判斷「這個分支還缺什麼」不能只看 PR 標題，要實際 diff 分支 tip 跟 main；(b) `git merge --abort` 失敗（Entry not uptodate）不代表操作失敗到危險狀態——commit 本身沒事，只是 index 卡住，用 `git status`/`git rev-parse HEAD` 先確認實際狀態再決定下一步，不要慌著用更重的操作硬清
+
 ### 2026-07-23｜兩個已知缺口修復 + Timeline UI 關閉決策 + PRD 收斂
 - Completed:
   (1) 混音錄音音檔暫存目錄 bug：根因是 `ContentView+CaptureActions.swift` 的 `startMixedAudioRecording()` 直接用 `FileManager.default.temporaryDirectory` 建構輸出路徑；修法是新增 `MixedAudioRecordingController.makeSessionOutputURL()`（鏡射系統音訊既有 pattern），寫入 `~/Library/Application Support/WhisperSwiftUI/MixedAudioChunks/`；
