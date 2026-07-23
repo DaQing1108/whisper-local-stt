@@ -1,13 +1,27 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.1
 
 ## Current State
-Last checkpoint: 2026-07-22（Speaker Diarization 移植：PRD 分析 → spike → Worker/protocol/SwiftUI 整合 → 真實 App 點擊驗證）
-Phase: Whisper Swift Diarization 功能落地（核心流程已在真實 App 驗證，邊緣案例與長錄音效能待補）
-Working: `whisper-swift` 分支（HEAD `178449d`，與 origin 同步）已完整實作 Speaker Diarization——採用 sherpa-onnx（ONNX Runtime，無 torch，繞過 2026-07-18 spike 否決的 subprocess 方案）；`DiarizationModelManager` 下載機制、`worker_entrypoint.py` 的 `diarization_warmup`/`diarize` command、SwiftUI「辨識講者」+「下載講者辨識模型」按鈕皆已實作並測試（Python 293/293、Swift 154/154）。已用真人多說話者錄音驗證品質（使用者確認正確），並在真實打包安裝的 App 上實際點擊驗證整個流程（真的看到 `[Speaker A]` 標籤正確渲染）。`main`（Whisper Classic v2.4.x）維持凍結維護
-Next action: HANDOFF v2 剩餘的兩個邊緣案例待補測（編輯保護、切換紀錄保護），長錄音效能（30分鐘以上真實會議）待有需求時再測；Whisper Classic PRD 的過時內容（P1/P2 需求表未反映 Appendix B-1 實際進度）尚未修正
-Blockers: none（Gate E 外部條件確認暫緩；本次額外修復了 `.git/refs/heads/` 裡 iCloud 同步留下的壞 ref 檔案，以及兩筆舊 discipline-loop 任務缺失的 step7-verification-log 記錄，皆非阻塞性清理）
+Last checkpoint: 2026-07-23（錄音回放校對 segment-level seek：跨帳號 handoff → 真實 App 點擊驗證 → push）
+Phase: Whisper Swift 兩個 PRD 待辦項目皆已落地（Diarization、錄音回放校對），codex-handoff/codex-receive 分工流程正式沉澱為全域指令
+Working: `whisper-swift` 分支（HEAD `ad1e18b`，與 origin 同步）新增 segment-level playback seek——逐字稿編輯框下方新增唯讀可點擊段落列表，點擊跳轉播放時間點＋播放中同步高亮目前段落，純 SwiftUI 改動，不碰 Worker/protocol。Python 293/293、Swift 153/154（唯一失敗是既有、跟本次無關的 WorkerSupervisorTests 環境依賴問題，已登記待修）。已在真實打包安裝的 App 上點擊驗證（用有效音檔的 system-audio 紀錄確認跳轉+高亮正常）。過程中發現並登記混音模式音檔存暫存目錄會消失的既有 bug（`task_d83de434`）。`codex-handoff`/`codex-receive` 兩個全域指令已更新，正式支援「另一個 Claude Code 帳號」（非僅 Codex）的協作分工與 checkpoint 步驟
+Next action: 混音音檔暫存目錄問題（`task_d83de434`）與 WorkerSupervisorTests 環境隔離問題待排；HANDOFF v2 剩餘的 Diarization 邊緣案例（編輯保護、切換紀錄保護）與長錄音效能待補測；Whisper Classic PRD 的過時內容尚未修正
+Blockers: none
 
 ## Checkpoint History
+### 2026-07-23｜錄音回放校對 segment-level seek + codex-handoff/receive 流程沉澱
+- Completed:
+  (1) 確認 Whisper Swift PRD 剩餘兩項待辦（錄音回放校對、Timeline UI），錄音回放校對範圍收斂為「segment-level seek」（基礎播放/audioPath 已存在，只缺點擊跳轉+高亮），評為 L1、純 SwiftUI；
+  (2) 跑 spec-writer 產出可直接交付規格，寫成自成一體的 handoff 文件（`docs/Whisper_Recording_Playback_Seek_HANDOFF_v1.md`），確認「commit 但不 push，由接手 session 獨立驗證後才 push」的分工方式；
+  (3) 把這個分工方式與 checkpoint 步驟正式沉澱進全域指令 `codex-handoff`/`codex-receive`（iCloud 同步的 `~/Library/Mobile Documents/.../claude-config/commands/`）——新增「執行者類型」判斷（Codex 無 git 權限 vs 另一個 Claude Code 帳號可 commit 不 push）、`codex-receive` 新增 Checkpoint（README+Notion）步驟；
+  (4) 另一個 Claude Code 帳號完成實作並 commit（`ad1e18b`），本 session 執行 `/codex-receive`：獨立重跑 `swift build`/`swift test`，發現 153/154（1 個既有、跟本次無關的環境依賴測試失敗，深入查證後確認根因是 `WorkerSupervisor()` 未注入假 model manager、讀到本機真實已下載的 Diarization 模型狀態，非本次回歸，決定登記為已知問題不修）；
+  (5) 打包時撞到一個既有的 `com.apple.FinderInfo`（Sparkle nested Updater.app）codesign 卡點，清除後重新打包安裝；
+  (6) 電腦操作工具點擊驗證卡在混音錄音的音檔問題——查證後發現 4 筆 mixed-audio 紀錄的 `audioPath` 全部指向系統暫存目錄且檔案已消失（既有 bug，跟本次功能無關），改用有效的 system-audio 紀錄測試後確認 segment-seek 的跳轉與高亮都正常運作；
+  (7) 登記混音音檔遺失問題為背景任務（`task_d83de434`），供之後獨立處理；
+  (8) 驗證通過後 push `ad1e18b` 到 origin/whisper-swift
+- State: `whisper-swift` HEAD `ad1e18b`，與 origin 同步；`codex-handoff`/`codex-receive` 全域指令已更新且已用這次任務實際驗證過整套流程可行
+- Next: `task_d83de434`（混音音檔暫存目錄問題）與 WorkerSupervisorTests 環境隔離問題待排優先序
+- 可複用教訓：(a) 電腦操作點擊「沒反應」時，先查資料層根因（本次是音檔真的不存在），不要假設是 UI 邏輯壞了；(b) codex-receive 的「本機重跑驗收指令」這一步真的攔到了東西——差點就照對方回報的「跟本次無關」直接相信，深入查證後才確認真的無關，這個獨立驗證的把關價值在這次體現得很具體
+
 ### 2026-07-22｜Whisper Swift Speaker Diarization 移植：分析→spike→整合→實測
 - Completed:
   (1) 分析 Whisper Classic PRD 與 Whisper Swift PRD，發現 PRD 宣稱 Diarization「完成」但 `worker_entrypoint.py` 實際硬編碼 `available: false`；
