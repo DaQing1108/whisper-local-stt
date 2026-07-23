@@ -1,13 +1,23 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-23 22:19
-Phase: 即時轉錄真機走查發現的兩個新問題（逐字稿累加 + Standard 裝置復原），雙 handoff 並行處理中
-Working: 麥克風即時轉錄卡住問題（`task_3f032a70`）修復已合併（commit `894f50b`）並經真機驗證，過程中使用者實測又發現兩個獨立新問題：(1) 即時模式跨 chunk 逐字稿互相覆蓋——只顯示最後一個完成的 chunk，前面的消失且無時間戳；(2) Standard 模式錄音中被音訊裝置重新設定（藍牙協商）打斷後無自動復原、UI 無錯誤提示、錄成 0 frames 空檔案。問題 (1) 已透過 codex-handoff → codex-receive 完整跑完：`LiveRecordingController` 比照已驗證的 `MixedAudioRecordingController` 補上 `acceptCompletedChunk`/`ownsChunk` 累加機制，commit `c365021`，本機獨立重跑 3 次 `swift build`/`swift test`（169/169 穩定全過），逐 diff 核對 AC 與範圍邊界，push 完成；獨立驗證同時發現並修正了 handoff 文件裡一個過時的根因描述（`ContentView+Results.swift:244` 的 `transcriptText` computed property 誤判為顯示綁定來源，實際是死碼，真正綁定是 `transcriptDraft`）。問題 (2) 已產出 `HANDOFF_CODEX_MIC_DEVICE_RECOVERY.md` 交給另一個 Claude Code 帳號，執行中（`MicrophoneCaptureService.swift` 已有未提交改動）。
-Next action: 等問題 (2) 完成報告，跑 /codex-receive 獨立驗證後 push；問題 (1) 的 AC-6（真機測試跨 3+ chunk）需要使用者親自驗證
+Last checkpoint: 2026-07-23 22:26
+Phase: 即時轉錄真機走查發現的兩個新問題（逐字稿累加 + Standard 裝置復原）皆已修復並 push
+Working: 麥克風即時轉錄卡住問題（`task_3f032a70`）修復已合併（commit `894f50b`）並經真機驗證，過程中使用者實測又發現兩個獨立新問題，兩者都已透過 codex-handoff → codex-receive 修復完成：(1) 即時模式跨 chunk 逐字稿互相覆蓋，`LiveRecordingController` 補上 `acceptCompletedChunk`/`ownsChunk` 累加機制；(2) Standard 模式錄音中被音訊裝置重新設定（藍牙協商）打斷後無自動復原，`MicrophoneCaptureService` 補上裝置事件監聽與重啟復原（沿用同一 session，不分 chunk）。兩個任務並行執行時，因為同一個 worktree 有兩個 Claude Code session 同時跑 git 操作、共用同一個 git index，發生一次 commit 內容錯位（(2) 的實際程式碼被誤掃進 (1) 收尾時的一個 untrack-only commit `4301ecb`，該 commit 訊息因此跟實際內容不符；對方回報的 `f27670f` 實際上幾乎是空的）——用 `git blame`/`git diff` 逐一查證，確認沒有任何程式碼遺失、內容正確，已全部 push，不做 force-push 修正訊息（風險/效益不成比例，需使用者另外授權才會考慮）。
+Next action: 無進行中任務；問題 (1) 的 AC-6（真機測試跨 3+ chunk）、問題 (2) 的 AC-6（真機測試藍牙裝置協商中錄音）都待使用者驗證
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-07-23 22:26｜Standard 模式裝置復原修復（codex-handoff → codex-receive，含 commit 錯位排查）
+- Scope: 與上一則「即時模式逐字稿累加」同一輪真機走查發現的第二個獨立問題——log 證實 Standard 模式（單次錄音）錄音中若遇到音訊裝置重新設定（藍牙耳機協商），`AVAudioEngine` 會被 macOS 靜默停止且無人復原，導致整段錄音變成 0 frames 空檔案、UI 卻顯示「Completed」無任何錯誤。
+- Completed:
+  (1) 比對 `LiveRecordingController.swift` 既有、已驗證正常的 `AudioCaptureEventMonitoring`/`SystemAudioCaptureEventMonitor` 復原機制，確認 `MicrophoneCaptureService` 完全沒有這層，`/codex-handoff` 產出 `HANDOFF_CODEX_MIC_DEVICE_RECOVERY.md`，交給另一個 Claude Code 帳號並行執行（與問題 (1) 同時進行，兩份 handoff 文件互相標注不要碰對方檔案）
+  (2) 執行方在 `MicrophoneCaptureService.swift` 新增 `eventMonitor` 注入、`handleSystemEvent`（debounce + 僅 `.recording` 狀態處理）、復原策略採「重啟 backend、沿用同一 session」（不像 Live 模式那樣 finalize/開新 chunk，因為 Standard 模式是單一連續錄音），新增 3 個測試
+  (3) `/codex-receive` 獨立驗證時發現對方回報的 commit `f27670f` 實際 diff 只有 HANDOFF 文件、沒有程式碼——追查後確認是雙 session 共用 git index 造成的 race condition：我稍早 `git rm --cached` + `git commit` untrack HANDOFF 文件的那個動作（commit `4301ecb`），時間點恰好與對方 `git add` 自己的改動重疊，把對方尚未 commit 的 `MicrophoneCaptureService.swift`/測試檔案一起掃了進去。用 `git blame`（確認程式碼行的實際歸屬 commit）+ `rtk proxy git diff`（繞開本機 rtk wrapper 對 git 輸出的摘要化，取得未過濾的原始 diff）逐一查證，確認程式碼完整、正確，只是 commit 訊息跟內容對不上；`origin/whisper-swift` 已包含全部改動，不做 force-push 改寫歷史
+  (4) 逐項核對程式碼邏輯（debounce 正確、`machine.state.canStop` 正確過濾非錄音狀態、復原時重用同一個 `CaptureSession` 而非開新檔）與對方自報的 1 個 MEDIUM（backend 重啟瞬間有一小段真實音訊間隙，WAV header 無時間戳無法偵測，記錄為已知取捨非本次要解決）、2 個 LOW（皆為既有程式碼行為，非本次引入）
+- Verification: `swift build`/`swift test` 本機獨立重跑 3 次穩定 169/169 全過；新增測試斷言直接驗證 `backend.stopCount`/`startCount` 與重啟前後兩次 PCM 資料都落在同一個 finalize 後的檔案裡；AC-6 真機測試（錄音中觸發藍牙裝置協商）待使用者驗證
+- 沉澱：**兩個 Claude Code session 不應該在同一個 git worktree 同時執行 git 寫入操作**（add/commit/rm --cached 等）——即使雙方改動的原始碼檔案完全不重疊，共用的 git index 仍可能造成 commit 內容互相污染。下次需要真正並行的 codex-handoff 任務，應該考慮讓執行方在獨立的 worktree/clone 裡工作，而非共用同一個目錄。
+
 ### 2026-07-23 22:19｜即時模式逐字稿累加修復（codex-handoff → codex-receive）
 - Scope: 使用者真機測試前一個 job-stall watchdog 修復時，錄音跨越 4 個 15 秒 chunk，發現全部 chunk 都正確轉錄完成，但畫面逐字稿只顯示最後一個 chunk 內容——追根因確認 `LiveRecordingController` 從一開始就沒有像 `MixedAudioRecordingController` 那樣的跨 chunk 累加機制（`showLatestWorkerResultIfNeeded()` 沒有 `liveRecording.ownsChunk`/`acceptCompletedChunk` 這層，每個 live chunk 都落到 Standard 模式用的「單次結果覆蓋」fallback 分支）。同一輪真機測試也順便發現並排除了 Standard 模式空白錄音是另一個獨立根因（藍牙裝置重新協商打斷 `AVAudioEngine` 且無復原機制），兩者分別開 handoff。
 - Completed:
