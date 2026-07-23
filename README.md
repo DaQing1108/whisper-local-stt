@@ -1,13 +1,22 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-23 20:25
-Phase: 即時錄音幻覺/正確性收斂 — RMS 靜音預過濾（含 handoff/receive 修正）+ 簡轉繁 segments 修復；背景任務處理麥克風即時轉錄卡住問題
-Working: (1) system-audio/mixed-audio 即時錄音管線補上 RMS 靜音預過濾（`AudioChunkSilenceDetector.swift`），另一個 Claude Code 帳號 handoff 執行、本 session 用 `/codex-receive` 獨立驗證時抓到兩個違反鎖定 AC 的問題（fail-closed 而非 fail-open、靜音 chunk duration 用固定 rotationInterval 而非實測時長）並修復，168/168 swift test 全過，commit `1a6a2fb` 已 push；用真實錄音（`transcription-history.json`）驗證 AC-7 通過，安靜片段無幻覺文字、時間戳無偏移。(2) 發現並修復 `whisper_core.py` 的 `run_whisper()` 只轉換 `full_text` 沒轉換 `info["segments"]`，導致即時轉錄畫面（用 segments 組出來）忽簡忽繁，新增 `_segments_to_traditional()`，302/302 python test 全過，commit `9271f7b` 已 push。(3) 過程中發現純麥克風即時轉錄（`LiveRecordingController.swift`）Python worker 會卡住不回報完成事件，另開背景任務（`task_3f032a70`）處理，執行中，正在編輯同一個 worktree 的 `LiveRecordingController.swift`，導致本 session 的 app 重建一度撞到 build race（"input file was modified during the build"），已停手等待背景任務完成再重建。
-Next action: 等待背景任務 `task_3f032a70` 完成 → 重新打包安裝 app（worker 已是最新，只差 swift build）→ 確認麥克風卡住問題修復
+Last checkpoint: 2026-07-23 21:40
+Phase: 系統音訊／混音錄音模式合併（codex-handoff → codex-receive）
+Working: 麥克風即時轉錄卡住問題（`task_3f032a70`）修復已合併（commit `894f50b`，180 秒 job-stall watchdog）。接續合併「系統音訊」與「混音」兩個即時錄音模式：刪除 `SystemAudioRecordingController.swift`（291 行）與對應獨立 UI 入口，`MixedAudioRecordingController.start()` 新增 `includeMicrophone` 參數，麥克風權限從必要改為可選（拒絕/關閉時退化成純系統音訊，底層 `MixedAudioAccumulator.drain()` 原生支援），`AppSettingsStore` 新增持久化設定 `includeMicrophoneInMixedMode`（預設 true），`ContentView+CaptureActions.swift` 6 處重複 `switch audioMode` 全部收斂成單一 `.mixed` case，UI 新增「同時錄我的聲音」開關。另一個 Claude Code 帳號 handoff 執行、commit `543facd`；本 session 用 `/codex-receive` 獨立重跑 build/test/diff 比對（未發現上次 RMS 任務那類邏輯反轉或寫死值問題），163/163 swift test 全過，已 push。重新打包安裝 app（worker 未變動，只重簽 Swift binary），使用者真機驗證 AC-7（開關關閉/開啟兩種情況錄音轉錄）通過。
+Next action: 無進行中任務，等待下一個需求
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-07-23 21:40｜合併系統音訊／混音錄音模式（codex-handoff → codex-receive）
+- Scope: 使用者發現「系統音訊」與「混音」兩個獨立即時錄音模式功能高度重疊（UI 入口、`CaptureUIRules` 三模式互斥規則、`acceptFinalizedChunk`/`acceptCompletedChunk` 完成後處理邏輯都逐字重複），這次 session 稍早修 RMS 靜音預過濾 bug 時就因為要在兩個 controller 各改一次而增加維護成本，使用者確認選擇完整合併（非僅抽共用邏輯），用 `/codex-handoff` 交給另一個 Claude Code 帳號執行。
+- Completed:
+  (1) Explore 階段發現實際是四模式互斥（standard/live/system/mixed），`ContentView+CaptureActions.swift` 有 6 處重複 `switch audioMode` 語句，Plan 鎖定 AC-1～AC-7 後產出 `HANDOFF_CODEX_MERGE_SYSTEM_MIXED_AUDIO.md`
+  (2) 執行方刪除 `SystemAudioRecordingController.swift` 整個檔案，`MixedAudioRecordingController.start(outputURL:includeMicrophone:)` 新增可選麥克風參數，`AppSettingsStore.includeMicrophoneInMixedMode` 持久化設定，`WhisperApp.swift`/`ContentView.swift`/`ContentView+Capture.swift`/`ContentView+Results.swift` 環境注入與完成後處理邏輯合併，`CaptureUIRulesTests.swift`/`MixedAudioRecordingControllerTests.swift` 測試整併，commit `543facd`（本機 commit，未 push，依 handoff 分工約定留給驗收方）
+  (3) `/codex-receive` 獨立驗證：本機重跑 `swift build`（成功）、`swift test`（163/163）、`git grep .system 殘留`（無輸出）；逐檔重讀 diff 確認 `MixedAudioRecordingController` 的 `includeMicrophone` 分支邏輯正確（非反邏輯）、AC-4/AC-5 有對應測試且斷言方向正確、`WhisperApp.swift` 環境注入清理乾淨無殘留依賴，未發現上次 RMS 任務那類「fail-closed 而非 fail-open」「寫死值而非實測值」問題，push 到 `origin/whisper-swift`
+- Verification: `swift build`/`swift test` 163/163 全過（本機獨立重跑，非僅信任執行方回報）；重新打包安裝 `~/Applications/Whisper Swift.app`（worker 未變動，跳過 PyInstaller 重建，僅重簽 Swift binary），使用者真機測試 AC-7（切換「同時錄我的聲音」開關關閉/開啟兩種情況）確認通過
+- 附註：worktree 根目錄有 3 個無關的舊 HANDOFF 文件殘留（Capture UI 重構，7/23 早上已 shipped），非本次任務產物
+
 ### 2026-07-23 20:25｜即時錄音幻覺/正確性收斂：RMS 靜音預過濾 + 簡轉繁 segments 修復
 - Scope: 延續稍早的 hallucination filter 修復（commit `57941b7`），繼續處理即時錄音管線的兩個結構性問題：15 秒切片邊界效應調查（結論：原假設不成立，production 既有的整段文字幻覺檢查已能正確攔截）、進一步發現真正的問題是近靜音 chunk 完全沒有預過濾就送進 Whisper。
 - Completed:
