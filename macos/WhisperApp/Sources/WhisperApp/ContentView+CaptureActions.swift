@@ -214,8 +214,7 @@ extension ContentView {
         mixedAudioHistoryEntryID = nil
         Task {
             do {
-                let url = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("mixed-audio-\(UUID()).wav")
+                let url = try MixedAudioRecordingController.makeSessionOutputURL()
                 try await mixedAudioRecording.start(outputURL: url)
                 captureStartedAt = Date()
                 errorMessage = nil

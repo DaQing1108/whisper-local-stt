@@ -392,4 +392,10 @@ final class MixedAudioRecordingController {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent("mixed-audio-chunk-\(UUID()).wav")
     }
+
+    nonisolated static func makeSessionOutputURL() throws -> URL {
+        let chunkURL = try makeChunkOutputURL()
+        return chunkURL.deletingLastPathComponent()
+            .appendingPathComponent("mixed-audio-session-\(UUID()).wav")
+    }
 }

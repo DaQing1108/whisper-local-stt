@@ -19,6 +19,10 @@ struct WorkerLaunchConfiguration: Sendable {
     let executableURL: URL
     let arguments: [String]
     let workingDirectory: URL
+    /// Layered on top of the inherited environment before credential injection;
+    /// used by tests to isolate HOME (and thus the Worker's model cache paths)
+    /// from the real machine's state without touching credential-injection logic.
+    var environmentOverrides: [String: String] = [:]
 
     static func discover(
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -137,11 +141,15 @@ final class WorkerSupervisor {
     private var modelRequestID: String?
     private var diarizationRequestID: String?
 
-    func start(pythonURL: URL, workerURL: URL, workingDirectory: URL) throws {
+    func start(
+        pythonURL: URL, workerURL: URL, workingDirectory: URL,
+        environmentOverrides: [String: String] = [:]
+    ) throws {
         try start(configuration: WorkerLaunchConfiguration(
             executableURL: pythonURL,
             arguments: ["-u", workerURL.path],
-            workingDirectory: workingDirectory
+            workingDirectory: workingDirectory,
+            environmentOverrides: environmentOverrides
         ))
     }
 
@@ -175,6 +183,9 @@ final class WorkerSupervisor {
         // .gemini case); the Worker also accepts GEMINI_API_KEY but there's no way for a user
         // to configure one in this app yet, so it's intentionally not forwarded here.
         var childEnvironment = ProcessInfo.processInfo.environment
+        for (key, value) in configuration.environmentOverrides {
+            childEnvironment[key] = value
+        }
         var punctuationEnabled = false
         if let anthropicKey = llmCredentialLoader(.anthropic), !anthropicKey.isEmpty {
             childEnvironment["ANTHROPIC_API_KEY"] = anthropicKey

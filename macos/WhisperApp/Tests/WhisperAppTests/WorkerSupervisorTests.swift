@@ -14,11 +14,16 @@ struct WorkerSupervisorTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let supervisor = WorkerSupervisor()
+        let isolatedHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("worker-supervisor-test-home-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: isolatedHome, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: isolatedHome) }
 
         try supervisor.start(
             pythonURL: URL(fileURLWithPath: "/usr/bin/python3"),
             workerURL: repository.appendingPathComponent("worker_entrypoint.py"),
-            workingDirectory: repository
+            workingDirectory: repository,
+            environmentOverrides: ["HOME": isolatedHome.path]
         )
 
         try await waitUntil { supervisor.state == .ready }
