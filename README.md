@@ -1,13 +1,20 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-23 12:10
-Phase: Whisper Swift Capture 分頁 UI/UX 重構 — 真機走查發現的 3 個既有缺陷已修復
-Working: 真機走查(codex-receive 之後)發現並修復 3 個問題：①「清空」按鈕改名「清空文字」，明確只清編輯區草稿、不影響段落列表(播放/匯出用的原始 ASR 結果)；②開始任何新錄音時呼叫新的 `resetWorkspaceForNewCapture()`，清掉上一筆結果殘留的逐字稿與段落列表；③修正 `CaptureUIRules.stopIsEnabled` 漏掉 `.mixed` 模式的既有缺陷 — 混音模式 15 秒分段轉錄期間 worker 任務進行中會鎖死停止鍵，導致實質上無法停止錄音，現已比照 `.live`/`.system` 排除在鎖定規則外。`swift build`／`swift test` 155/155、Python `pytest` 293/293 全綠，使用者已在真實簽章版 App 上逐項複驗三個修正皆正常
+Last checkpoint: 2026-07-23 12:50
+Phase: Whisper Swift 講者辨識新增進度提示（今晚第 4 個真機走查修復）
+Working: 確認講者辨識功能本身正常（直接測後端 diarization_service.diarize() 成功，僅耗時 48–60 秒／段約 1:43 錄音），既有 UI 完全沒有處理中提示、按鈕變灰後畫面無回饋，容易被誤判為壞掉。已在 `ContentView+Results.swift` 新增 `worker.diarizationStatus == "processing"` 時顯示的 ProgressView + 提示文字，真機驗證：辨識中顯示提示、完成後自動消失並正確呈現 `[Speaker X]` 結果。`swift build`／`swift test` 155/155、Python `pytest` 293/293 全綠
 Next action: 無立即待辦
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-07-23 12:50｜講者辨識新增處理中進度提示
+- Scope: 使用者詢問講者辨識支援哪些錄音模式後，追問「辨識完後如何看結果」時發現畫面沒有任何反應，逐步排查後確認功能本身正常、純粹缺進度提示。追加修法：`ContentView+Results.swift` 在 `worker.diarizationStatus == "processing"` 時顯示 `ProgressView` + 「講者辨識進行中，可能需要數十秒…」文字，緊鄰既有的失敗訊息顯示邏輯之前。
+- Verification: `swift build`／`swift test`（155/155）；重新打包安裝後用 computer-use 直接操作真實 App，點擊「辨識講者」立即截圖確認提示出現，等滿 60 秒後確認提示消失且逐字稿正確覆蓋為 `[Speaker A]`～`[Speaker E]` 格式；push 前 pre-push hook 的 Python `pytest` 293/293 全綠。
+- 排查過程：先用 computer-use 直接點擊測試，兩次都只等 5–15 秒就判斷「沒反應」，後來直接呼叫 Python 端 `diarization_service.diarize()` 才發現這段錄音實際要 48 秒，證實是等待時間不夠、不是功能壞掉；另外也懷疑過本 session 稍早多次 `pkill worker_entrypoint.py` 是否讓當時執行中的 App 連線到殘留的 worker，因此重新完整重啟 App 排除干擾後才做最終驗證。
+- 附註：本次呼叫 `/discipline-loop`（`engineering-discipline-loop` skill）連續三次回報 `Unknown skill`，非先前 `/save-session` 那種重試後自癒的暫時性問題；比照今晚稍早三個修復的做法，手動走完等效的 Explore/Change/Test/Verify/Ship 紀律完成本次修復。
+
+
 ### 2026-07-23 12:10｜真機走查修復：清空按鈕語意、新錄音殘留內容、混音模式停止鍵鎖死
 - Scope: 使用者在真實 App 上實際錄一場混音會議時發現三個問題，逐一追根因後修復：
   1. `ContentView+Results.swift` 的「清空」按鈕改名「清空文字」——原按鈕只清 `transcriptDraft`（可編輯草稿），不影響 `entry.segments`（播放跳轉、SRT 匯出用的原始辨識結果），舊名稱讓使用者誤以為連段落列表都會清掉。
