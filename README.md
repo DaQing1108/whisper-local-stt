@@ -1,13 +1,22 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-23 21:40
-Phase: 系統音訊／混音錄音模式合併（codex-handoff → codex-receive）
-Working: 麥克風即時轉錄卡住問題（`task_3f032a70`）修復已合併（commit `894f50b`，180 秒 job-stall watchdog）。接續合併「系統音訊」與「混音」兩個即時錄音模式：刪除 `SystemAudioRecordingController.swift`（291 行）與對應獨立 UI 入口，`MixedAudioRecordingController.start()` 新增 `includeMicrophone` 參數，麥克風權限從必要改為可選（拒絕/關閉時退化成純系統音訊，底層 `MixedAudioAccumulator.drain()` 原生支援），`AppSettingsStore` 新增持久化設定 `includeMicrophoneInMixedMode`（預設 true），`ContentView+CaptureActions.swift` 6 處重複 `switch audioMode` 全部收斂成單一 `.mixed` case，UI 新增「同時錄我的聲音」開關。另一個 Claude Code 帳號 handoff 執行、commit `543facd`；本 session 用 `/codex-receive` 獨立重跑 build/test/diff 比對（未發現上次 RMS 任務那類邏輯反轉或寫死值問題），163/163 swift test 全過，已 push。重新打包安裝 app（worker 未變動，只重簽 Swift binary），使用者真機驗證 AC-7（開關關閉/開啟兩種情況錄音轉錄）通過。
-Next action: 無進行中任務，等待下一個需求
+Last checkpoint: 2026-07-23 22:19
+Phase: 即時轉錄真機走查發現的兩個新問題（逐字稿累加 + Standard 裝置復原），雙 handoff 並行處理中
+Working: 麥克風即時轉錄卡住問題（`task_3f032a70`）修復已合併（commit `894f50b`）並經真機驗證，過程中使用者實測又發現兩個獨立新問題：(1) 即時模式跨 chunk 逐字稿互相覆蓋——只顯示最後一個完成的 chunk，前面的消失且無時間戳；(2) Standard 模式錄音中被音訊裝置重新設定（藍牙協商）打斷後無自動復原、UI 無錯誤提示、錄成 0 frames 空檔案。問題 (1) 已透過 codex-handoff → codex-receive 完整跑完：`LiveRecordingController` 比照已驗證的 `MixedAudioRecordingController` 補上 `acceptCompletedChunk`/`ownsChunk` 累加機制，commit `c365021`，本機獨立重跑 3 次 `swift build`/`swift test`（169/169 穩定全過），逐 diff 核對 AC 與範圍邊界，push 完成；獨立驗證同時發現並修正了 handoff 文件裡一個過時的根因描述（`ContentView+Results.swift:244` 的 `transcriptText` computed property 誤判為顯示綁定來源，實際是死碼，真正綁定是 `transcriptDraft`）。問題 (2) 已產出 `HANDOFF_CODEX_MIC_DEVICE_RECOVERY.md` 交給另一個 Claude Code 帳號，執行中（`MicrophoneCaptureService.swift` 已有未提交改動）。
+Next action: 等問題 (2) 完成報告，跑 /codex-receive 獨立驗證後 push；問題 (1) 的 AC-6（真機測試跨 3+ chunk）需要使用者親自驗證
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-07-23 22:19｜即時模式逐字稿累加修復（codex-handoff → codex-receive）
+- Scope: 使用者真機測試前一個 job-stall watchdog 修復時，錄音跨越 4 個 15 秒 chunk，發現全部 chunk 都正確轉錄完成，但畫面逐字稿只顯示最後一個 chunk 內容——追根因確認 `LiveRecordingController` 從一開始就沒有像 `MixedAudioRecordingController` 那樣的跨 chunk 累加機制（`showLatestWorkerResultIfNeeded()` 沒有 `liveRecording.ownsChunk`/`acceptCompletedChunk` 這層，每個 live chunk 都落到 Standard 模式用的「單次結果覆蓋」fallback 分支）。同一輪真機測試也順便發現並排除了 Standard 模式空白錄音是另一個獨立根因（藍牙裝置重新協商打斷 `AVAudioEngine` 且無復原機制），兩者分別開 handoff。
+- Completed:
+  (1) 逐行追蹤 `ContentView+Results.swift`/`WorkerSupervisor.swift`/`MixedAudioRecordingController.swift` 確認根因與可直接參考的既有正確實作，`/codex-handoff` 產出 `HANDOFF_CODEX_LIVE_TRANSCRIPT_ACCUMULATION.md`，交給另一個 Claude Code 帳號執行
+  (2) 執行方在 `LiveRecordingController.swift` 移植 `acceptCompletedChunk`/`ownsChunk`（含去重、時間戳 offset 累加）、`WhisperApp.swift` 修正 closure 捕獲時機讓 `liveRecording` 也能被完成處理 handler 排除、`ContentView+Results.swift` 新增對稱的 live 分支並修正一個過程中發現的 HIGH（history entry 的 `audioPath` 若跟著每個 chunk 漂移會讓非首段 segment 的 seek 播放錯誤音檔，改為固定釘住第一個 chunk），新增 3 個測試，commit `c365021`（本機 commit，未 push）
+  (3) `/codex-receive` 獨立驗證：發現對方沒有依約產出 `HANDOFF_CLAUDE_*_VERIFICATION.md`（流程瑕疵，已記錄但不影響本次是否可 push 的判斷），改為直接讀 commit diff 逐項核對；確認「`audioPath` 漂移」修復邏輯正確（`TranscriptionHistoryStore.updateResult` 的 `audioURL` 參數省略時會保留原值）、確認執行方指出「舊 handoff 文件對 `transcriptText` computed property 的根因描述已過時、實際是死碼」這個自我修正屬實（全 repo grep 無其他引用）；本機重跑 3 次 build/test 全過；額外抓到執行方誤將 `HANDOFF_CODEX_*.md` commit 進 repo，另開 chore commit untrack（commit `4301ecb`）；push 完成
+- Verification: `swift build`/`swift test` 本機獨立重跑 3 次穩定 169/169 全過（非僅信任回報）；AC-1～AC-4 自動驗證通過，AC-5（Standard 模式不受影響）採程式碼追蹤驗證（此 codebase 對 ContentView extension method 本來就沒有測試框架，非本次新增缺口）；AC-6 真機測試待使用者驗證
+- 沉澱：這是本 session 第二次獨立驗證抓到「執行方回報的根因分析部分過時/錯誤」而非只驗證程式碼本身正確性——`/codex-receive` 的價值不只是重跑測試，也包含重新質疑對方交出的分析內容是否仍然成立
+
 ### 2026-07-23 21:40｜合併系統音訊／混音錄音模式（codex-handoff → codex-receive）
 - Scope: 使用者發現「系統音訊」與「混音」兩個獨立即時錄音模式功能高度重疊（UI 入口、`CaptureUIRules` 三模式互斥規則、`acceptFinalizedChunk`/`acceptCompletedChunk` 完成後處理邏輯都逐字重複），這次 session 稍早修 RMS 靜音預過濾 bug 時就因為要在兩個 controller 各改一次而增加維護成本，使用者確認選擇完整合併（非僅抽共用邏輯），用 `/codex-handoff` 交給另一個 Claude Code 帳號執行。
 - Completed:
