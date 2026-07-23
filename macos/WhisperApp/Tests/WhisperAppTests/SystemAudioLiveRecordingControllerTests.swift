@@ -108,6 +108,89 @@ struct SystemAudioLiveRecordingControllerTests {
     }
 
     @Test
+    func entireSessionSilentStillFinalizesSessionWithEmptyTranscript() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("system-live-all-silent-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let urls = (1...2).map { directory.appendingPathComponent("chunk-\($0).wav") }
+        let sequence = SystemLiveURLSequence(urls)
+        let permission = SystemAudioPermissionController(provider: SystemLivePermissionProvider())
+        permission.refresh()
+        let backend = SystemLiveCaptureBackend()
+        let scheduler = SystemLiveScheduler()
+        let transcriber = SystemLiveTranscriber()
+        let controller = SystemAudioRecordingController(
+            lifecycle: SystemAudioCaptureLifecycleController(permission: permission, backend: backend),
+            backend: backend, transcriber: transcriber, scheduler: scheduler,
+            outputURLFactory: { try sequence.next() }
+        )
+
+        try await controller.start()
+        var quietSamples = Data()
+        for _ in 0..<50 {
+            var value: Int16 = 5
+            withUnsafeBytes(of: &value) { quietSamples.append(contentsOf: $0) }
+        }
+        backend.emitPCM(quietSamples)
+        scheduler.fire()
+        #expect(transcriber.submittedURLs.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: urls[0].path))
+
+        let returned = try await controller.stopAndTranscribe(modelName: "base")
+        #expect(returned == controller.sessionFinalizedURL)
+        #expect(FileManager.default.fileExists(atPath: returned.path))
+        #expect(controller.transcriptText.isEmpty)
+        #expect(controller.transcriptDurationSeconds == 15)
+        #expect(transcriber.submittedURLs.isEmpty)
+    }
+
+    @Test
+    func silentChunkIsSkippedButDurationStillAdvances() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("system-live-silent-skip-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let urls = (1...3).map { directory.appendingPathComponent("chunk-\($0).wav") }
+        let sequence = SystemLiveURLSequence(urls)
+        let permission = SystemAudioPermissionController(provider: SystemLivePermissionProvider())
+        permission.refresh()
+        let backend = SystemLiveCaptureBackend()
+        let scheduler = SystemLiveScheduler()
+        let transcriber = SystemLiveTranscriber()
+        let controller = SystemAudioRecordingController(
+            lifecycle: SystemAudioCaptureLifecycleController(permission: permission, backend: backend),
+            backend: backend, transcriber: transcriber, scheduler: scheduler,
+            outputURLFactory: { try sequence.next() }
+        )
+
+        try await controller.start()
+
+        var quietSamples = Data()
+        for _ in 0..<50 {
+            var value: Int16 = 5
+            withUnsafeBytes(of: &value) { quietSamples.append(contentsOf: $0) }
+        }
+        backend.emitPCM(quietSamples)
+        scheduler.fire()
+
+        #expect(transcriber.submittedURLs.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: urls[0].path))
+        #expect(controller.transcriptDurationSeconds == 15)
+
+        var loudSamples = Data()
+        for _ in 0..<50 {
+            var value: Int16 = 12_000
+            withUnsafeBytes(of: &value) { loudSamples.append(contentsOf: $0) }
+        }
+        backend.emitPCM(loudSamples)
+        scheduler.fire()
+        transcriber.completeActiveJob()
+
+        #expect(transcriber.submittedURLs == [urls[1]])
+    }
+
+    @Test
     func rotationFailureStopsCaptureAndFinalizesCurrentAudio() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("system-live-rotate-failure-\(UUID())", isDirectory: true)
@@ -160,7 +243,7 @@ struct SystemAudioLiveRecordingControllerTests {
         )
 
         try await controller.start(modelName: "large-v3", language: "zh")
-        backend.emitPCM(Data([0x01]))
+        backend.emitPCM(Data([0xff, 0x7f]))
         scheduler.fire()
 
         #expect(transcriber.submittedModelNames == ["large-v3"])
@@ -170,7 +253,7 @@ struct SystemAudioLiveRecordingControllerTests {
         #expect(controller.submissionQueue.pendingURLs == [urls[0]])
         #expect(controller.submissionQueue.errorMessage?.contains("disk model failure") == true)
 
-        backend.emitPCM(Data([0x02]))
+        backend.emitPCM(Data([0x00, 0x7f]))
         scheduler.fire()
         #expect(transcriber.submittedURLs == [urls[0]])
         #expect(controller.submissionQueue.pendingURLs == [urls[0], urls[1]])
@@ -198,9 +281,9 @@ struct SystemAudioLiveRecordingControllerTests {
         )
 
         try await controller.start()
-        backend.emitPCM(Data([0x01]))
+        backend.emitPCM(Data([0xff, 0x7f]))
         scheduler.fire()
-        backend.emitPCM(Data([0x02]))
+        backend.emitPCM(Data([0x00, 0x7f]))
         _ = try await controller.stop()
 
         #expect(controller.acceptCompletedChunk(

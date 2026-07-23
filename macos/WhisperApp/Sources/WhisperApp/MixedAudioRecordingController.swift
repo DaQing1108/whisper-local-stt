@@ -326,6 +326,11 @@ final class MixedAudioRecordingController {
     private func acceptFinalizedChunk(_ url: URL) {
         lastFinalizedURL = url
         finalizedChunkURLs.append(url)
+        guard !AudioChunkSilenceDetector.isSilent(contentsOf: url) else {
+            try? FileManager.default.removeItem(at: url)
+            _ = acceptCompletedChunk(url, text: "", durationSeconds: flushInterval)
+            return
+        }
         submissionQueue.enqueue(url)
     }
 

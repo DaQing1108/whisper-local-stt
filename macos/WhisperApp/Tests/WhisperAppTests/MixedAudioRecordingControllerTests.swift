@@ -137,8 +137,8 @@ struct MixedAudioRecordingControllerTests {
         #expect(transcriber.submittedURLs.count == 1)
         #expect(transcriber.submittedURLs.first == controller.finalizedChunkURLs.first)
 
-        mic.emit([500, 900])
-        system.emit([100, 200])
+        mic.emit([5000, 9000])
+        system.emit([1000, 2000])
         scheduler.fire()
         // Second chunk queues behind the first, which is still in flight.
         #expect(controller.finalizedChunkURLs.count == 2)
@@ -157,6 +157,45 @@ struct MixedAudioRecordingControllerTests {
         #expect(system.stopCount == 1)
         try? FileManager.default.removeItem(at: url)
         for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+    }
+
+    @Test
+    func silentMixedChunkIsSkippedButDurationStillAdvances() async throws {
+        let mic = MixedMicrophoneBackend()
+        let system = MixedSystemBackend()
+        let scheduler = MixedScheduler()
+        let transcriber = MixedTranscriber()
+        let controller = MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: true),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic,
+            systemBackend: system,
+            scheduler: scheduler,
+            transcriber: transcriber,
+            flushInterval: 15
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-silent-\(UUID()).wav")
+        try await controller.start(outputURL: url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+        }
+
+        mic.emit(Array(repeating: Int16(5), count: 50))
+        system.emit(Array(repeating: Int16(5), count: 50))
+        scheduler.fire()
+
+        #expect(controller.finalizedChunkURLs.count == 1)
+        #expect(transcriber.submittedURLs.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: controller.finalizedChunkURLs[0].path))
+        #expect(controller.transcriptDurationSeconds == 15)
+
+        mic.emit(Array(repeating: Int16(12_000), count: 50))
+        system.emit(Array(repeating: Int16(12_000), count: 50))
+        scheduler.fire()
+        transcriber.completeActiveJob()
+
+        #expect(transcriber.submittedURLs == [controller.finalizedChunkURLs[1]])
     }
 
     @Test
@@ -189,8 +228,8 @@ struct MixedAudioRecordingControllerTests {
         #expect(controller.transcriptDurationSeconds == 4)
         #expect(controller.transcriptText.contains("第一段"))
 
-        mic.emit([200, 400])
-        system.emit([100, 200])
+        mic.emit([2000, 4000])
+        system.emit([1000, 2000])
         scheduler.fire()
         let secondChunkURL = controller.finalizedChunkURLs[1]
         #expect(controller.acceptCompletedChunk(
