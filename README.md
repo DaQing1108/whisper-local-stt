@@ -1,13 +1,21 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-23 22:26
-Phase: 即時轉錄真機走查發現的兩個新問題（逐字稿累加 + Standard 裝置復原）皆已修復並 push
-Working: 麥克風即時轉錄卡住問題（`task_3f032a70`）修復已合併（commit `894f50b`）並經真機驗證，過程中使用者實測又發現兩個獨立新問題，兩者都已透過 codex-handoff → codex-receive 修復完成：(1) 即時模式跨 chunk 逐字稿互相覆蓋，`LiveRecordingController` 補上 `acceptCompletedChunk`/`ownsChunk` 累加機制；(2) Standard 模式錄音中被音訊裝置重新設定（藍牙協商）打斷後無自動復原，`MicrophoneCaptureService` 補上裝置事件監聽與重啟復原（沿用同一 session，不分 chunk）。兩個任務並行執行時，因為同一個 worktree 有兩個 Claude Code session 同時跑 git 操作、共用同一個 git index，發生一次 commit 內容錯位（(2) 的實際程式碼被誤掃進 (1) 收尾時的一個 untrack-only commit `4301ecb`，該 commit 訊息因此跟實際內容不符；對方回報的 `f27670f` 實際上幾乎是空的）——用 `git blame`/`git diff` 逐一查證，確認沒有任何程式碼遺失、內容正確，已全部 push，不做 force-push 修正訊息（風險/效益不成比例，需使用者另外授權才會考慮）。
-Next action: 無進行中任務；問題 (1) 的 AC-6（真機測試跨 3+ chunk）、問題 (2) 的 AC-6（真機測試藍牙裝置協商中錄音）都待使用者驗證
+Last checkpoint: 2026-07-23 23:03
+Phase: 今日四項修復（watchdog / System-Mixed 合併 / 逐字稿累加 / 裝置復原）完成整體 review，版號 bump 至 0.2.2 並重新打包安裝；一項死碼清理已拆成背景任務另開 session 處理中
+Working: 延續前次 checkpoint，本輪新增：(1) 版號 0.2.1 → 0.2.2（commit `72a6d25`，理由是純 bug fix/整併、無新增能力，比照既有 patch bump 慣例）(2) 重新打包安裝 `~/Applications/Whisper Swift.app` 時，過程中踩到一個新的、跟既有「iCloud 同步造成 quarantine」不同的失敗模式：`codesign --verify --deep --strict` 回報 `com.apple.FinderInfo` xattr 不被允許（出現在 app bundle 根目錄與內嵌的 `Python3.framework`），導致簽名驗證失敗、整個 `.app` 一度從 `~/Applications` 消失（懷疑跟 iCloud 對 `~/Documents` 底下 `dist/` 資料夾的同步/衝突處理有關，過程中甚至在 `dist/` 看到一個 `Contents 2/` 的衝突副本資料夾）；用 `xattr -d com.apple.FinderInfo` 手動清除兩個位置後 `codesign --verify` 轉為通過，重新複製安裝成功。(3) 對整個 `ba7bffa..HEAD` 範圍（今日 4 項改動 + 版號 bump）跑了一次跨改動整體 code review（獨立 agent），聚焦單一改動審查看不到的交互風險（`WhisperApp.swift` 合併後的 `ownsChunk` guard、`ContentView+Results.swift` 分支互斥性、`SystemAudioCaptureEventMonitor` 共用狀態風險、`AudioInputMode` 殘留引用），結論 APPROVE、0 CRITICAL/HIGH，本機重新獨立跑 build/test 169/169 全過；唯一發現的 1 個 MEDIUM（System/Mixed 合併後 `SystemAudioCaptureLifecycleController` 已無 production 呼叫端、僅剩自己的測試檔案在用）已拆成背景任務（`task_941fc369`），使用者已在獨立 session 啟動處理中，不在本次範圍。
+Next action: 等背景任務 `task_941fc369`（死碼清理）完成回報；使用者驗證重新安裝後的 App 版號顯示是否為 0.2.2；問題 (1)/(2) 的 AC-6（即時模式跨 chunk 逐字稿、Standard 模式藍牙裝置協商中錄音）待真機驗證
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-07-23 23:03｜整體收尾 review + 版號 bump + 打包踩坑（FinderInfo xattr）
+- Scope: 前兩則 checkpoint 完成的 4 項修復（watchdog、System/Mixed 合併、逐字稿累加、裝置復原）已個別驗證並 push，這一輪做收尾動作：版號 bump、重新打包安裝供使用者真機驗證、對整體 diff 做一次跨改動 review。
+- Completed:
+  (1) 版號 0.2.1 → 0.2.2，`Info.plist` 唯一改動點，commit `72a6d25`，已 push
+  (2) 執行 `scripts/build_swiftui_app.sh` 打包時首次遇到 `codesign --verify --deep --strict` 因 `com.apple.FinderInfo` xattr 失敗（不同於既有文件記錄的 iCloud quarantine 問題），且 `dist/Whisper Swift.app` 一度從 `~/Applications` 消失、`dist/` 內出現疑似 iCloud 衝突副本的 `Contents 2/` 資料夾；用 `xattr -d com.apple.FinderInfo` 分別清除 app 根目錄與內嵌 `Python3.framework` 兩處後重新 `codesign --verify` 通過，重新複製安裝到 `~/Applications` 成功；這次刻意不用 `open` 指令自動啟動（文件明確要求手動 Finder 雙擊 + 系統設定核准），改請使用者自行操作
+  (3) 對 `ba7bffa..HEAD`（今日全部改動）跑跨改動整體 review：確認 `WhisperApp.swift` 合併後的雙重 `ownsChunk` guard 完整無漏、`ContentView+Results.swift` 的 mixed/live 分支互斥、`SystemAudioCaptureEventMonitor` 無共用可變狀態風險、`AudioInputMode`/`.system` 殘留引用全域 grep 為零；本機重新獨立跑 build/test 169/169 全過；發現 1 個 MEDIUM（`SystemAudioCaptureLifecycleController` 合併後已是死碼），拆成背景任務 `task_941fc369` 交給使用者另開的獨立 session 處理，不佔用本次範圍
+- Verification: `swift build`/`swift test` 獨立 review agent 親自重跑確認 169/169；`codesign --verify --deep --strict` 對重新安裝後的 `~/Applications/Whisper Swift.app` 確認 valid on disk；版號顯示待使用者重新開啟 App 後親自確認
+- 沉澱：CLAUDE.md 現有的「App 從 ~/Applications 消失」診斷樹只記錄了 iCloud quarantine 這一種根因，這次遇到的 `com.apple.FinderInfo` xattr 是同一個症狀下的另一個獨立成因，值得之後補充進診斷樹（本次先記錄在這裡，尚未寫回 CLAUDE.md，需要使用者確認要不要正式收錄）
 ### 2026-07-23 22:26｜Standard 模式裝置復原修復（codex-handoff → codex-receive，含 commit 錯位排查）
 - Scope: 與上一則「即時模式逐字稿累加」同一輪真機走查發現的第二個獨立問題——log 證實 Standard 模式（單次錄音）錄音中若遇到音訊裝置重新設定（藍牙耳機協商），`AVAudioEngine` 會被 macOS 靜默停止且無人復原，導致整段錄音變成 0 frames 空檔案、UI 卻顯示「Completed」無任何錯誤。
 - Completed:
