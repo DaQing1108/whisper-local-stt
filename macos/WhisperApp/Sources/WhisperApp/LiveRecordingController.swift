@@ -27,6 +27,7 @@ protocol LiveAudioTranscribing: AudioTranscribing {
         _ observer: @escaping @MainActor @Sendable (WorkerState) -> Void
     ) -> UUID
     func removeObserver(_ id: UUID)
+    func cancel() throws
 }
 
 extension WorkerSupervisor: LiveAudioTranscribing {}
@@ -109,16 +110,22 @@ final class OrderedChunkSubmissionQueue {
     private let transcriber: any LiveAudioTranscribing
     private var isPausedAfterFailure = false
     var isWorkerReady: Bool { transcriber.state == .ready }
+    /// Guards against a Worker job that accepts a chunk but never emits a terminal event
+    /// (process alive, job hung) — without this, activeURL never clears and the queue stalls forever.
+    private let jobStallTimeout: TimeInterval
+    private var jobStallWatchdog: Task<Void, Never>?
 
     init(
         transcriber: any LiveAudioTranscribing, modelName: String,
-        language: String? = nil, domain: String = "general", extraTerms: String = ""
+        language: String? = nil, domain: String = "general", extraTerms: String = "",
+        jobStallTimeout: TimeInterval = 180
     ) {
         self.transcriber = transcriber
         self.modelName = modelName
         self.language = language
         self.domain = domain
         self.extraTerms = extraTerms
+        self.jobStallTimeout = jobStallTimeout
         _ = transcriber.addTerminalObserver { [weak self] requestID, status in
             self?.jobDidReachTerminal(requestID: requestID, status: status)
         }
@@ -151,6 +158,7 @@ final class OrderedChunkSubmissionQueue {
             )
             activeURL = next
             errorMessage = nil
+            scheduleJobStallWatchdog(for: activeRequestID)
         } catch {
             pendingURLs.insert(next, at: 0)
             isPausedAfterFailure = true
@@ -159,8 +167,28 @@ final class OrderedChunkSubmissionQueue {
         }
     }
 
+    private func scheduleJobStallWatchdog(for requestID: String?) {
+        jobStallWatchdog?.cancel()
+        guard let requestID else { jobStallWatchdog = nil; return }
+        jobStallWatchdog = Task { [weak self, jobStallTimeout] in
+            try? await Task.sleep(for: .seconds(jobStallTimeout))
+            guard !Task.isCancelled else { return }
+            self?.handleJobStall(requestID: requestID)
+        }
+    }
+
+    private func handleJobStall(requestID: String) {
+        guard requestID == activeRequestID else { return }
+        // A terminal event racing this cancel() is harmless: it will carry a different,
+        // untracked requestID (WorkerSupervisor.cancel() sends its own), so the guards in
+        // jobDidReachTerminal/jobWasLost above simply won't match it.
+        try? transcriber.cancel()
+    }
+
     private func jobDidReachTerminal(requestID: String?, status: String) {
         guard requestID == activeRequestID else { return }
+        jobStallWatchdog?.cancel()
+        jobStallWatchdog = nil
         guard status == "Completed" else {
             if let activeURL { pendingURLs.insert(activeURL, at: 0) }
             activeURL = nil
@@ -180,6 +208,8 @@ final class OrderedChunkSubmissionQueue {
 
     private func jobWasLost(requestID: String) {
         guard requestID == activeRequestID, let activeURL else { return }
+        jobStallWatchdog?.cancel()
+        jobStallWatchdog = nil
         pendingURLs.insert(activeURL, at: 0)
         self.activeURL = nil
         activeRequestID = nil
@@ -236,6 +266,7 @@ final class LiveRecordingController {
         transcriber: any LiveAudioTranscribing,
         rotationInterval: TimeInterval = 15,
         modelName: String = "base",
+        jobStallTimeout: TimeInterval = 180,
         outputURLFactory: @escaping @Sendable () throws -> URL = {
             try LiveRecordingController.makeOutputURL()
         }
@@ -246,7 +277,9 @@ final class LiveRecordingController {
         self.eventMonitor = eventMonitor
         self.rotationInterval = rotationInterval
         self.outputURLFactory = outputURLFactory
-        submissionQueue = OrderedChunkSubmissionQueue(transcriber: transcriber, modelName: modelName)
+        submissionQueue = OrderedChunkSubmissionQueue(
+            transcriber: transcriber, modelName: modelName, jobStallTimeout: jobStallTimeout
+        )
         submissionQueue.queueDrainedHandler = { [weak self] in
             if self?.state == .draining { self?.state = .idle }
         }

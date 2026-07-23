@@ -73,6 +73,7 @@ private final class MixedTranscriber: LiveAudioTranscribing {
     private(set) var submittedURLs: [URL] = []
     private(set) var requestIDs: [String] = []
     var transcribeError: Error?
+    func cancel() throws {}
     func transcribe(audioURL: URL, modelName: String, language: String?) throws -> String {
         if let transcribeError { throw transcribeError }
         submittedURLs.append(audioURL)

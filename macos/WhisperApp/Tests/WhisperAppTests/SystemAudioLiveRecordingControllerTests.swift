@@ -28,6 +28,7 @@ private final class SystemLiveTranscriber: LiveAudioTranscribing {
     private(set) var submittedLanguages: [String?] = []
     private(set) var requestIDs: [String] = []
 
+    func cancel() throws {}
     func transcribe(audioURL: URL, modelName: String, language: String?) throws -> String {
         submittedURLs.append(audioURL)
         submittedModelNames.append(modelName)

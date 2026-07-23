@@ -79,6 +79,7 @@ private final class FakeSystemAudioTranscriber: LiveAudioTranscribing {
     func addReadyObserver(_ observer: @escaping @MainActor @Sendable () -> Void) -> UUID { UUID() }
     func addUnavailableObserver(_ observer: @escaping @MainActor @Sendable (WorkerState) -> Void) -> UUID { UUID() }
     func removeObserver(_ id: UUID) {}
+    func cancel() throws {}
 
     func transcribe(audioURL: URL, modelName: String, language: String?) throws -> String {
         receivedURL = audioURL

@@ -59,7 +59,9 @@ private final class LiveTranscriber: LiveAudioTranscribing {
     private var unavailableObservers: [UUID: @MainActor @Sendable (WorkerState) -> Void] = [:]
     private(set) var submittedURLs: [URL] = []
     private(set) var requestIDs: [String] = []
+    private(set) var cancelCallCount = 0
     var transcribeError: Error?
+    func cancel() throws { cancelCallCount += 1 }
     func transcribe(audioURL: URL, modelName: String, language: String?) throws -> String {
         if let transcribeError { throw transcribeError }
         submittedURLs.append(audioURL)
@@ -84,6 +86,9 @@ private final class LiveTranscriber: LiveAudioTranscribing {
         readyObservers[id] = nil; unavailableObservers[id] = nil
     }
     func completeActiveJob() { terminalObservers.values.forEach { $0(requestIDs.last, "Completed") } }
+    func failActiveJob(_ status: String = "Cancelled") {
+        terminalObservers.values.forEach { $0(requestIDs.last, status) }
+    }
     func emitUnrelatedTerminal() { terminalObservers.values.forEach { $0("unrelated", "Completed") } }
     func loseActiveJob() {
         state = .restarting(1)
@@ -533,5 +538,93 @@ struct LiveRecordingControllerTests {
         #expect(controller.submissionQueue.completedURLs == Array(urls.prefix(chunkCount)))
         #expect(controller.state == .idle)
         #expect(try controller.finalizedChunkURLs.allSatisfy { try Data(contentsOf: $0).count == 48 })
+    }
+
+    @Test
+    func stalledJobWithNoTerminalEventTriggersCancelAfterTimeout() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("live-stall-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("chunk.wav")
+        let backend = LiveCaptureBackend()
+        let scheduler = ManualRotationScheduler()
+        let transcriber = LiveTranscriber()
+        let controller = LiveRecordingController(
+            permissionProvider: LivePermissionProvider(),
+            backend: backend,
+            scheduler: scheduler,
+            transcriber: transcriber,
+            jobStallTimeout: 0.05,
+            outputURLFactory: { url }
+        )
+
+        await controller.start()
+        backend.emit(Data([0x01, 0x02]))
+        scheduler.fire()
+        #expect(transcriber.submittedURLs == [url])
+
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(transcriber.cancelCallCount == 1)
+    }
+
+    @Test
+    func jobCompletingBeforeTimeoutNeverTriggersCancel() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("live-no-stall-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("chunk.wav")
+        let backend = LiveCaptureBackend()
+        let scheduler = ManualRotationScheduler()
+        let transcriber = LiveTranscriber()
+        let controller = LiveRecordingController(
+            permissionProvider: LivePermissionProvider(),
+            backend: backend,
+            scheduler: scheduler,
+            transcriber: transcriber,
+            jobStallTimeout: 0.05,
+            outputURLFactory: { url }
+        )
+
+        await controller.start()
+        backend.emit(Data([0x01, 0x02]))
+        scheduler.fire()
+        transcriber.completeActiveJob()
+
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(transcriber.cancelCallCount == 0)
+    }
+
+    @Test
+    func cancelledEventAfterStallRequeuesChunkAndPausesQueue() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("live-stall-cancelled-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("chunk.wav")
+        let backend = LiveCaptureBackend()
+        let scheduler = ManualRotationScheduler()
+        let transcriber = LiveTranscriber()
+        let controller = LiveRecordingController(
+            permissionProvider: LivePermissionProvider(),
+            backend: backend,
+            scheduler: scheduler,
+            transcriber: transcriber,
+            jobStallTimeout: 0.05,
+            outputURLFactory: { url }
+        )
+
+        await controller.start()
+        backend.emit(Data([0x01, 0x02]))
+        scheduler.fire()
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(transcriber.cancelCallCount == 1)
+
+        transcriber.failActiveJob("Cancelled")
+
+        #expect(controller.submissionQueue.activeURL == nil)
+        #expect(controller.submissionQueue.pendingURLs == [url])
+        if case .failed = controller.state {} else { Issue.record("Expected failed state after stalled job was cancelled") }
     }
 }
