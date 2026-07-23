@@ -1,13 +1,24 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-23 13:05
-Phase: 今日工作收斂 — Notion PRD 補上今天 4 項工作、版號 0.2.0 → 0.2.1
-Working: 透過 `task-router` 判斷今天（Capture UI/UX 重構、3 個真機走查缺陷修復、講者辨識進度提示、segment-level seek/混音持久化修復）屬於 L1 文件+版號更新任務。已核對 Notion PRD 頁面最後編輯時間早於今天實際 commit 時間，確認 PRD 尚未反映今天工作，新增 Section 11 記錄並同步版號引用；`macos/WhisperApp/Info.plist` 的 `CFBundleShortVersionString` 由 0.2.0 bump 至 0.2.1，commit `8ccc49a`。
-Next action: 使用者確認是否要 push `8ccc49a` 到 `origin/whisper-swift`（目前僅本機 commit，尚未推送）
+Last checkpoint: 2026-07-23 20:25
+Phase: 即時錄音幻覺/正確性收斂 — RMS 靜音預過濾（含 handoff/receive 修正）+ 簡轉繁 segments 修復；背景任務處理麥克風即時轉錄卡住問題
+Working: (1) system-audio/mixed-audio 即時錄音管線補上 RMS 靜音預過濾（`AudioChunkSilenceDetector.swift`），另一個 Claude Code 帳號 handoff 執行、本 session 用 `/codex-receive` 獨立驗證時抓到兩個違反鎖定 AC 的問題（fail-closed 而非 fail-open、靜音 chunk duration 用固定 rotationInterval 而非實測時長）並修復，168/168 swift test 全過，commit `1a6a2fb` 已 push；用真實錄音（`transcription-history.json`）驗證 AC-7 通過，安靜片段無幻覺文字、時間戳無偏移。(2) 發現並修復 `whisper_core.py` 的 `run_whisper()` 只轉換 `full_text` 沒轉換 `info["segments"]`，導致即時轉錄畫面（用 segments 組出來）忽簡忽繁，新增 `_segments_to_traditional()`，302/302 python test 全過，commit `9271f7b` 已 push。(3) 過程中發現純麥克風即時轉錄（`LiveRecordingController.swift`）Python worker 會卡住不回報完成事件，另開背景任務（`task_3f032a70`）處理，執行中，正在編輯同一個 worktree 的 `LiveRecordingController.swift`，導致本 session 的 app 重建一度撞到 build race（"input file was modified during the build"），已停手等待背景任務完成再重建。
+Next action: 等待背景任務 `task_3f032a70` 完成 → 重新打包安裝 app（worker 已是最新，只差 swift build）→ 確認麥克風卡住問題修復
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-07-23 20:25｜即時錄音幻覺/正確性收斂：RMS 靜音預過濾 + 簡轉繁 segments 修復
+- Scope: 延續稍早的 hallucination filter 修復（commit `57941b7`），繼續處理即時錄音管線的兩個結構性問題：15 秒切片邊界效應調查（結論：原假設不成立，production 既有的整段文字幻覺檢查已能正確攔截）、進一步發現真正的問題是近靜音 chunk 完全沒有預過濾就送進 Whisper。
+- Completed:
+  (1) 設計並用真實 debug session 錄音（`SystemAudioChunks/`）做實驗，驗證 RMS 靜音預過濾（threshold=500，沿用既有 Python 端 `system_audio.py` 慣例）是可行方案；`/codex-handoff` 產出規格文件，交給另一個 Claude Code 帳號執行（`AudioChunkSilenceDetector.swift` + `SystemAudioRecordingController`/`MixedAudioRecordingController` 的 `acceptFinalizedChunk` 各加 5 行 + 6 個測試檔案，commit `8744f49`）
+  (2) `/codex-receive` 獨立驗證時，親自逐檔比對 diff（不只信任回報摘要）抓到兩個違反鎖定 AC 的問題：`isSilent` 讀檔失敗時 fail-closed（違反 AC-2）、靜音 chunk duration 用固定 `rotationInterval`/`flushInterval` 而非實測時長（違反 AC-6，partial/interrupted chunk 會造成時間戳偏移）；當場修復並補 5 個 regression test（含 2 個專門覆蓋 partial-chunk-from-stop 的情境），168/168 swift test 全過，commit `1a6a2fb`
+  (3) 使用者實機測試（混音模式，84 秒錄音）時發現簡繁混雜，追根因確認 `run_whisper()` 只轉換合併後的 `full_text`，從沒轉換 `info["segments"]`（即時畫面用 segments 組出來），新增 `_segments_to_traditional()` 套用在兩個 return 路徑，5 個新測試 + 302/302 python test 全過，commit `9271f7b`
+- Verification: 兩次修復都經過本機 `swift build`/`swift test`、`pytest tests/unit` 全套重跑（不只受影響模組）；RMS 修復額外用使用者真實錄音的 `transcription-history.json` 驗證 AC-7（安靜片段無幻覺、時間戳無偏移，68s→80s 的 12 秒靜音缺口後接續片段正確從 80.032s 開始）
+- 附註：測試過程中發現純麥克風即時轉錄路徑（`LiveRecordingController.swift`）有獨立的 Python worker 卡住問題（worker process 存活但 0% CPU、完成事件沒回報，導致佇列永久卡住），確認跟本次 RMS/簡轉繁修復無關（該路徑本次完全沒動），另開背景任務 `task_3f032a70` 處理中
+- Next: 等背景任務完成，重新打包安裝 app 做端對端確認
+
+
 ### 2026-07-23 13:05｜Notion PRD 收錄今日工作 + 版號 0.2.1
 - Scope: 使用者詢問「今天有作功能及介面優化需要更新PRD及更新版本號？」，透過 `task-router` 判斷為 L1 任務並核對現況：git log 確認今天 whisper-swift 有 5 組 commit（segment-level seek、混音持久化修復、Capture UI/UX 重構、3 個真機走查缺陷修復、講者辨識進度提示），`notion-search`/`notion-fetch` 核對 Notion PRD 頁面（📋 Whisper Swift — PRD）最後編輯時間為今天 00:42–00:47，早於今天實際 commit 時間（07:31 起），確認 PRD 尚未涵蓋今天下午的工作。
 - Completed: (1) Notion PRD 頁面新增「Section 11 — 2026-07-23 收尾」，記錄 Capture UI/UX 重構、3 個真機走查缺陷修復、講者辨識進度提示三項工作內容與驗證證據；(2) 同步更新 PRD 內三處版號引用（文件頭、Roadmap 表格新增一列、頁尾）從 v0.2.0 改為 v0.2.1；(3) `macos/WhisperApp/Info.plist` 的 `CFBundleShortVersionString` bump 0.2.0 → 0.2.1，比照 Legacy 版 v2.2.1/v2.3.1 的 patch bump 慣例（純介面優化與 bug fix，非新增大功能）。
