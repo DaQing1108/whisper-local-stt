@@ -9,6 +9,10 @@ from collections import Counter
 # Whisper phantom output during near-silence: only timestamps, no speech words.
 _TIMESTAMP_ONLY_RE = re.compile(r'^[\s\[\]\d:.–\-]+$')
 
+# Short (2-8 char) substring that repeats 3+ times back-to-back, anywhere in the text
+# (unlike the phrase-level rule below, which only checks substrings anchored at index 0).
+_SHORT_REPEAT_RE = re.compile(r'(.{2,8}?)\1{2,}')
+
 # Foreign script Unicode blocks (Cyrillic, Arabic, Thai, etc.)
 # Excludes CJK, Latin, Japanese kana, Korean — these are expected in zh/en/ja context.
 _FOREIGN_SCRIPT_RE = re.compile(
@@ -42,7 +46,10 @@ def is_hallucination(text: str) -> bool:
     2. 中文 character-level 重複（如「好」× 200，無空格分詞無法靠 word-level 偵測）
     3. Foreign script 污染（如 Cyrillic 字元佔比 > 30%）
     4. Word-level 重複（英文/空格分詞場景）
-    5. Phrase-level 重複（任意子串重複覆蓋 > 60%）
+    5. Phrase-level 重複（僅比對從文字開頭算起的子串，重複覆蓋 > 60%）
+    6. 含數字的短片語重複（不限文字開頭位置，如「1個,1個,1個,1個,1個,1個。」這種
+       Whisper 卡在數字計數迴圈的已知幻覺模式；規則 5 只比對開頭子串會漏掉這類
+       出現在文字中段的重複）
     """
     if not text or len(text) < 20:
         return False
@@ -94,6 +101,20 @@ def is_hallucination(text: str) -> bool:
             logging.warning("[Hallucination] chunk rejected: '%s' repeats %d times",
                             phrase, count)
             return True
+
+    # 6. Digit-bearing short-phrase repetition, not anchored at text start.
+    #    Only flags units containing a digit: this catches Whisper's known numeric
+    #    counting-loop hallucination (e.g. "1個,1個,1個,1個,1個,1個。") without
+    #    colliding with legitimate repeated phrases like "我們可以 我們可以 ..."
+    #    (no digit) or digit runs inside real numbers like phone numbers (unit
+    #    length >= 2 excludes a single repeated digit such as "1111").
+    short_repeat = _SHORT_REPEAT_RE.search(text)
+    if short_repeat and any(ch.isdigit() for ch in short_repeat.group(1)):
+        logging.warning(
+            "[Hallucination] chunk rejected: digit-bearing unit '%s' repeats in '%s'",
+            short_repeat.group(1), short_repeat.group(0)[:60],
+        )
+        return True
 
     return False
 

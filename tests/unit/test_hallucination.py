@@ -67,6 +67,30 @@ class TestPhraseRepetition:
         assert not is_hallucination(text)
 
 
+class TestDigitBearingRepeatAnywhere:
+    """含數字的短片語重複，不限文字開頭位置（v2.4 新增）。"""
+
+    def test_real_case_numeric_counting_loop_rejected(self):
+        """真實案例：Whisper 卡在數字計數迴圈，重複片段不在文字開頭"""
+        text = "3個,1個,1個,1個,1個,1個,1個。"
+        assert is_hallucination(text)
+
+    def test_repeated_meaningful_phrase_without_digit_passes(self):
+        """規則 5 的既有邊界案例：無數字的片語重複 5 次不應被新規則誤傷"""
+        text = "我們可以 我們可以 我們可以 我們可以 我們可以 討論其他議題"
+        assert not is_hallucination(text)
+
+    def test_phone_number_digit_run_passes(self):
+        """電話號碼裡的連續重複數字（如 1111）不應被誤判"""
+        text = "他的電話是0912345678，市話是0233221111，記得打給他。"
+        assert not is_hallucination(text)
+
+    def test_normal_text_with_incrementing_numbers_passes(self):
+        """遞增編號列點（第1點、第2點...）不應被誤判"""
+        text = "第1點跟第2點都要處理，第1點是預算，第2點是排程，我們先討論第1點。"
+        assert not is_hallucination(text)
+
+
 class TestTimestampOnlyPhantom:
     """mlx-whisper 在近靜音段落產生的 timestamp-only phantom 偵測。"""
 
