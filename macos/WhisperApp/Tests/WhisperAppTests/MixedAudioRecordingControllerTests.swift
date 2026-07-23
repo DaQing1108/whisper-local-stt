@@ -188,7 +188,9 @@ struct MixedAudioRecordingControllerTests {
         #expect(controller.finalizedChunkURLs.count == 1)
         #expect(transcriber.submittedURLs.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: controller.finalizedChunkURLs[0].path))
-        #expect(controller.transcriptDurationSeconds == 15)
+        // Duration reflects the mixed chunk's actual 50-sample content (50/16000s), not the
+        // nominal 15s flush interval.
+        #expect(controller.transcriptDurationSeconds == Double(50) / 16_000)
 
         mic.emit(Array(repeating: Int16(12_000), count: 50))
         system.emit(Array(repeating: Int16(12_000), count: 50))
@@ -196,6 +198,41 @@ struct MixedAudioRecordingControllerTests {
         transcriber.completeActiveJob()
 
         #expect(transcriber.submittedURLs == [controller.finalizedChunkURLs[1]])
+    }
+
+    @Test
+    func partialSilentMixedChunkFromStopAdvancesDurationByItsActualLengthNotFlushInterval() async throws {
+        // finalFlush() (triggered by stop, before any scheduler.fire()) produces a chunk
+        // shorter than flushInterval. A silent chunk like this must be credited with its
+        // true length, not the full 15s, or later segment timestamps would drift.
+        let mic = MixedMicrophoneBackend()
+        let system = MixedSystemBackend()
+        let scheduler = MixedScheduler()
+        let transcriber = MixedTranscriber()
+        let controller = MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: true),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic,
+            systemBackend: system,
+            scheduler: scheduler,
+            transcriber: transcriber,
+            flushInterval: 15
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-partial-silent-\(UUID()).wav")
+        try await controller.start(outputURL: url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+        }
+
+        // 4,000 samples at 16kHz mono = 0.25s, well short of the 15s flush interval.
+        mic.emit(Array(repeating: Int16(5), count: 4_000))
+        // No scheduler.fire(): stop() finalizes the in-progress chunk via finalFlush().
+
+        _ = try await controller.stop()
+
+        #expect(transcriber.submittedURLs.isEmpty)
+        #expect(controller.transcriptDurationSeconds == 0.25)
     }
 
     @Test

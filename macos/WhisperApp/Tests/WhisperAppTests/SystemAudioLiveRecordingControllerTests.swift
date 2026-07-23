@@ -141,7 +141,9 @@ struct SystemAudioLiveRecordingControllerTests {
         #expect(returned == controller.sessionFinalizedURL)
         #expect(FileManager.default.fileExists(atPath: returned.path))
         #expect(controller.transcriptText.isEmpty)
-        #expect(controller.transcriptDurationSeconds == 15)
+        // Duration reflects the chunk's actual 50-sample content (50/16000s), not the nominal
+        // 15s rotation interval — rotate() finalizes whatever was accumulated, not a full chunk.
+        #expect(controller.transcriptDurationSeconds == Double(50) / 16_000)
         #expect(transcriber.submittedURLs.isEmpty)
     }
 
@@ -176,7 +178,7 @@ struct SystemAudioLiveRecordingControllerTests {
 
         #expect(transcriber.submittedURLs.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: urls[0].path))
-        #expect(controller.transcriptDurationSeconds == 15)
+        #expect(controller.transcriptDurationSeconds == Double(50) / 16_000)
 
         var loudSamples = Data()
         for _ in 0..<50 {
@@ -188,6 +190,45 @@ struct SystemAudioLiveRecordingControllerTests {
         transcriber.completeActiveJob()
 
         #expect(transcriber.submittedURLs == [urls[1]])
+    }
+
+    @Test
+    func partialSilentChunkFromStopAdvancesDurationByItsActualLengthNotRotationInterval() async throws {
+        // session.finish() (triggered by stop, before any rotation fires) produces a chunk
+        // shorter than rotationInterval. If a silent chunk like this were credited with the
+        // full 15s rotation interval instead of its true length, every later segment's
+        // timestamp would drift by the difference.
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("system-live-partial-silent-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let urls = [directory.appendingPathComponent("chunk-1.wav")]
+        let sequence = SystemLiveURLSequence(urls)
+        let permission = SystemAudioPermissionController(provider: SystemLivePermissionProvider())
+        permission.refresh()
+        let backend = SystemLiveCaptureBackend()
+        let scheduler = SystemLiveScheduler()
+        let transcriber = SystemLiveTranscriber()
+        let controller = SystemAudioRecordingController(
+            lifecycle: SystemAudioCaptureLifecycleController(permission: permission, backend: backend),
+            backend: backend, transcriber: transcriber, scheduler: scheduler,
+            outputURLFactory: { try sequence.next() }
+        )
+
+        try await controller.start()
+        // 8,000 samples at 16kHz mono = 0.5s, well short of the 15s rotation interval.
+        var quietSamples = Data()
+        for _ in 0..<8_000 {
+            var value: Int16 = 5
+            withUnsafeBytes(of: &value) { quietSamples.append(contentsOf: $0) }
+        }
+        backend.emitPCM(quietSamples)
+        // No scheduler.fire(): stop() finalizes the in-progress chunk via session.finish().
+
+        _ = try await controller.stopAndTranscribe(modelName: "base")
+
+        #expect(transcriber.submittedURLs.isEmpty)
+        #expect(controller.transcriptDurationSeconds == 0.5)
     }
 
     @Test

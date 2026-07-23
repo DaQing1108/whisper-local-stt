@@ -217,8 +217,9 @@ final class SystemAudioRecordingController {
         lastFinalizedURL = url
         finalizedChunkURLs.append(url)
         guard !AudioChunkSilenceDetector.isSilent(contentsOf: url) else {
+            let duration = AudioChunkSilenceDetector.durationSeconds(contentsOf: url)
             try? FileManager.default.removeItem(at: url)
-            _ = acceptCompletedChunk(url, text: "", durationSeconds: rotationInterval)
+            _ = acceptCompletedChunk(url, text: "", durationSeconds: duration)
             return
         }
         submissionQueue.enqueue(url)
