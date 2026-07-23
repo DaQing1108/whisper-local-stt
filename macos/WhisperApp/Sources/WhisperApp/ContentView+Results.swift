@@ -114,6 +114,12 @@ extension ContentView {
                         }
                     }
                 }
+                if worker.diarizationStatus == "processing" {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("講者辨識進行中，可能需要數十秒…").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 if let diarizationFailureMessage = worker.diarizationFailureMessage, worker.diarizationStatus == "failed" {
                     Text(diarizationFailureMessage).font(.caption).foregroundStyle(.red)
                 }
