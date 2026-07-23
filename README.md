@@ -1,13 +1,20 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-23 23:03
-Phase: 今日四項修復（watchdog / System-Mixed 合併 / 逐字稿累加 / 裝置復原）完成整體 review，版號 bump 至 0.2.2 並重新打包安裝；一項死碼清理已拆成背景任務另開 session 處理中
-Working: 延續前次 checkpoint，本輪新增：(1) 版號 0.2.1 → 0.2.2（commit `72a6d25`，理由是純 bug fix/整併、無新增能力，比照既有 patch bump 慣例）(2) 重新打包安裝 `~/Applications/Whisper Swift.app` 時，過程中踩到一個新的、跟既有「iCloud 同步造成 quarantine」不同的失敗模式：`codesign --verify --deep --strict` 回報 `com.apple.FinderInfo` xattr 不被允許（出現在 app bundle 根目錄與內嵌的 `Python3.framework`），導致簽名驗證失敗、整個 `.app` 一度從 `~/Applications` 消失（懷疑跟 iCloud 對 `~/Documents` 底下 `dist/` 資料夾的同步/衝突處理有關，過程中甚至在 `dist/` 看到一個 `Contents 2/` 的衝突副本資料夾）；用 `xattr -d com.apple.FinderInfo` 手動清除兩個位置後 `codesign --verify` 轉為通過，重新複製安裝成功。(3) 對整個 `ba7bffa..HEAD` 範圍（今日 4 項改動 + 版號 bump）跑了一次跨改動整體 code review（獨立 agent），聚焦單一改動審查看不到的交互風險（`WhisperApp.swift` 合併後的 `ownsChunk` guard、`ContentView+Results.swift` 分支互斥性、`SystemAudioCaptureEventMonitor` 共用狀態風險、`AudioInputMode` 殘留引用），結論 APPROVE、0 CRITICAL/HIGH，本機重新獨立跑 build/test 169/169 全過；唯一發現的 1 個 MEDIUM（System/Mixed 合併後 `SystemAudioCaptureLifecycleController` 已無 production 呼叫端、僅剩自己的測試檔案在用）已拆成背景任務（`task_941fc369`），使用者已在獨立 session 啟動處理中，不在本次範圍。
-Next action: 等背景任務 `task_941fc369`（死碼清理）完成回報；使用者驗證重新安裝後的 App 版號顯示是否為 0.2.2；問題 (1)/(2) 的 AC-6（即時模式跨 chunk 逐字稿、Standard 模式藍牙裝置協商中錄音）待真機驗證
+Last checkpoint: 2026-07-23 23:14
+Phase: 背景任務 task_941fc369（SystemAudioCaptureLifecycleController 死碼清理）已完成並 push，今日五項修復/整理全數收尾
+Working: 延續前次 checkpoint 記錄的背景任務，本輪在獨立 worktree session 中完成：透過 engineering-discipline-loop 輕量六步路徑，刪除 `SystemAudioCaptureLifecycle.swift` 裡自 commit 543facd（System/Mixed 合併）後即無 production 呼叫端的 `SystemAudioCaptureLifecycleController` class 與 `SystemAudioCaptureState` enum，保留仍被 `MixedAudioRecordingController`/`ScreenCaptureKitAudioBackend` 使用的 `SystemAudioCaptureBackend` protocol；同步刪除唯一測試該 controller 的 `SystemAudioCaptureLifecycleTests.swift`。`git grep` 確認零殘留引用，`swift build` 乾淨，`swift test` 162/162 全過（169 − 7 個被移除的測試，符合預期）。Commit `72874ad`，已 push 到 `origin/whisper-swift`。
+Next action: 使用者驗證重新安裝後的 App 版號顯示是否為 0.2.2；前次 checkpoint 記錄的 AC-6（即時模式跨 chunk 逐字稿、Standard 模式藍牙裝置協商中錄音）待真機驗證
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-07-23 23:14｜死碼清理收尾（SystemAudioCaptureLifecycleController）
+- Scope: 前次 checkpoint 記錄的背景任務 `task_941fc369`——獨立 review agent 在整體收尾 review 時發現的 1 個 MEDIUM，System/Mixed 錄音模式合併（commit 543facd）後 `SystemAudioCaptureLifecycleController` 已無 production 呼叫端，僅剩自己的專屬測試檔案在用，當時明確標記為 follow-up cleanup debt。
+- Completed: 透過 engineering-discipline-loop 輕量六步路徑執行（EXPLORE 確認零 production 引用 → PLAN 經核准 → CHANGE 刪除 class/enum/測試檔並保留仍在用的 protocol → QUICK CHECK 五條全過 → TEST 162/162 → VERIFY diff 乾淨 → SHIP）。刪除 `SystemAudioCaptureLifecycle.swift` 中的 `SystemAudioCaptureLifecycleController` class、`SystemAudioCaptureState` enum、多餘的 `import Observation`；整檔刪除 `SystemAudioCaptureLifecycleTests.swift`（7 個測試）；`SystemAudioCaptureBackend` protocol 完整保留。
+- State: `swift build` 成功無新增警告；`swift test` 162/162 全過（169 − 7，符合預期）；`git status` 確認恰好一個檔案修改、一個檔案刪除，無範圍外改動；commit `72874ad` 已 push 到 `origin/whisper-swift`。
+- Next: 無後續動作，此項清理債已結清
+
+
 ### 2026-07-23 23:03｜整體收尾 review + 版號 bump + 打包踩坑（FinderInfo xattr）
 - Scope: 前兩則 checkpoint 完成的 4 項修復（watchdog、System/Mixed 合併、逐字稿累加、裝置復原）已個別驗證並 push，這一輪做收尾動作：版號 bump、重新打包安裝供使用者真機驗證、對整體 diff 做一次跨改動 review。
 - Completed:
