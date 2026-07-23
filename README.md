@@ -1,13 +1,19 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-23 12:50
-Phase: Whisper Swift 講者辨識新增進度提示（今晚第 4 個真機走查修復）
-Working: 確認講者辨識功能本身正常（直接測後端 diarization_service.diarize() 成功，僅耗時 48–60 秒／段約 1:43 錄音），既有 UI 完全沒有處理中提示、按鈕變灰後畫面無回饋，容易被誤判為壞掉。已在 `ContentView+Results.swift` 新增 `worker.diarizationStatus == "processing"` 時顯示的 ProgressView + 提示文字，真機驗證：辨識中顯示提示、完成後自動消失並正確呈現 `[Speaker X]` 結果。`swift build`／`swift test` 155/155、Python `pytest` 293/293 全綠
-Next action: 無立即待辦
+Last checkpoint: 2026-07-23 13:05
+Phase: 今日工作收斂 — Notion PRD 補上今天 4 項工作、版號 0.2.0 → 0.2.1
+Working: 透過 `task-router` 判斷今天（Capture UI/UX 重構、3 個真機走查缺陷修復、講者辨識進度提示、segment-level seek/混音持久化修復）屬於 L1 文件+版號更新任務。已核對 Notion PRD 頁面最後編輯時間早於今天實際 commit 時間，確認 PRD 尚未反映今天工作，新增 Section 11 記錄並同步版號引用；`macos/WhisperApp/Info.plist` 的 `CFBundleShortVersionString` 由 0.2.0 bump 至 0.2.1，commit `8ccc49a`。
+Next action: 使用者確認是否要 push `8ccc49a` 到 `origin/whisper-swift`（目前僅本機 commit，尚未推送）
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-07-23 13:05｜Notion PRD 收錄今日工作 + 版號 0.2.1
+- Scope: 使用者詢問「今天有作功能及介面優化需要更新PRD及更新版本號？」，透過 `task-router` 判斷為 L1 任務並核對現況：git log 確認今天 whisper-swift 有 5 組 commit（segment-level seek、混音持久化修復、Capture UI/UX 重構、3 個真機走查缺陷修復、講者辨識進度提示），`notion-search`/`notion-fetch` 核對 Notion PRD 頁面（📋 Whisper Swift — PRD）最後編輯時間為今天 00:42–00:47，早於今天實際 commit 時間（07:31 起），確認 PRD 尚未涵蓋今天下午的工作。
+- Completed: (1) Notion PRD 頁面新增「Section 11 — 2026-07-23 收尾」，記錄 Capture UI/UX 重構、3 個真機走查缺陷修復、講者辨識進度提示三項工作內容與驗證證據；(2) 同步更新 PRD 內三處版號引用（文件頭、Roadmap 表格新增一列、頁尾）從 v0.2.0 改為 v0.2.1；(3) `macos/WhisperApp/Info.plist` 的 `CFBundleShortVersionString` bump 0.2.0 → 0.2.1，比照 Legacy 版 v2.2.1/v2.3.1 的 patch bump 慣例（純介面優化與 bug fix，非新增大功能）。
+- Verification: 確認 App 內版號顯示讀取自 `Bundle.main.infoDictionary`（`AudioInputMode.swift`），非硬編碼字串，故僅需改 Info.plist 一處；`git diff --stat` 確認本次改動只涉及 `Info.plist` 一個檔案；commit `8ccc49a` 已建立於本機 `whisper-swift` 分支，尚未 push（push 屬於會影響共享遠端狀態的操作，待使用者確認後才執行）。
+- Next: 使用者確認後 push `8ccc49a` 到 `origin/whisper-swift`。
+
 ### 2026-07-23 12:50｜講者辨識新增處理中進度提示
 - Scope: 使用者詢問講者辨識支援哪些錄音模式後，追問「辨識完後如何看結果」時發現畫面沒有任何反應，逐步排查後確認功能本身正常、純粹缺進度提示。追加修法：`ContentView+Results.swift` 在 `worker.diarizationStatus == "processing"` 時顯示 `ProgressView` + 「講者辨識進行中，可能需要數十秒…」文字，緊鄰既有的失敗訊息顯示邏輯之前。
 - Verification: `swift build`／`swift test`（155/155）；重新打包安裝後用 computer-use 直接操作真實 App，點擊「辨識講者」立即截圖確認提示出現，等滿 60 秒後確認提示消失且逐字稿正確覆蓋為 `[Speaker A]`～`[Speaker E]` 格式；push 前 pre-push hook 的 Python `pytest` 293/293 全綠。
