@@ -1,52 +1,52 @@
 import SwiftUI
 
 extension ContentView {
-    var captureCard: some View {
-        VStack(spacing: 18) {
-            Image(systemName: audioMode.symbol)
-                .font(.system(size: 42, weight: .light))
-                .foregroundStyle(isPrimaryRecording ? DaylightPalette.accentRecord : DaylightPalette.accentActive)
-                .symbolEffect(.pulse, isActive: isPrimaryRecording)
-                .frame(height: 54)
-            VStack(spacing: 4) {
-                Text(primaryStatusText).font(.headline)
-                Text(modeHelpText).font(.caption).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            if isPrimaryRecording, let captureStartedAt {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(Self.elapsedString(from: captureStartedAt, to: context.date))
-                        .font(.system(.title3, design: .monospaced).monospacedDigit())
-                        .accessibilityLabel("Recording elapsed time")
-                }
-                if audioMode == .standard {
-                    ProgressView(value: recording.microphone.audioLevel)
-                        .progressViewStyle(.linear)
-                        .tint(DaylightPalette.accentRecord)
-                        .accessibilityLabel("Audio input level")
-                        .accessibilityValue("\(Int(recording.microphone.audioLevel * 100)) percent")
-                }
-            }
+    var compactControlBar: some View {
+        HStack(spacing: 14) {
             Button(action: primaryCaptureAction) {
                 Label(primaryButtonLabel, systemImage: isPrimaryRecording ? "stop.fill" : audioMode.symbol)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
             }
             .buttonStyle(.borderedProminent)
             .tint(isPrimaryRecording ? DaylightPalette.accentRecord : DaylightPalette.accentActive)
             .controlSize(.large)
             .disabled(!primaryActionEnabled)
+
+            if isPrimaryRecording, let captureStartedAt {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(Self.elapsedString(from: captureStartedAt, to: context.date))
+                        .font(.system(.body, design: .monospaced).monospacedDigit())
+                        .accessibilityLabel("Recording elapsed time")
+                }
+            }
+
+            AudioWaveformView(
+                level: audioMode == .standard ? recording.microphone.audioLevel : 0,
+                isRecording: isPrimaryRecording
+            )
+            .frame(maxWidth: 180)
+
+            Text(primaryStatusText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+
+            Spacer()
+
+            StatusBadge(text: statusText, color: statusColor)
+
+            Button { isSettingsPopoverPresented = true } label: {
+                Image(systemName: "gearshape")
+            }
+            .popover(isPresented: $isSettingsPopoverPresented, arrowEdge: .top) {
+                settingsPopoverContent
+                    .padding(20)
+                    .frame(width: 440)
+            }
         }
-        .padding(.vertical, 18)
-        .frame(maxWidth: .infinity)
-        .cardStyle()
     }
 
-    var quickSettings: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("快速設定").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                .accessibilityAddTraits(.isHeader)
-            VStack(alignment: .leading, spacing: 12) {
+    var settingsPopoverContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("快速設定").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
                 PillSegmentedControl(
                     options: AudioInputMode.allCases,
                     selection: Binding(get: { settings.audioMode }, set: { settings.audioMode = $0 }),
@@ -102,10 +102,11 @@ extension ContentView {
                         }
                     }
                 }
+                Divider()
+                fileTranscription
+                batchTranscription
             }
-            .padding(.top, 4)
         }
-        .cardStyle()
     }
 
     var fileTranscription: some View {

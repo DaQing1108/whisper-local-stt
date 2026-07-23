@@ -55,6 +55,8 @@ struct ContentView: View {
     @State var presentNextCompletedResult = false
     @State var selectedSection: SidebarSection? = .capture
     @State var languageDraft = ""
+    @State var isSettingsPopoverPresented = false
+    @State var selectedWorkspaceTab: WorkspaceTab = .transcript
 
     var body: some View {
         NavigationSplitView {
@@ -65,30 +67,31 @@ struct ContentView: View {
             .navigationTitle(AppIdentity.displayName)
             .navigationSplitViewColumnWidth(min: 170, ideal: 190)
         } detail: {
-            ScrollView {
-                VStack(alignment: .leading, spacing: DaylightMetric.sectionSpacing) {
-                    header
-                    switch selectedSection ?? .capture {
-                    case .capture:
-                        captureCard
-                        quickSettings
-                        fileTranscription
-                        batchTranscription
-                        resultsWorkspace
-                        summaryWorkspace
-                    case .history:
-                        historySection
-                    case .vocabulary:
-                        vocabularySection
-                    case .integrations, .settings:
-                        advancedSettings
-                    }
-                    messages
+            VStack(spacing: 0) {
+                Group {
+                    if selectedSection ?? .capture == .capture { compactControlBar } else { header }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(24)
+                .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 12)
+                Divider()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: DaylightMetric.sectionSpacing) {
+                        switch selectedSection ?? .capture {
+                        case .capture:
+                            workspaceContainer
+                        case .history:
+                            historySection
+                        case .vocabulary:
+                            vocabularySection
+                        case .integrations, .settings:
+                            advancedSettings
+                        }
+                        messages
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(24)
+                }
+                .background(DaylightPalette.surface)
             }
-            .background(DaylightPalette.surface)
         }
         .frame(minWidth: 820, minHeight: 620)
         .task {

@@ -1,12 +1,71 @@
 import SwiftUI
 import AVFoundation
 
+enum WorkspaceTab: Hashable, Identifiable, CaseIterable {
+    case transcript
+    case summary
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .transcript: "Transcript"
+        case .summary: "AI Summary"
+        }
+    }
+}
+
 extension ContentView {
-    var resultsWorkspace: some View {
+    var workspaceContainer: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("本次轉錄結果").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                .accessibilityAddTraits(.isHeader)
-            VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("工作區").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                PillSegmentedControl(
+                    options: WorkspaceTab.allCases,
+                    selection: $selectedWorkspaceTab,
+                    accessibilityLabel: "工作區分頁"
+                ) { tab in Text(tab.title) }
+            }
+            switch selectedWorkspaceTab {
+            case .transcript: transcriptContent
+            case .summary: summaryContent
+            }
+        }
+        .cardStyle()
+        .overlay(alignment: .bottomTrailing) {
+            if selectedWorkspaceTab == .transcript, !transcriptDraft.isEmpty {
+                HStack(spacing: 8) {
+                    Button { copyDraft() } label: { Image(systemName: "doc.on.doc") }
+                    if let entry = currentEntry {
+                        Menu { ForEach(TranscriptionExportFormat.allCases) { format in
+                            Button(format.rawValue) { export(entry, as: format) }
+                                .disabled(format == .srt && entry.segments.isEmpty)
+                        } } label: { Image(systemName: "square.and.arrow.up") }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(DaylightPalette.accentActive)
+                .padding(14)
+            }
+        }
+        .onChange(of: worker.diarizedSegments) { _, segments in
+            guard !segments.isEmpty else { return }
+            guard diarizationTargetEntryID != nil, diarizationTargetEntryID == currentEntry?.id else { return }
+            guard !isDraftDirty else {
+                errorMessage = "講者辨識已完成，但逐字稿已被手動編輯，未覆蓋；請用「複製」另外取用結果。"
+                return
+            }
+            transcriptDraft = Self.renderSpeakerLabeled(segments)
+            isDraftDirty = true
+            diarizationTargetEntryID = nil
+        }
+        .onDisappear { stopPlaybackPolling() }
+    }
+
+    private var transcriptContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text(worker.jobStatus).font(.caption).foregroundStyle(.secondary)
                     Spacer()
@@ -64,22 +123,8 @@ extension ContentView {
                             .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-            }
-            .tint(DaylightPalette.accentActive)
         }
-        .cardStyle()
-        .onChange(of: worker.diarizedSegments) { _, segments in
-            guard !segments.isEmpty else { return }
-            guard diarizationTargetEntryID != nil, diarizationTargetEntryID == currentEntry?.id else { return }
-            guard !isDraftDirty else {
-                errorMessage = "講者辨識已完成，但逐字稿已被手動編輯，未覆蓋；請用「複製」另外取用結果。"
-                return
-            }
-            transcriptDraft = Self.renderSpeakerLabeled(segments)
-            isDraftDirty = true
-            diarizationTargetEntryID = nil
-        }
-        .onDisappear { stopPlaybackPolling() }
+        .tint(DaylightPalette.accentActive)
     }
 
     private static let playbackPollInterval: TimeInterval = 0.3
@@ -144,11 +189,8 @@ extension ContentView {
         }
     }
 
-    var summaryWorkspace: some View {
+    private var summaryContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("AI 會議摘要").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                .accessibilityAddTraits(.isHeader)
-            VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     TextField("會議標題", text: Binding(
                         get: { meetingTitle },
@@ -190,9 +232,7 @@ extension ContentView {
                         Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
                     }
                 }
-            }
         }
-        .cardStyle()
     }
 
     var transcriptText: String {
