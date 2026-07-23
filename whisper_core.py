@@ -37,6 +37,13 @@ def _to_traditional(text: str) -> str:
         return text
 
 
+def _segments_to_traditional(segments: list[dict]) -> list[dict]:
+    """對每條 segment 的 text 套用 _to_traditional()。run_whisper() 只轉換合併後的
+    full_text 是不夠的：即時轉錄畫面是用 segments（帶時間戳）組出來的，沒轉換的話
+    畫面顯示的還是 Whisper 原始輸出，簡繁不一致。"""
+    return [{**seg, "text": _to_traditional(seg.get("text", ""))} for seg in segments]
+
+
 class TranscriptionError(Exception):
     """帶有 error_code 的轉錄錯誤，routes.py 可直接取用 code 推送結構化 SSE。"""
     def __init__(self, code: str, message: str):
@@ -562,7 +569,7 @@ def run_whisper(
                 cancellation.raise_if_cancelled()
             full_text = _strip_prompt_echo(result.get("text", "").strip(), prompt)
             lang      = result.get("language", "?")
-            info["segments"] = result.get("segments", [])
+            info["segments"] = _segments_to_traditional(result.get("segments", []))
             if not kwargs.get("skip_llm") and has_llm_key():
                 emit("status", {"msg": "⏳ 語音辨識完畢，正在啟動 LLM 進行語意糾錯與標點處理..."})
                 full_text = llm_punctuate(full_text, extra_terms)
@@ -606,7 +613,7 @@ def run_whisper(
                     progress_cb(i + 1, n_chunks, seg_text)
 
         full_text = "\n".join(texts)
-        info["segments"] = all_segments
+        info["segments"] = _segments_to_traditional(all_segments)
         if not kwargs.get("skip_llm") and has_llm_key():
             emit("status", {"msg": "⏳ 全文轉錄完畢，正在啟動 LLM 進行語意糾錯與標點處理..."})
             full_text = llm_punctuate(full_text, extra_terms)
