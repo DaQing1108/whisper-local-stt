@@ -1,13 +1,20 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-20 21:40
-Phase: Whisper Swift 已知缺口逐項修復
-Working: language TextField 持久化、混音模式 15 秒分段轉錄、Notion append crash-safety 三項缺口皆已修復並通過 discipline-loop 驗證；本機 `~/Applications/Whisper Swift.app` 已重建簽署並確認可啟動
-Next action: 使用者以真實 Notion token 手動驗收 append crash-safety（AC-5）；之後處理 Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）
-Blockers: Gate E 需使用者提供 Apple Developer 憑證與第二台乾淨 Mac，尚未開始
+Last checkpoint: 2026-07-23 10:20
+Phase: Whisper Swift Capture 分頁 UI/UX 重構（codex-handoff/codex-receive 流程驗收完成）
+Working: ContentView detail 容器改為固定頂欄＋滿版工作區，套用到全部 5 個 SidebarSection；Capture 分頁新增 compactControlBar（錄音／計時／AudioWaveformView／Settings Popover）與 Transcript/AI Summary 分段工作區（PillSegmentedControl＋浮動 Copy/Export），皆已由使用者在真實 App 上肉眼核對 mockup 並確認正常；`swift build`／`swift test` 154/154、Python `pytest` 293/293 全綠
+Next action: 無立即待辦；已另開背景任務追蹤「清空」按鈕未連動清除逐字稿段落列表的既有 UX 問題（非本次回歸）
+Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-07-23 10:20｜Capture 分頁 UI/UX 重構（codex-handoff → codex-receive）
+- Scope: 依 Notion 優化建議與使用者提供的實際 mockup 截圖，透過 task-router → spec-writer → engineering-discipline-loop（Explore＋Plan）→ codex-handoff 交給另一個 Claude Code 帳號執行，本 session 以 codex-receive 獨立驗收。改動 `ContentView.swift`（body 骨架：Capture 分頁顯示 compactControlBar／其餘 4 分頁維持 header，統一固定頂欄＋滿版 ScrollView 外殼）、`ContentView+Capture.swift`（captureCard/quickSettings 拆為 compactControlBar ＋ settingsPopoverContent，fileTranscription/batchTranscription 搬進 Popover）、`ContentView+Results.swift`（resultsWorkspace/summaryWorkspace 合併為 workspaceContainer，用既有 `PillSegmentedControl` 切換 Transcript/AI Summary，onChange/onDisappear 副作用集中到容器層避免 tab 切換失效，新增浮動 Copy/Export overlay），新增 `AudioWaveformView.swift`。
+- 獨立驗收發現並修正：執行方回報的 diff 摘要遺漏了 commit 誤將 `HANDOFF_CODEX_*.md`／`HANDOFF_CLAUDE_*_VERIFICATION.md` 一併 commit 進 repo（違反協議），已用新 commit `git rm --cached` 移除追蹤；Plan 階段自己誤寫「21 個 @Environment binding」，實際重新核對為 15 個（改版前後一致，未流失，僅為 spec 撰寫時的計數錯誤）。
+- Verification: `swift build`／`swift test`（154/154）重新獨立跑過確認；`git diff --stat` 逐檔核對範圍與 handoff 核准一致；本機重新打包簽署 `~/Applications/Whisper Swift.app`（Gate B，`WhisperSTT Local` 憑證）供使用者手動 Gatekeeper 核准後於真實 App 走查全部 5 個分頁與 Settings Popover，逐項確認正常；`git push` 前 pre-push hook 額外跑 Python `pytest` 293/293 全綠。
+- 踩過的坑：raw debug 執行檔無法用 computer-use 截圖驗證（compositor 層級白名單只認已安裝、有註冊 bundle identity 的 .app，裸執行檔不在其中）——正確路徑是走 `scripts/build_swiftui_app.sh` 產出簽署版 App 後由使用者親自截圖／走查，不要嘗試繞過 Gatekeeper 或用 raw binary 硬湊自動化視覺驗證。
+- 沉澱：codex-handoff／codex-receive 首次完整跑過「另一個 Claude Code 帳號」執行者類型（非 Codex）的完整分工流程，包含獨立抓出對方 commit 範圍外洩的違規，驗證了「不能只信任執行方回報」這條規則在真實案例上有效。
+
 ### 2026-07-20 21:40｜Notion append ambiguous-outcome crash-safety
 - Scope: `NotionClient.swift` 新增 `clearsAmbiguousLock` 分類（依 `NotionClientError` case 判斷該錯誤是否保證從未送達或已被 Notion 乾淨拒絕）；`ContentView+History.swift` 的 `appendToNotion` 改為在 `Task` 啟動前同步呼叫 `markNotionOutcomeAmbiguous`（原本只在觀察到 `.ambiguousOutcome` 後才鎖定），修正 App 在請求真正在途時被強制關閉／crash 導致鎖定遺失、重啟後可重試造成重複 append 的風險。
 - Review 修復：獨立 code-reviewer agent 首輪抓到 1 個 HIGH（`NotionCredentialStore` 的 Keychain 讀取失敗屬於 `NotionCredentialError`、不在 `NotionClientError` 分類內，導致這類「從未送達」的錯誤反而永久鎖住條目）與 1 個 MEDIUM（手動解鎖按鈕在正常上傳中途也會出現），兩者皆已修復並經同一 agent 重審確認無新問題。
