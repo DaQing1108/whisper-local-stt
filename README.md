@@ -1,13 +1,27 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.1
 
 ## Current State
-Last checkpoint: 2026-07-23（錄音回放校對 segment-level seek：跨帳號 handoff → 真實 App 點擊驗證 → push）
-Phase: Whisper Swift 兩個 PRD 待辦項目皆已落地（Diarization、錄音回放校對），codex-handoff/codex-receive 分工流程正式沉澱為全域指令
-Working: `whisper-swift` 分支（HEAD `ad1e18b`，與 origin 同步）新增 segment-level playback seek——逐字稿編輯框下方新增唯讀可點擊段落列表，點擊跳轉播放時間點＋播放中同步高亮目前段落，純 SwiftUI 改動，不碰 Worker/protocol。Python 293/293、Swift 153/154（唯一失敗是既有、跟本次無關的 WorkerSupervisorTests 環境依賴問題，已登記待修）。已在真實打包安裝的 App 上點擊驗證（用有效音檔的 system-audio 紀錄確認跳轉+高亮正常）。過程中發現並登記混音模式音檔存暫存目錄會消失的既有 bug（`task_d83de434`）。`codex-handoff`/`codex-receive` 兩個全域指令已更新，正式支援「另一個 Claude Code 帳號」（非僅 Codex）的協作分工與 checkpoint 步驟
-Next action: 混音音檔暫存目錄問題（`task_d83de434`）與 WorkerSupervisorTests 環境隔離問題待排；HANDOFF v2 剩餘的 Diarization 邊緣案例（編輯保護、切換紀錄保護）與長錄音效能待補測；Whisper Classic PRD 的過時內容尚未修正
+Last checkpoint: 2026-07-23（兩個已知缺口修復 + Timeline UI 關閉決策 + PRD 收斂）
+Phase: Whisper Swift PRD 主要功能項目全數收尾，僅剩「完整快捷鍵台式 parity」（低優先序、未排入）
+Working: `whisper-swift` 分支（HEAD `fca3769`，與 origin 同步）修復兩個已登記的已知問題——(1) 混音錄音音檔存到 macOS 暫存目錄導致消失的 bug，改為比照系統音訊寫入 `~/Library/Application Support/WhisperSwiftUI/`（新增 `MixedAudioRecordingController.makeSessionOutputURL()`）；(2) `WorkerSupervisorTests` 會讀到本機真實 diarization 模型快取狀態導致斷言失效，改為 `WorkerSupervisor.start(...)` 新增 `environmentOverrides` 參數，測試隔離 `HOME` 到乾淨暫存目錄，不動既有憑證注入邏輯。`swift test` 154/154 全過。另外稽核 Whisper Classic 的「Timeline」分頁後發現它從未有真實功能（純佔位符），其設計意圖已由 segment-level seek 完整涵蓋，經使用者確認關閉此 PRD 項目。順帶稽核發現 worktree 內一份 2026-07-20 的過時文件（`docs/Whisper_SwiftUI_P0_Gap_Closing_Specs_v1.md`）誤判領域選單/LLM開關/Obsidian/Notion對齊為未完成缺口，實際上五項已於 2026-07-21～22 全部完成。Notion PRD 已同步更新（Section 4/7 現況 + 新增 Section 10 Session Log）
+Next action: 完整快捷鍵台式 parity（低優先序，尚未排入時程）；HANDOFF v2 剩餘的 Diarization 邊緣案例（編輯保護、切換紀錄保護）與長錄音效能仍待補測；Whisper Classic PRD 的過時內容尚未修正
 Blockers: none
 
 ## Checkpoint History
+### 2026-07-23｜兩個已知缺口修復 + Timeline UI 關閉決策 + PRD 收斂
+- Completed:
+  (1) 混音錄音音檔暫存目錄 bug：根因是 `ContentView+CaptureActions.swift` 的 `startMixedAudioRecording()` 直接用 `FileManager.default.temporaryDirectory` 建構輸出路徑；修法是新增 `MixedAudioRecordingController.makeSessionOutputURL()`（鏡射系統音訊既有 pattern），寫入 `~/Library/Application Support/WhisperSwiftUI/MixedAudioChunks/`；
+  (2) `WorkerSupervisorTests` 環境隔離：`WorkerSupervisor.start(...)` 新增 `environmentOverrides` 參數，測試把 subprocess 的 `HOME` 隔離到乾淨暫存目錄，讓 Python `Path.home()` 讀不到本機真實已下載的 diarization 模型快取，不動既有的 Keychain 憑證注入邏輯；
+  (3) `swift build`/`swift test` 154/154 全過，commit `fca3769` push 到 origin/whisper-swift；
+  (4) 撤下已修復的背景任務 chip（`task_d83de434`）；
+  (5) 稽核 Whisper Classic 對應的「Timeline」分頁原始碼（`templates/index.html` panel-timeline），確認它從未有真實功能，只是一個「功能開發中，敬請期待」的純佔位符，無 JS 邏輯、無 backend route；其設計意圖（含時間碼逐段記錄）已由當天稍早完成的 segment-level seek 功能完整涵蓋；使用者確認關閉此 PRD 項目，不另開 Timeline 專屬畫面；
+  (6) 程式碼稽核順帶發現 worktree 內 2026-07-20 的 `docs/Whisper_SwiftUI_P0_Gap_Closing_Specs_v1.md` 已過時——文件把領域選單、LLM 校對開關、Obsidian/Notion 發布對齊列為未完成缺口，實際上這五項（含當時列為「降級 post-GA」的 Diarization）都已完成，分別對應 commit `517a1a9`/`24b4ca1`/`1f70c1e`/`f9f12ff`（2026-07-21）與 `dc4fe04`（2026-07-22）；
+  (7) 同步更新 Notion Whisper Swift PRD：Section 3 Non-Goals 表格、Section 4 已知差距清單、Section 7 風險表格更新現況，新增 Section 10 Session Log 記錄本輪收尾
+- State: `whisper-swift` HEAD `fca3769`，與 origin 同步；`swift test` 154/154（含先前唯一已知失敗，本輪修復）；Whisper Swift PRD 主要功能項目全數收尾
+- Next: 完整快捷鍵台式 parity（低優先序）；HANDOFF v2 剩餘 Diarization 邊緣案例與長錄音效能測試
+- 可複用教訓：(a) 「已知問題、暫不修」的決策不是永久的——一旦發現修法其實不需要碰當初評估為高風險的程式碼路徑（本次是用測試專屬的 env override 隔離 HOME，而非真的去動憑證注入邏輯），值得重新評估是否現在就能低成本修掉；(b) PRD 裡「範圍待釐清」的項目，直接去查對應 Classic 功能的真實程式碼比憑空討論更快——這次一查就發現 Classic 那邊也只是個佔位符，範圍立刻就清楚了；(c) 稽核當下建立的規格文件（P0 Gap doc）不會自動保鮮，後續開發一旦超前，文件內容就可能整批過時，需要靠實際 git log/程式碼稽核來驗證，不能直接信任文件本身的「真實缺口」判定
+
+### 2026-07-23｜錄音回放校對 segment-level seek + codex-handoff/receive 流程沉澱
 ### 2026-07-23｜錄音回放校對 segment-level seek + codex-handoff/receive 流程沉澱
 - Completed:
   (1) 確認 Whisper Swift PRD 剩餘兩項待辦（錄音回放校對、Timeline UI），錄音回放校對範圍收斂為「segment-level seek」（基礎播放/audioPath 已存在，只缺點擊跳轉+高亮），評為 L1、純 SwiftUI；
