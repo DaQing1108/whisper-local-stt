@@ -51,7 +51,7 @@ enum CaptureUIRules {
     }
 
     static func stopIsEnabled(mode: AudioInputMode, workerHasActiveJob: Bool) -> Bool {
-        mode == .live || mode == .system || !workerHasActiveJob
+        mode == .live || mode == .system || mode == .mixed || !workerHasActiveJob
     }
 
     static func systemAudioStartIsEnabled(

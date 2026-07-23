@@ -95,7 +95,7 @@ extension ContentView {
                 HStack {
                     Button("儲存修改") { saveDraft() }.disabled(currentEntryID == nil)
                     Button("複製") { copyDraft() }.disabled(transcriptDraft.isEmpty)
-                    Button("清空") { transcriptDraft = ""; isDraftDirty = true }.disabled(transcriptDraft.isEmpty)
+                    Button("清空文字") { transcriptDraft = ""; isDraftDirty = true }.disabled(transcriptDraft.isEmpty)
                     if let entry = currentEntry {
                         Button(audioPlayer?.isPlaying == true ? "暫停音訊" : "播放音訊") { togglePlayback(entry) }
                         if !worker.diarizationAvailable && worker.diarizationStatus != "ready" {

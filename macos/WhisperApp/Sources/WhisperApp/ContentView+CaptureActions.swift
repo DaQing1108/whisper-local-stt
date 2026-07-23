@@ -106,6 +106,7 @@ extension ContentView {
             case .mixed: stopMixedAudioRecording()
             }
         } else {
+            resetWorkspaceForNewCapture()
             switch audioMode {
             case .standard: startRecording()
             case .live: startLiveRecording()
@@ -113,6 +114,16 @@ extension ContentView {
             case .mixed: startMixedAudioRecording()
             }
         }
+    }
+
+    /// Clears the workspace's stale entry before a new recording starts, so the
+    /// previous result's transcript/segments don't linger on screen mid-recording.
+    func resetWorkspaceForNewCapture() {
+        currentEntryID = nil
+        transientEntry = nil
+        transcriptDraft = ""
+        isDraftDirty = false
+        switchSummaryWorkspace()
     }
 
     func startTranscription() {

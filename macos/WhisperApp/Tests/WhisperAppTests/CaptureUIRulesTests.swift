@@ -38,6 +38,13 @@ struct CaptureUIRulesTests {
     }
 
     @Test
+    func activeChunkJobDoesNotDisableMixedStop() {
+        // Mixed mode rotates and submits a transcription job every 15s like .system,
+        // so an in-flight job must never block the user from stopping the recording.
+        #expect(CaptureUIRules.stopIsEnabled(mode: .mixed, workerHasActiveJob: true))
+    }
+
+    @Test
     func systemAudioStartRemainsActionableWhenPermissionNeedsAttention() {
         #expect(CaptureUIRules.systemAudioStartIsEnabled(
             workerReady: true,
