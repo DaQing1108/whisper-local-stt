@@ -1,13 +1,27 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-23 23:14
-Phase: 背景任務 task_941fc369（SystemAudioCaptureLifecycleController 死碼清理）已完成並 push，今日五項修復/整理全數收尾
-Working: 延續前次 checkpoint 記錄的背景任務，本輪在獨立 worktree session 中完成：透過 engineering-discipline-loop 輕量六步路徑，刪除 `SystemAudioCaptureLifecycle.swift` 裡自 commit 543facd（System/Mixed 合併）後即無 production 呼叫端的 `SystemAudioCaptureLifecycleController` class 與 `SystemAudioCaptureState` enum，保留仍被 `MixedAudioRecordingController`/`ScreenCaptureKitAudioBackend` 使用的 `SystemAudioCaptureBackend` protocol；同步刪除唯一測試該 controller 的 `SystemAudioCaptureLifecycleTests.swift`。`git grep` 確認零殘留引用，`swift build` 乾淨，`swift test` 162/162 全過（169 − 7 個被移除的測試，符合預期）。Commit `72874ad`，已 push 到 `origin/whisper-swift`。
-Next action: 使用者驗證重新安裝後的 App 版號顯示是否為 0.2.2；前次 checkpoint 記錄的 AC-6（即時模式跨 chunk 逐字稿、Standard 模式藍牙裝置協商中錄音）待真機驗證
-Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
+Last checkpoint: 2026-07-24 09:20
+Phase: 設定畫面拆分（Obsidian·Notion vs 偏好設定）完成並 push；順帶清理兩個前次 session 遺留的 stale discipline-loop state 檔
+Working: whisper-swift HEAD `6a9050c` 已 push 到 origin。`ContentView+Settings.swift` 的 `advancedSettings` 拆成 `obsidianNotionSettings`（僅發布目的地：Obsidian Vault/Notion token/page ID）與 `appPreferences`（Worker 控制、OpenAI/Anthropic API key、檢查更新、App 版本），`ContentView.swift` 的 switch 分開路由 `.integrations`/`.settings` 兩個 case。`swift build`/`swift test` 162/162 全過。重新打包（`scripts/build_swiftui_app.sh`）並安裝到 `~/Applications/Whisper Swift.app`，使用者已實際開啟確認畫面內容正常。
+Next action: 無立即待辦；Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
+Blockers: Gate E 同上，未變化
 
 ## Checkpoint History
+### 2026-07-24 09:20｜設定畫面拆分（Obsidian·Notion vs 偏好設定）+ 兩個 stale loop state 清理
+- Scope: 使用者發現側邊欄「Obsidian·Notion」與「偏好設定」兩個入口顯示完全相同內容（根因：`ContentView.swift` 的 switch 對 `.integrations`/`.settings` 兩個 case 共用同一個 `advancedSettings` view）。討論後確認拆分方案：「Obsidian·Notion」只留發布目的地（Vault 路徑/Notion token/page ID），「偏好設定」留 Worker 控制/OpenAI・Anthropic API key（用於 AI 摘要，跟發布整合無關）/檢查更新/App 版本。
+- Completed:
+  (1) engineering-discipline-loop 輕量六步路徑執行：EXPLORE 確認插入點 → harness-rules Pre-flight 判定 L1 → CHANGE 拆 `advancedSettings` 為 `obsidianNotionSettings` + `appPreferences` 兩個 View，`ContentView.swift` switch 分開路由 → QUICK CHECK 五條全過 → TEST 162/162 → VERIFY diff 乾淨（僅 2 檔案）→ SHIP，commit `6a9050c` 已 push `origin/whisper-swift`
+  (2) 進入 Step 0 時發現 worktree 殘留兩個前次 session 未清的 stale discipline-loop state 檔（mic1/live1，`current_step` 卡在 3，但 `completed_steps` 內容其實已寫到 step 8）——查證 `git log`（`4301ecb` 含 `MicrophoneCaptureService.swift` 完整實作）+ grep 程式碼（`acceptCompletedChunk`/`ownsChunk`/`eventMonitor` 皆存在）確認兩者皆已實作並 push，非真的未完成，直接刪除 stale state 檔而非重做
+  (3) 重新打包：`scripts/build_swiftui_app.sh` 執行中與安裝到 `~/Applications` 前各踩到一次 iCloud Drive 對 `dist/` 目錄塞入重複 `Contents 2` 資料夾，導致 `codesign --deep --strict` 回報 `unsealed contents present in the bundle root`；清除後兩處簽名驗證皆通過
+  (4) 嘗試在 CLI 直接執行 App 內嵌的 `WhisperWorker` 二進位檔做 Gate B smoke test，被 macOS AMFI 以「ad-hoc 簽名、繞過 LaunchServices 直接執行」擋下（`log show` 證實 `AppleMobileFileIntegrityError Code=-423`）；比對確認現有正常運作中的舊版 App 內的 `WhisperWorker` 也是同樣 ad-hoc 簽名，判斷是 CLI 直接執行的測試方式本身觸發 AMFI 較嚴格檢查，並非這次改動或打包產物有問題，改請使用者直接開 App 驗證
+- Verification: `swift build` 乾淨、`swift test` 162/162；`codesign --verify --deep --strict` 對 `dist/` 與 `~/Applications` 兩份都確認 valid；使用者已實際開啟新版 App 並確認畫面正常
+- 沉澱：
+  (a) discipline-loop state 檔的 `current_step` 欄位不可靠——這次兩個 stale 檔都卡在 `current_step: 3`，但 `completed_steps` 陣列裡的內容其實記到了 step 8，判斷是該次 session 結束前忘了更新頂層欄位或忘了跑 Step 9 清檔案。之後看到 state 檔要同時比對 `completed_steps` 陣列的最後一條，不能只看 `current_step` 數字。
+  (b) CLAUDE.md 現有的「App 從 ~/Applications 消失/FinderInfo xattr」診斷樹只記錄了 codesign 失敗的兩種根因（iCloud quarantine、FinderInfo xattr），這次又踩到第三種：iCloud 同步造成 bundle 根目錄多出完整的 `Contents 2/` 副本資料夾。值得補充進診斷樹，但本次先記錄在這裡，尚未寫回 CLAUDE.md。
+  (c) 新發現：AMFI 對「直接 CLI exec ad-hoc 簽名的內嵌執行檔」與「透過已被 Gatekeeper 核准的父 App 內部 spawn 同一個執行檔」的檢查嚴格度不同——前者會被 AppleSystemPolicy 直接擋下（Code -423），後者（使用者正常使用 App 的路徑）目前看來不受影響。之後不要再用直接 CLI exec 內嵌 worker 的方式做打包後 smoke test，這個方法本身會誤報失敗。
+- Next: 無立即待辦
+
 ### 2026-07-23 23:14｜死碼清理收尾（SystemAudioCaptureLifecycleController）
 - Scope: 前次 checkpoint 記錄的背景任務 `task_941fc369`——獨立 review agent 在整體收尾 review 時發現的 1 個 MEDIUM，System/Mixed 錄音模式合併（commit 543facd）後 `SystemAudioCaptureLifecycleController` 已無 production 呼叫端，僅剩自己的專屬測試檔案在用，當時明確標記為 follow-up cleanup debt。
 - Completed: 透過 engineering-discipline-loop 輕量六步路徑執行（EXPLORE 確認零 production 引用 → PLAN 經核准 → CHANGE 刪除 class/enum/測試檔並保留仍在用的 protocol → QUICK CHECK 五條全過 → TEST 162/162 → VERIFY diff 乾淨 → SHIP）。刪除 `SystemAudioCaptureLifecycle.swift` 中的 `SystemAudioCaptureLifecycleController` class、`SystemAudioCaptureState` enum、多餘的 `import Observation`；整檔刪除 `SystemAudioCaptureLifecycleTests.swift`（7 個測試）；`SystemAudioCaptureBackend` protocol 完整保留。
