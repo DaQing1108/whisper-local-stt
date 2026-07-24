@@ -81,8 +81,10 @@ struct ContentView: View {
                             historySection
                         case .vocabulary:
                             vocabularySection
-                        case .integrations, .settings:
-                            advancedSettings
+                        case .integrations:
+                            obsidianNotionSettings
+                        case .settings:
+                            appPreferences
                         }
                         messages
                     }

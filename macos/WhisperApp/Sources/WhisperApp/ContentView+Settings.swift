@@ -1,20 +1,9 @@
 import SwiftUI
 
 extension ContentView {
-    var advancedSettings: some View {
-        DisclosureGroup("進階設定與整合") {
+    var obsidianNotionSettings: some View {
+        DisclosureGroup("Obsidian‧Notion") {
             VStack(alignment: .leading, spacing: 14) {
-                GroupBox("Worker") {
-                    HStack {
-                        Button("啟動 Worker") { startWorker() }.disabled(worker.state != .stopped)
-                        Button("停止 Worker") { worker.stop() }.disabled(worker.state == .stopped || liveOwnsWorker)
-                        Spacer()
-                        Button("檢查說話者分離能力") {
-                            do { try worker.requestCapabilities(); errorMessage = nil }
-                            catch { errorMessage = error.localizedDescription }
-                        }.disabled(worker.state != .ready)
-                    }
-                }
                 GroupBox("發布目的地") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -28,7 +17,31 @@ extension ContentView {
                         ))
                         Button("將 Notion token 儲存至 Keychain") { saveNotionToken() }
                             .disabled(notionToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        Divider()
+                    }
+                }
+            }
+            .padding(.top, 10)
+        }
+        .tint(DaylightPalette.accentActive)
+        .cardStyle()
+    }
+
+    var appPreferences: some View {
+        DisclosureGroup("偏好設定") {
+            VStack(alignment: .leading, spacing: 14) {
+                GroupBox("Worker") {
+                    HStack {
+                        Button("啟動 Worker") { startWorker() }.disabled(worker.state != .stopped)
+                        Button("停止 Worker") { worker.stop() }.disabled(worker.state == .stopped || liveOwnsWorker)
+                        Spacer()
+                        Button("檢查說話者分離能力") {
+                            do { try worker.requestCapabilities(); errorMessage = nil }
+                            catch { errorMessage = error.localizedDescription }
+                        }.disabled(worker.state != .ready)
+                    }
+                }
+                GroupBox("AI 摘要金鑰") {
+                    VStack(alignment: .leading, spacing: 8) {
                         SecureField("OpenAI API key（僅存 Keychain）", text: $openAIAPIKey)
                         Button("將 OpenAI key 儲存至 Keychain") { saveOpenAIKey() }
                             .disabled(openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
