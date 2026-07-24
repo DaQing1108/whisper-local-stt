@@ -38,6 +38,13 @@
   值得重新評估是否該提前推進 Gate E，而不是繼續忍受每次重裝都要手動點「仍要打開」
 - **確認時間**：2026-07-22（Whisper Swift 版號顯示功能打包驗證時發現並排查確認）
 
+## Git 歷史已知瑕疵（commit message ≠ diff，2026-07-24 發現）
+
+- **`f27670f`**（訊息：「fix(swift): recover Standard-mode recording from mid-session audio device changes」）— 訊息描述了完整的 mic-device-recovery 修復（含 independent review APPROVE 記錄），但實際 diff **只新增了一份 66 行的 `HANDOFF_CODEX_MIC_DEVICE_RECOVERY.md` 文件，沒有動到任何 source code**。
+- **`4301ecb3`**（緊接在 f27670f 後面，訊息：「chore(swift): untrack HANDOFF doc accidentally committed with live-transcript fix」，聽起來只是清理文件）— **實際上這個 commit 才是真正的實作**：`MicrophoneCaptureService.swift`（+59 行）、`MicrophoneCaptureServiceTests.swift`（+84 行）。
+- **原因**：兩個 commit 的內容疑似在 commit 當下對調了（作者訊息寫好了但 `git add` 錯了範圍）。已確認兩者皆已 push 到 `origin/whisper-swift`，屬共享歷史，**不重寫**（不 rebase/amend），改用 git notes 標註（`git log --show-notes` 可見，notes 已 push 到 `origin/refs/notes/commits`）。
+- **查證用**：真正要找「mic-device-recovery（音訊裝置切換時 Standard 模式錄音恢復）」的實作，去看 `4301ecb3`，不是 `f27670f`。
+
 ## 絕對不能做（NEVER）
 
 ### 1. 不能用 pyobjc 做系統音訊擷取
