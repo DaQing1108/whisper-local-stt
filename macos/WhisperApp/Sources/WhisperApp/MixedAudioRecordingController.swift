@@ -9,12 +9,27 @@ enum MixedAudioRecordingState: Equatable, Sendable {
     case failed(String)
 }
 
-enum MixedAudioRecordingError: Error {
+enum MixedAudioRecordingError: LocalizedError {
     case recordingAlreadyActive
     case microphonePermissionDenied
     case screenRecordingPermissionDenied
     case captureFailed(String)
     case workerNotReady
+
+    var errorDescription: String? {
+        switch self {
+        case .recordingAlreadyActive:
+            "A mixed audio recording is already in progress or still stopping. Try Stop again, or wait for it to finish."
+        case .microphonePermissionDenied:
+            "Microphone access is required for mixed audio recording."
+        case .screenRecordingPermissionDenied:
+            "Screen Recording access is required for mixed audio recording."
+        case .captureFailed(let reason):
+            "Mixed audio capture failed: \(reason)"
+        case .workerNotReady:
+            "Transcription worker is not ready yet."
+        }
+    }
 }
 
 private final class MixedAudioAccumulator: @unchecked Sendable {

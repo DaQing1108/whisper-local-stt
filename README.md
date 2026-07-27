@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-24 09:20
-Phase: 設定畫面拆分（Obsidian·Notion vs 偏好設定）完成並 push；順帶清理兩個前次 session 遺留的 stale discipline-loop state 檔
-Working: whisper-swift HEAD `6a9050c` 已 push 到 origin。`ContentView+Settings.swift` 的 `advancedSettings` 拆成 `obsidianNotionSettings`（僅發布目的地：Obsidian Vault/Notion token/page ID）與 `appPreferences`（Worker 控制、OpenAI/Anthropic API key、檢查更新、App 版本），`ContentView.swift` 的 switch 分開路由 `.integrations`/`.settings` 兩個 case。`swift build`/`swift test` 162/162 全過。重新打包（`scripts/build_swiftui_app.sh`）並安裝到 `~/Applications/Whisper Swift.app`，使用者已實際開啟確認畫面內容正常。
-Next action: 無立即待辦；Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
-Blockers: Gate E 同上，未變化
+Last checkpoint: 2026-07-27 16:21
+Phase: 混音錄製 MixedAudioRecordingError 錯誤訊息修復（LocalizedError conformance）
+Working: 診斷使用者回報的「無法完成作業。（WhisperApp.MixedAudioRecordingError錯誤0。）」錯誤訊息。查核 `MixedAudioRecordingControllerTests.swift` 既有測試（`midRecordingStopFailureThenSuccessfulRetryDoesNotDeleteTheRecording` 等）確認「停止失敗時保留 fullSession 讓使用者可重試停止」是刻意設計，不是 bug；真正問題是 `MixedAudioRecordingError` 沒有 `LocalizedError` conformance，導致顯示 Swift 預設 NSError 描述。已在 `MixedAudioRecordingController.swift` 加上 `errorDescription`，`.recordingAlreadyActive` 現在會提示「再按一次停止，或等它完成」。`swift build` 通過，`swift test --filter MixedAudioRecordingControllerTests` 14/14 全過，全套 162 個測試僅 1 個既有、與本次改動無關的 flaky timing test（`LiveRecordingControllerTests.laterDeviceEventCannotIndefinitelyPostponeRecovery`，單獨重跑即過）。已用 `scripts/build_swiftui_app.sh` 重新打包並裝到 `~/Applications/Whisper Swift.app`，使用者手動 Gatekeeper 核准後確認「執行正常」。尚未 commit。
+Next action: commit `MixedAudioRecordingController.swift` 的改動到 whisper-swift 分支並 push
+Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-07-27 16:21｜混音錄製 MixedAudioRecordingError 錯誤訊息修復
+- Completed: 診斷混音錄製停止失敗時顯示的無意義錯誤訊息；確認底層「停止失敗保留 session 供重試」邏輯是刻意設計；為 `MixedAudioRecordingError` 加上 `LocalizedError` 讓五個 case 都有清楚描述
+- State: `swift build`/相關單元測試全過，重新打包安裝後使用者實機驗證「執行正常」；程式碼尚未 commit
+- Next: commit + push 到 origin/whisper-swift
+
 ### 2026-07-24 09:20｜設定畫面拆分（Obsidian·Notion vs 偏好設定）+ 兩個 stale loop state 清理
 - Scope: 使用者發現側邊欄「Obsidian·Notion」與「偏好設定」兩個入口顯示完全相同內容（根因：`ContentView.swift` 的 switch 對 `.integrations`/`.settings` 兩個 case 共用同一個 `advancedSettings` view）。討論後確認拆分方案：「Obsidian·Notion」只留發布目的地（Vault 路徑/Notion token/page ID），「偏好設定」留 Worker 控制/OpenAI・Anthropic API key（用於 AI 摘要，跟發布整合無關）/檢查更新/App 版本。
 - Completed:
