@@ -36,12 +36,14 @@ private final class MixedSystemBackend: SystemAudioCaptureBackend {
     private(set) var stopCount = 0
     var suspendStart = false
     var suspendStop = false
+    var startError: Error?
     var stopError: Error?
     private var startContinuation: CheckedContinuation<Void, Never>?
     private var stopContinuation: CheckedContinuation<Void, Never>?
     func start() async throws {
         startCount += 1
         if suspendStart { await withCheckedContinuation { startContinuation = $0 } }
+        if let startError { throw startError }
     }
     func stop() async throws {
         stopCount += 1
@@ -123,6 +125,16 @@ private extension Array where Element == Int16 {
     var pcmData: Data {
         withUnsafeBytes { Data($0) }
     }
+}
+
+@MainActor
+private final class ManualAudioEventMonitor: AudioCaptureEventMonitoring {
+    private var handler: (@MainActor @Sendable (AudioCaptureSystemEvent) -> Void)?
+    func start(handler: @escaping @MainActor @Sendable (AudioCaptureSystemEvent) -> Void) {
+        self.handler = handler
+    }
+    func stop() { handler = nil }
+    func emit(_ event: AudioCaptureSystemEvent) { handler?(event) }
 }
 
 @MainActor
@@ -593,6 +605,159 @@ struct MixedAudioRecordingControllerTests {
         await #expect(throws: (any Error).self) { try await controller.stop() }
         #expect(controller.canStart)
         #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test
+    func sleepNotificationSuspendsCaptureAndPreservesFinalizedChunks() async throws {
+        let mic = MixedMicrophoneBackend()
+        let system = MixedSystemBackend()
+        let scheduler = MixedScheduler()
+        let monitor = ManualAudioEventMonitor()
+        let controller = MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: true),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic,
+            systemBackend: system,
+            scheduler: scheduler,
+            eventMonitor: monitor,
+            transcriber: MixedTranscriber()
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-sleep-\(UUID()).wav")
+        try await controller.start(outputURL: url)
+        mic.emit([1000, 3000])
+        system.emit([3000, 1000])
+        scheduler.fire()
+        #expect(controller.finalizedChunkURLs.count == 1)
+        let chunksBeforeSleep = controller.finalizedChunkURLs
+
+        monitor.emit(.interruptionBegan)
+
+        #expect(controller.state == .recovering)
+        #expect(mic.stopCount == 1)
+        #expect(controller.finalizedChunkURLs == chunksBeforeSleep)
+
+        monitor.emit(.interruptionEnded)
+        for _ in 0..<50 where controller.state != .recording {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        _ = try? await controller.stop()
+        try? FileManager.default.removeItem(at: url)
+        for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+    }
+
+    @Test
+    func wakeNotificationRestartsBackendsAndResumesRecording() async throws {
+        let mic = MixedMicrophoneBackend()
+        let system = MixedSystemBackend()
+        let scheduler = MixedScheduler()
+        let monitor = ManualAudioEventMonitor()
+        let controller = MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: true),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic,
+            systemBackend: system,
+            scheduler: scheduler,
+            eventMonitor: monitor,
+            transcriber: MixedTranscriber()
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-wake-\(UUID()).wav")
+        try await controller.start(outputURL: url)
+        #expect(system.startCount == 1)
+
+        monitor.emit(.interruptionBegan)
+        #expect(controller.state == .recovering)
+
+        monitor.emit(.interruptionEnded)
+        for _ in 0..<50 where controller.state != .recording {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(controller.state == .recording)
+        #expect(system.startCount == 2)
+
+        mic.emit([1000, 2000])
+        system.emit([2000, 1000])
+        scheduler.fire()
+        #expect(controller.finalizedChunkURLs.count == 1)
+
+        _ = try? await controller.stop()
+        try? FileManager.default.removeItem(at: url)
+        for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+    }
+
+    @Test
+    func recoveryFailureExhaustsRetriesAndUnlocksRestart() async throws {
+        let mic = MixedMicrophoneBackend()
+        let system = MixedSystemBackend()
+        let scheduler = MixedScheduler()
+        let monitor = ManualAudioEventMonitor()
+        let controller = MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: true),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic,
+            systemBackend: system,
+            scheduler: scheduler,
+            eventMonitor: monitor,
+            transcriber: MixedTranscriber()
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-recovery-fail-\(UUID()).wav")
+        try await controller.start(outputURL: url)
+
+        monitor.emit(.interruptionBegan)
+        #expect(controller.state == .recovering)
+
+        system.startError = MixedTestError.failed
+        monitor.emit(.interruptionEnded)
+        for _ in 0..<50 where !controller.state.isFailed {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(controller.state.isFailed)
+        #expect(!controller.hasActiveOperation)
+        #expect(controller.canStart)
+
+        // This is the direct regression check for the original bug: restart must be possible.
+        system.startError = nil
+        let restartURL = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-recovery-fail-restart-\(UUID()).wav")
+        try await controller.start(outputURL: restartURL)
+        #expect(controller.state == .recording)
+        _ = try? await controller.stop()
+
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.removeItem(at: restartURL)
+        for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+    }
+
+    @Test
+    func stoppingWhileRecoveringFinalizesSessionCleanly() async throws {
+        let mic = MixedMicrophoneBackend()
+        let system = MixedSystemBackend()
+        let scheduler = MixedScheduler()
+        let monitor = ManualAudioEventMonitor()
+        let controller = MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: true),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic,
+            systemBackend: system,
+            scheduler: scheduler,
+            eventMonitor: monitor,
+            transcriber: MixedTranscriber()
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-stop-while-recovering-\(UUID()).wav")
+        try await controller.start(outputURL: url)
+        mic.emit([1000, 3000])
+        system.emit([3000, 1000])
+        scheduler.fire()
+
+        monitor.emit(.interruptionBegan)
+        #expect(controller.state == .recovering)
+        #expect(controller.canStop)
+
+        let finalized = try await controller.stop()
+        #expect(finalized == url)
+        #expect(controller.state == .idle)
+        #expect(!controller.hasActiveOperation)
+
+        try? FileManager.default.removeItem(at: url)
+        for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
     }
 }
 

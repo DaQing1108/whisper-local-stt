@@ -294,6 +294,7 @@ extension ContentView {
         case .idle: "Mixed audio idle"
         case .starting: "Starting mic + system audio…"
         case .recording: "Recording mic + system audio — \(mixedAudioRecording.finalizedChunkURLs.count) chunks finalized"
+        case .recovering: "Recovering mixed audio capture…"
         case .stopping: "Stopping mixed audio…"
         case .failed(let message): "Mixed audio error: \(message)"
         }

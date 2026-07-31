@@ -5,6 +5,7 @@ enum MixedAudioRecordingState: Equatable, Sendable {
     case idle
     case starting
     case recording
+    case recovering
     case stopping
     case failed(String)
 }
@@ -92,6 +93,11 @@ final class MixedAudioRecordingController {
     private var stopOperationID: UUID?
     private var didFinalFlush = false
     private var isHandlingCaptureFailure = false
+    private let eventMonitor: any AudioCaptureEventMonitoring
+    private var includeMicrophone = true
+    private var recoveryAttempts = 0
+    private let maximumRecoveryAttempts = 2
+    private var resumeTask: Task<Void, Never>?
 
     var hasActiveOperation: Bool {
         isStarting || stopTask != nil || fullSession != nil || microphoneActive || systemActive
@@ -100,7 +106,7 @@ final class MixedAudioRecordingController {
         fullSession == nil && (submissionQueue.activeURL != nil || !submissionQueue.pendingURLs.isEmpty)
     }
     var canStart: Bool { !hasActiveOperation && !isDraining }
-    var canStop: Bool { fullSession != nil && (microphoneActive || systemActive) }
+    var canStop: Bool { fullSession != nil && (microphoneActive || systemActive || state == .recovering) }
 
     var modelName: String {
         get { submissionQueue.modelName }
@@ -125,6 +131,7 @@ final class MixedAudioRecordingController {
         microphoneBackend: any AudioCaptureBackend,
         systemBackend: any SystemAudioCaptureBackend,
         scheduler: any ChunkRotationScheduling,
+        eventMonitor: any AudioCaptureEventMonitoring = SystemAudioCaptureEventMonitor(),
         transcriber: any LiveAudioTranscribing,
         flushInterval: TimeInterval = 15,
         chunkOutputURLFactory: @escaping @Sendable () throws -> URL = {
@@ -136,6 +143,7 @@ final class MixedAudioRecordingController {
         self.microphoneBackend = microphoneBackend
         self.systemBackend = systemBackend
         self.scheduler = scheduler
+        self.eventMonitor = eventMonitor
         self.flushInterval = flushInterval
         self.chunkOutputURLFactory = chunkOutputURLFactory
         submissionQueue = OrderedChunkSubmissionQueue(transcriber: transcriber, modelName: "base")
@@ -152,6 +160,7 @@ final class MixedAudioRecordingController {
         isStarting = true
         stopRequestedDuringStart = false
         state = .starting
+        self.includeMicrophone = includeMicrophone
         defer { isStarting = false }
         if includeMicrophone {
             let microphoneGranted: Bool
@@ -202,6 +211,8 @@ final class MixedAudioRecordingController {
             }
             scheduler.schedule(every: flushInterval) { [weak self] in self?.rotateChunk() }
             state = stopRequestedDuringStart ? .stopping : .recording
+            eventMonitor.start { [weak self] event in self?.handleSystemEvent(event) }
+            recoveryAttempts = 0
         } catch {
             if systemActive {
                 do {
@@ -251,6 +262,9 @@ final class MixedAudioRecordingController {
 
     private func performStop() async throws -> URL {
         guard let fullSession else { throw MixedAudioRecordingError.captureFailed("No mixed-audio session") }
+        resumeTask?.cancel()
+        resumeTask = nil
+        eventMonitor.stop()
         state = .stopping
         scheduler.cancel()
         var stopError: Error?
@@ -326,6 +340,102 @@ final class MixedAudioRecordingController {
         errorBox?.record(error)
         _ = try? await stop()
         isHandlingCaptureFailure = false
+    }
+
+    private func handleSystemEvent(_ event: AudioCaptureSystemEvent) {
+        switch event {
+        case .interruptionBegan:
+            suspendCaptureForSleep()
+        case .interruptionEnded:
+            if state == .recovering { startResumeTask() }
+        case .configurationChanged, .deviceChanged:
+            // Mixed-mode device-change recovery is a known, separate gap — out of scope here.
+            break
+        }
+    }
+
+    private func suspendCaptureForSleep() {
+        guard state == .recording else { return }
+        state = .recovering
+        scheduler.cancel()
+        if microphoneActive {
+            try? microphoneBackend.stop()
+            microphoneActive = false
+        }
+        // Not awaiting systemBackend.stop() here: willSleepNotification's handler is dispatched
+        // synchronously, so it cannot await. The OS force-tears-down the SCStream at sleep anyway;
+        // the real stop-then-restart happens in resumeCaptureAfterSleep()'s async context, which
+        // must stop() first to clear the dead stream reference (see known pitfalls).
+        systemActive = false
+    }
+
+    private func startResumeTask() {
+        resumeTask?.cancel()
+        resumeTask = Task { [weak self] in
+            await self?.resumeCaptureAfterSleep()
+            self?.resumeTask = nil
+        }
+    }
+
+    private func resumeCaptureAfterSleep() async {
+        guard state == .recovering else { return }
+        guard let accumulator else {
+            failRecovery("Mixed audio session lost during recovery")
+            return
+        }
+        guard submissionQueue.isWorkerReady else {
+            failRecovery("Python Worker unavailable during audio recovery")
+            return
+        }
+        // Must stop() first to clear ScreenCaptureKitAudioBackend's stale stream reference,
+        // otherwise start()'s `guard stream == nil` silently no-ops and recovery fails quietly.
+        try? await systemBackend.stop()
+        let errorBox = MixedAudioErrorBox()
+        self.errorBox = errorBox
+
+        var lastError: Error?
+        while recoveryAttempts < maximumRecoveryAttempts {
+            guard !Task.isCancelled else { return }
+            do {
+                try await systemBackend.start()
+                systemActive = true
+                if includeMicrophone {
+                    try microphoneBackend.start(
+                        onPCM: { [weak accumulator] in accumulator?.appendMicrophone($0) },
+                        onError: { [weak errorBox] error in errorBox?.record(error) }
+                    )
+                    microphoneActive = true
+                }
+                scheduler.schedule(every: flushInterval) { [weak self] in self?.rotateChunk() }
+                state = .recording
+                recoveryAttempts = 0
+                return
+            } catch {
+                lastError = error
+                recoveryAttempts += 1
+                if systemActive { try? await systemBackend.stop(); systemActive = false }
+                if microphoneActive { try? microphoneBackend.stop(); microphoneActive = false }
+            }
+        }
+        failRecovery("Mixed audio recovery failed: \(lastError?.localizedDescription ?? "unknown error")")
+    }
+
+    private func failRecovery(_ message: String) {
+        resumeTask?.cancel()
+        resumeTask = nil
+        eventMonitor.stop()
+        scheduler.cancel()
+        if microphoneActive { try? microphoneBackend.stop(); microphoneActive = false }
+        systemActive = false
+        if !didFinalFlush { finalFlush(); didFinalFlush = true }
+        if let fullSession, let url = try? fullSession.finalize() {
+            lastFinalizedURL = url
+        }
+        self.fullSession = nil
+        self.chunkSession = nil
+        accumulator = nil
+        errorBox = nil
+        state = .failed(message)
     }
 
     private func finalFlush() {
