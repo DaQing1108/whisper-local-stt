@@ -1,14 +1,19 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-31 12:00
-Phase: 混音模式睡眠/喚醒恢復修復（sleep/wake recovery parity with Live 模式）
-Working: 使用者回報混音模式錄音時筆電休眠恢復後會卡死、無法終止錄音。根因分析：`MixedAudioRecordingController` 完全沒有監聽 `NSWorkspace` 睡眠/喚醒事件（`LiveRecordingController` 早就有），睡眠時 backend 被 OS 強制關閉但 controller 內部狀態未同步，`performStop()` 對已死 backend 操作失敗時又沒清乾淨 `fullSession`/`microphoneActive`/`systemActive`，`hasActiveOperation` 永遠 `true` 造成卡死。以 `/codex-handoff` → `/codex-receive` 流程交接修復：新增 `.recovering` state、`eventMonitor` 整合、睡眠時暫停／喚醒時 bounded-retry 重啟兩個 backend（mic + system audio）、恢復失敗時保證清空 session 相關欄位讓狀態機解鎖。`swift build`/`swift test` 166/166 全過（1 個既有、與本次改動無關的計時類 flaky test，單獨 `--filter` 重跑即過）。獨立驗收時發現 VERIFICATION.md 的 diff-stat 自我陳述與實際 commit 不符（意外把 2 份 HANDOFF 文件 commit 進去，跟專案既有慣例不一致，且是這個專案第 5 次發生同類疏漏），已用 `git rm --cached` + 新 chore commit 修正，不動原 commit。已 push 到 `origin/whisper-swift`。AC-5（真實筆電睡眠/喚醒）待使用者真機驗證。
-Next action: 使用者實際休眠/喚醒一次驗證混音模式錄音能恢復或至少停止鍵不再卡死；之後視需要重新打包安裝
+Last checkpoint: 2026-08-01 00:04
+Phase: 混音模式睡眠/喚醒恢復修復（sleep/wake recovery parity with Live 模式）— 已真機驗證完成
+Working: 使用者回報混音模式錄音時筆電休眠恢復後會卡死、無法終止錄音。根因分析：`MixedAudioRecordingController` 完全沒有監聽 `NSWorkspace` 睡眠/喚醒事件（`LiveRecordingController` 早就有），睡眠時 backend 被 OS 強制關閉但 controller 內部狀態未同步，`performStop()` 對已死 backend 操作失敗時又沒清乾淨 `fullSession`/`microphoneActive`/`systemActive`，`hasActiveOperation` 永遠 `true` 造成卡死。以 `/codex-handoff` → `/codex-receive` 流程交接修復：新增 `.recovering` state、`eventMonitor` 整合、睡眠時暫停／喚醒時 bounded-retry 重啟兩個 backend（mic + system audio）、恢復失敗時保證清空 session 相關欄位讓狀態機解鎖（commit `e9c5ee1` + chore 修正 `186d66b`，已 push）。使用者真機測試 AC-5（實際闔上筆電蓋睡眠約 30 秒再喚醒）時，恢復本身成功但暴露第二個既有 bug：`ScreenCaptureKitAudioBackend.stop()` 在 `stopCapture()` 拋錯時從未清空 `self.stream`，導致重試停止永遠打在同一個死掉的 stream 上、一樣失敗——這個問題現有測試架構測不到（fake 沒模擬真實 SCStream 的內部狀態），只有真機測試才揭露。已修復（commit `85f4cca`，把 `self.stream = nil` 移到拋錯前）並重新打包安裝，使用者複測確認「正常停止錄音」，AC-5 通過。
+Next action: 無立即待辦；下次涉及混音模式時留意 `.configurationChanged`/`.deviceChanged`（藍牙裝置切換）仍是已知的獨立缺口，未涵蓋在本次修復內
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
-### 2026-07-31 12:00｜混音模式睡眠/喚醒恢復修復
+### 2026-08-01 00:04｜混音模式睡眠/喚醒恢復修復 — 真機驗證通過
+- Completed: 診斷混音模式睡眠中斷卡死根因；以 codex-handoff/codex-receive 跨帳號分工完成主修復（`.recovering` state + `eventMonitor` + bounded-retry resume）；獨立驗收時抓到 VERIFICATION.md 自我陳述與實際 diff 不符（HANDOFF 文件誤 commit）並修正；使用者真機測試又揭露第二個獨立 bug（`ScreenCaptureKitAudioBackend.stop()` 死掉的 stream 參照沒清空導致重試永遠失敗），當場診斷、修復、重新打包安裝，使用者複測確認正常
+- State: `swift build`/`swift test` 166/166 全過（兩輪皆全綠），commit `e9c5ee1`＋`186d66b`＋`85f4cca` 已 push `origin/whisper-swift`；AC-1~5 全數完成（含真機驗證）
+- Next: 無，此任務結案
+
+### 2026-07-31 12:00｜混音模式睡眠/喚醒恢復修復（第一輪，AC-5 待驗證）
 - Completed: 診斷混音模式睡眠中斷卡死根因；以 codex-handoff/codex-receive 跨帳號分工完成修復（`.recovering` state + `eventMonitor` + bounded-retry resume + 失敗保證解鎖狀態機）；獨立驗收時抓到 VERIFICATION.md 自我陳述與實際 diff 不符（HANDOFF 文件誤 commit），修正後才 push
 - State: `swift build`/`swift test` 166/166 全過，commit `e9c5ee1`（實作）+ `186d66b`（chore 修正）已 push `origin/whisper-swift`；AC-1~4 已自動驗證，AC-5 待真機驗證
 - Next: 使用者真機睡眠/喚醒驗證
