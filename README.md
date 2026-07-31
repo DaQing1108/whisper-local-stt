@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-07-27 16:21
-Phase: 混音錄製 MixedAudioRecordingError 錯誤訊息修復（LocalizedError conformance）
-Working: 診斷使用者回報的「無法完成作業。（WhisperApp.MixedAudioRecordingError錯誤0。）」錯誤訊息。查核 `MixedAudioRecordingControllerTests.swift` 既有測試（`midRecordingStopFailureThenSuccessfulRetryDoesNotDeleteTheRecording` 等）確認「停止失敗時保留 fullSession 讓使用者可重試停止」是刻意設計，不是 bug；真正問題是 `MixedAudioRecordingError` 沒有 `LocalizedError` conformance，導致顯示 Swift 預設 NSError 描述。已在 `MixedAudioRecordingController.swift` 加上 `errorDescription`，`.recordingAlreadyActive` 現在會提示「再按一次停止，或等它完成」。`swift build` 通過，`swift test --filter MixedAudioRecordingControllerTests` 14/14 全過，全套 162 個測試僅 1 個既有、與本次改動無關的 flaky timing test（`LiveRecordingControllerTests.laterDeviceEventCannotIndefinitelyPostponeRecovery`，單獨重跑即過）。已用 `scripts/build_swiftui_app.sh` 重新打包並裝到 `~/Applications/Whisper Swift.app`，使用者手動 Gatekeeper 核准後確認「執行正常」。尚未 commit。
-Next action: commit `MixedAudioRecordingController.swift` 的改動到 whisper-swift 分支並 push
+Last checkpoint: 2026-07-31 12:00
+Phase: 混音模式睡眠/喚醒恢復修復（sleep/wake recovery parity with Live 模式）
+Working: 使用者回報混音模式錄音時筆電休眠恢復後會卡死、無法終止錄音。根因分析：`MixedAudioRecordingController` 完全沒有監聽 `NSWorkspace` 睡眠/喚醒事件（`LiveRecordingController` 早就有），睡眠時 backend 被 OS 強制關閉但 controller 內部狀態未同步，`performStop()` 對已死 backend 操作失敗時又沒清乾淨 `fullSession`/`microphoneActive`/`systemActive`，`hasActiveOperation` 永遠 `true` 造成卡死。以 `/codex-handoff` → `/codex-receive` 流程交接修復：新增 `.recovering` state、`eventMonitor` 整合、睡眠時暫停／喚醒時 bounded-retry 重啟兩個 backend（mic + system audio）、恢復失敗時保證清空 session 相關欄位讓狀態機解鎖。`swift build`/`swift test` 166/166 全過（1 個既有、與本次改動無關的計時類 flaky test，單獨 `--filter` 重跑即過）。獨立驗收時發現 VERIFICATION.md 的 diff-stat 自我陳述與實際 commit 不符（意外把 2 份 HANDOFF 文件 commit 進去，跟專案既有慣例不一致，且是這個專案第 5 次發生同類疏漏），已用 `git rm --cached` + 新 chore commit 修正，不動原 commit。已 push 到 `origin/whisper-swift`。AC-5（真實筆電睡眠/喚醒）待使用者真機驗證。
+Next action: 使用者實際休眠/喚醒一次驗證混音模式錄音能恢復或至少停止鍵不再卡死；之後視需要重新打包安裝
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-07-31 12:00｜混音模式睡眠/喚醒恢復修復
+- Completed: 診斷混音模式睡眠中斷卡死根因；以 codex-handoff/codex-receive 跨帳號分工完成修復（`.recovering` state + `eventMonitor` + bounded-retry resume + 失敗保證解鎖狀態機）；獨立驗收時抓到 VERIFICATION.md 自我陳述與實際 diff 不符（HANDOFF 文件誤 commit），修正後才 push
+- State: `swift build`/`swift test` 166/166 全過，commit `e9c5ee1`（實作）+ `186d66b`（chore 修正）已 push `origin/whisper-swift`；AC-1~4 已自動驗證，AC-5 待真機驗證
+- Next: 使用者真機睡眠/喚醒驗證
+
 ### 2026-07-27 16:21｜混音錄製 MixedAudioRecordingError 錯誤訊息修復
 - Completed: 診斷混音錄製停止失敗時顯示的無意義錯誤訊息；確認底層「停止失敗保留 session 供重試」邏輯是刻意設計；為 `MixedAudioRecordingError` 加上 `LocalizedError` 讓五個 case 都有清楚描述
 - State: `swift build`/相關單元測試全過，重新打包安裝後使用者實機驗證「執行正常」；程式碼尚未 commit
