@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-08-01 00:04
-Phase: 混音模式睡眠/喚醒恢復修復（sleep/wake recovery parity with Live 模式）— 已真機驗證完成
-Working: 使用者回報混音模式錄音時筆電休眠恢復後會卡死、無法終止錄音。根因分析：`MixedAudioRecordingController` 完全沒有監聽 `NSWorkspace` 睡眠/喚醒事件（`LiveRecordingController` 早就有），睡眠時 backend 被 OS 強制關閉但 controller 內部狀態未同步，`performStop()` 對已死 backend 操作失敗時又沒清乾淨 `fullSession`/`microphoneActive`/`systemActive`，`hasActiveOperation` 永遠 `true` 造成卡死。以 `/codex-handoff` → `/codex-receive` 流程交接修復：新增 `.recovering` state、`eventMonitor` 整合、睡眠時暫停／喚醒時 bounded-retry 重啟兩個 backend（mic + system audio）、恢復失敗時保證清空 session 相關欄位讓狀態機解鎖（commit `e9c5ee1` + chore 修正 `186d66b`，已 push）。使用者真機測試 AC-5（實際闔上筆電蓋睡眠約 30 秒再喚醒）時，恢復本身成功但暴露第二個既有 bug：`ScreenCaptureKitAudioBackend.stop()` 在 `stopCapture()` 拋錯時從未清空 `self.stream`，導致重試停止永遠打在同一個死掉的 stream 上、一樣失敗——這個問題現有測試架構測不到（fake 沒模擬真實 SCStream 的內部狀態），只有真機測試才揭露。已修復（commit `85f4cca`，把 `self.stream = nil` 移到拋錯前）並重新打包安裝，使用者複測確認「正常停止錄音」，AC-5 通過。
-Next action: 無立即待辦；下次涉及混音模式時留意 `.configurationChanged`/`.deviceChanged`（藍牙裝置切換）仍是已知的獨立缺口，未涵蓋在本次修復內
+Last checkpoint: 2026-08-01 00:30
+Phase: 裝置復原邏輯純去重（`DeviceEventDebouncer` 共用 helper）— 已完成並 push
+Working: 盤點 worktree 內殘留的 untracked handoff/草稿檔（capture UI 重構、merge system/mixed audio、live transcript accumulation、混音 sleep/wake 驗證報告、save-session 補記、`.notion-draft/`），逐一比對 `git log`/程式碼確認皆已 merge 進 HEAD 且已 push，清掉這些殘留檔案；唯一尚未執行的是 `HANDOFF_CODEX_DEVICE_RECOVERY_DEDUP.md`（`MicrophoneCaptureService.handleSystemEvent` 和 `LiveRecordingController.handleSystemEvent` 各自維護一套幾乎相同的 `ignoreDeviceEventsUntil` debounce 判斷邏輯）。直接執行該 handoff：在 `AudioCaptureRecovery.swift` 新增純函式 `DeviceEventDebouncer.evaluate(now:ignoreUntil:interval:)`，回傳 `DeviceEventDebounceDecision`（`shouldIgnore` + `nextIgnoreUntil`），兩個呼叫端改呼叫共用 helper，各自「怎麼重啟」與「何時寫入下一個視窗」的既有邏輯完全不變（`MicrophoneCaptureService` 沿用 helper 回傳的 `nextIgnoreUntil`；`LiveRecordingController` 的 `.configurationChanged` 分支刻意只讀不寫，維持原行為）。新增 `DeviceEventDebouncerTests.swift`（4 個測試，涵蓋視窗內忽略/視窗外允許/無視窗允許/下一視窗計算）。`swift test` 170/170 全過（166 既有 + 4 新增），`git diff --stat` 僅動到 `AudioCaptureRecovery.swift`/`MicrophoneCaptureService.swift`/`LiveRecordingController.swift` 三個允許檔案，`StandardRecordingController.swift` 未觸碰。commit `b71fa41` 已 push `origin/whisper-swift`。
+Next action: 無立即待辦；`.configurationChanged`/`.deviceChanged`（藍牙裝置切換）跨模式合併仍是已知的獨立缺口，本次刻意不處理（HANDOFF 文件範圍排除）
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
+### 2026-08-01 00:30｜裝置復原邏輯純去重 + worktree 殘留 handoff 檔案清理
+- Completed: 盤點並清掉 7 個已完成工作對應的殘留 untracked 檔案（capture UI 重構、merge system/mixed audio、live transcript accumulation、混音 sleep/wake 驗證報告、save-session 補記、`.notion-draft/`、舊 gap-closing specs），逐一用 `git log --oneline --all` + 程式碼 grep 查證屬實已 merge/push 才刪；執行僅存的 `HANDOFF_CODEX_DEVICE_RECOVERY_DEDUP.md`：新增 `DeviceEventDebouncer` 純函式 helper 消除 `MicrophoneCaptureService`/`LiveRecordingController` 重複的裝置事件 debounce 判斷邏輯，兩邊「怎麼重啟」的既有行為完全不動
+- State: `swift build` 乾淨；`swift test` 170/170 全過（170 = 166 既有 + 4 新增 `DeviceEventDebouncerTests`），過程中 `laterDeviceEventCannotIndefinitelyPostponeRecovery` 出現一次已知計時類 flaky（單獨 `--filter` 重跑即過，非本次改動所致）；`git diff --stat` 僅 3 個允許檔案，`StandardRecordingController.swift` 未觸碰；commit `b71fa41` 已 push `origin/whisper-swift`；已產出 `HANDOFF_CLAUDE_DEVICE_RECOVERY_DEDUP_VERIFICATION.md`
+- Next: 無，此任務結案
+
 ### 2026-08-01 00:04｜混音模式睡眠/喚醒恢復修復 — 真機驗證通過
 - Completed: 診斷混音模式睡眠中斷卡死根因；以 codex-handoff/codex-receive 跨帳號分工完成主修復（`.recovering` state + `eventMonitor` + bounded-retry resume）；獨立驗收時抓到 VERIFICATION.md 自我陳述與實際 diff 不符（HANDOFF 文件誤 commit）並修正；使用者真機測試又揭露第二個獨立 bug（`ScreenCaptureKitAudioBackend.stop()` 死掉的 stream 參照沒清空導致重試永遠失敗），當場診斷、修復、重新打包安裝，使用者複測確認正常
 - State: `swift build`/`swift test` 166/166 全過（兩輪皆全綠），commit `e9c5ee1`＋`186d66b`＋`85f4cca` 已 push `origin/whisper-swift`；AC-1~5 全數完成（含真機驗證）
