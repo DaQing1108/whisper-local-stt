@@ -321,8 +321,11 @@ final class MicrophoneCaptureService {
     private func handleSystemEvent(_ event: AudioCaptureSystemEvent) {
         guard event == .configurationChanged || event == .deviceChanged else { return }
         guard machine.state.canStop, let session else { return }
-        if let ignoreDeviceEventsUntil, ignoreDeviceEventsUntil > Date() { return }
-        ignoreDeviceEventsUntil = Date().addingTimeInterval(Self.deviceEventDebounceInterval)
+        let decision = DeviceEventDebouncer.evaluate(
+            now: Date(), ignoreUntil: ignoreDeviceEventsUntil, interval: Self.deviceEventDebounceInterval
+        )
+        guard !decision.shouldIgnore else { return }
+        ignoreDeviceEventsUntil = decision.nextIgnoreUntil
         do {
             try backend.stop()
             try backend.start(onPCM: pcmHandler(for: session), onError: errorHandler(for: session))

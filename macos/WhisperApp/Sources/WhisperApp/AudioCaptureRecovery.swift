@@ -9,6 +9,29 @@ enum AudioCaptureSystemEvent: Equatable, Sendable {
     case interruptionEnded
 }
 
+/// Result of evaluating whether a device/configuration-change event should be
+/// debounced. `nextIgnoreUntil` is only meaningful when `shouldIgnore` is `false` —
+/// callers that want to start a new debounce window store it back as their
+/// `ignoreDeviceEventsUntil` state; callers that don't (e.g. a branch that only
+/// checks the window without owning it) can ignore the field.
+struct DeviceEventDebounceDecision: Equatable {
+    let shouldIgnore: Bool
+    let nextIgnoreUntil: Date?
+}
+
+/// Pure decision logic shared by `MicrophoneCaptureService` and
+/// `LiveRecordingController` for debouncing bursts of device/configuration-change
+/// notifications. Does not own any restart action or state — callers keep their
+/// own `ignoreDeviceEventsUntil: Date?` and pass it in each time.
+enum DeviceEventDebouncer {
+    static func evaluate(now: Date, ignoreUntil: Date?, interval: TimeInterval) -> DeviceEventDebounceDecision {
+        if let ignoreUntil, ignoreUntil > now {
+            return DeviceEventDebounceDecision(shouldIgnore: true, nextIgnoreUntil: ignoreUntil)
+        }
+        return DeviceEventDebounceDecision(shouldIgnore: false, nextIgnoreUntil: now.addingTimeInterval(interval))
+    }
+}
+
 @MainActor
 protocol AudioCaptureEventMonitoring: AnyObject {
     func start(handler: @escaping @MainActor @Sendable (AudioCaptureSystemEvent) -> Void)

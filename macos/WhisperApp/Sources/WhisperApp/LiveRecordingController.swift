@@ -504,7 +504,8 @@ final class LiveRecordingController {
         case .interruptionEnded:
             if state == .recovering { resumeCaptureAfterInterruption() }
         case .configurationChanged:
-            if let ignoreDeviceEventsUntil, ignoreDeviceEventsUntil > Date() { return }
+            let decision = DeviceEventDebouncer.evaluate(now: Date(), ignoreUntil: ignoreDeviceEventsUntil, interval: 2)
+            guard !decision.shouldIgnore else { return }
             handleDeviceEvent()
         case .deviceChanged:
             handleDeviceEvent()
