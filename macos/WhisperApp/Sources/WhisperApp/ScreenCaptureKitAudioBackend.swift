@@ -163,8 +163,11 @@ final class ScreenCaptureKitAudioBackend: NSObject, SystemAudioCaptureBackend, S
         isStopping = true
         defer { isStopping = false }
         output.deactivate()
-        try await stream.stopCapture()
+        // Clear the reference before the throwing call: once the OS has torn the stream down
+        // (e.g. after a sleep/wake cycle), stopCapture() throws and a stale `self.stream` would
+        // make every retry hit the exact same dead stream and fail identically forever.
         self.stream = nil
+        try await stream.stopCapture()
     }
 
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
