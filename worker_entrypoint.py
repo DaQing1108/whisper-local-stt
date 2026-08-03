@@ -162,6 +162,7 @@ class WorkerRuntime:
                     str(payload["audio_path"]),
                     list(payload["segments"]),
                     manager=self._diarization_manager,
+                    num_speakers=payload.get("num_speakers"),
                 )
             except ModelNotReadyError as exc:
                 exc.code = "MODEL_NOT_READY"

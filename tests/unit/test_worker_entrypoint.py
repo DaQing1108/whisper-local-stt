@@ -141,7 +141,7 @@ def test_worker_second_diarize_rejected_while_first_still_running():
     stdout = io.StringIO()
     release = threading.Event()
 
-    def slow_diarize(audio_path, segments, manager=None):
+    def slow_diarize(audio_path, segments, manager=None, **_kwargs):
         release.wait(timeout=2)
         return segments
 
@@ -185,7 +185,7 @@ def test_worker_diarize_merges_speakers_when_cached(monkeypatch):
         diarization_manager=_FakeDiarizationManager(cached=True),
     )
 
-    def fake_diarize(audio_path, segments, manager=None):
+    def fake_diarize(audio_path, segments, manager=None, **_kwargs):
         return [{**segment, "speaker": "Speaker A"} for segment in segments]
 
     import diarization_service
@@ -199,6 +199,50 @@ def test_worker_diarize_merges_speakers_when_cached(monkeypatch):
     event = _events(stdout)[0]
     assert event["event"] == "diarized"
     assert event["payload"]["segments"] == [{"start": 0.0, "end": 1.0, "text": "hi", "speaker": "Speaker A"}]
+
+
+def test_worker_diarize_passes_num_speakers_from_payload(monkeypatch):
+    stdout = io.StringIO()
+    runtime = WorkerRuntime(
+        lambda *_args, **_kwargs: None, stdout, io.StringIO(),
+        diarization_manager=_FakeDiarizationManager(cached=True),
+    )
+    received = {}
+
+    def fake_diarize(audio_path, segments, manager=None, **kwargs):
+        received.update(kwargs)
+        return segments
+
+    import diarization_service
+    monkeypatch.setattr(diarization_service, "diarize", fake_diarize)
+
+    runtime.handle_line(_command("diar-1", "diarize", {
+        "audio_path": "a.wav", "segments": [], "num_speakers": 3,
+    }))
+    runtime.wait_for_idle()
+
+    assert received.get("num_speakers") == 3
+
+
+def test_worker_diarize_defaults_num_speakers_to_none_when_absent(monkeypatch):
+    stdout = io.StringIO()
+    runtime = WorkerRuntime(
+        lambda *_args, **_kwargs: None, stdout, io.StringIO(),
+        diarization_manager=_FakeDiarizationManager(cached=True),
+    )
+    received = {}
+
+    def fake_diarize(audio_path, segments, manager=None, **kwargs):
+        received.update(kwargs)
+        return segments
+
+    import diarization_service
+    monkeypatch.setattr(diarization_service, "diarize", fake_diarize)
+
+    runtime.handle_line(_command("diar-1", "diarize", {"audio_path": "a.wav", "segments": []}))
+    runtime.wait_for_idle()
+
+    assert received.get("num_speakers") is None
 
 
 def test_worker_transcribes_file_and_keeps_stdout_jsonl_only(tmp_path):

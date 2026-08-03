@@ -25,7 +25,11 @@ def _speaker_label(index: int) -> str:
     return f"Speaker {index + 1}"
 
 
-def _build_pipeline(manager: DiarizationModelManager):
+def _build_pipeline(
+    manager: DiarizationModelManager,
+    num_speakers: int | None = None,
+    threshold: float = 0.5,
+):
     import sherpa_onnx
 
     config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
@@ -37,7 +41,9 @@ def _build_pipeline(manager: DiarizationModelManager):
         embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(
             model=str(manager.embedding_model_path),
         ),
-        clustering=sherpa_onnx.FastClusteringConfig(),
+        clustering=sherpa_onnx.FastClusteringConfig(
+            num_clusters=num_speakers or -1, threshold=threshold
+        ),
     )
     if not config.validate():
         raise RuntimeError("invalid sherpa_onnx diarization config")
@@ -80,11 +86,13 @@ def diarize(
     audio_path: str,
     segments: list[dict],
     manager: DiarizationModelManager | None = None,
+    num_speakers: int | None = None,
+    threshold: float = 0.5,
 ) -> list[dict]:
     manager = manager or DiarizationModelManager()
     if not manager.status()["cached"]:
         raise ModelNotReadyError("diarization models are not downloaded yet")
-    pipeline = _build_pipeline(manager)
+    pipeline = _build_pipeline(manager, num_speakers=num_speakers, threshold=threshold)
     samples = _read_audio(audio_path)
     result = pipeline.process(samples).sort_by_start_time()
     return _merge_speakers(segments, result)

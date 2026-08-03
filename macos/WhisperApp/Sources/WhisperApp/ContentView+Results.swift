@@ -62,6 +62,28 @@ extension ContentView {
             diarizationTargetEntryID = nil
         }
         .onDisappear { stopPlaybackPolling() }
+        .sheet(isPresented: $isRenamingSpeakers) { speakerRenameSheet }
+    }
+
+    private var speakerRenameSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("重新命名講者").font(.headline)
+            ForEach(speakerRenameInputs.keys.sorted(), id: \.self) { label in
+                TextField(label, text: Binding(
+                    get: { speakerRenameInputs[label] ?? label },
+                    set: { speakerRenameInputs[label] = $0 }
+                ))
+            }
+            HStack {
+                Spacer()
+                Button("取消") { isRenamingSpeakers = false }
+                Button("確認") { applySpeakerRenameSheet() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(DaylightPalette.accentActive)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 320)
     }
 
     private var transcriptContent: some View {
@@ -104,8 +126,14 @@ extension ContentView {
                             }
                             .disabled(worker.diarizationOperationInProgress || worker.activeRequestID != nil)
                         }
+                        TextField("已知講者人數", text: $knownSpeakerCount)
+                            .frame(width: 90)
+                            .disabled(worker.diarizationOperationInProgress || worker.activeRequestID != nil)
                         Button("辨識講者") { triggerDiarization(entry) }
                             .disabled(entry.segments.isEmpty || worker.diarizationOperationInProgress || worker.activeRequestID != nil)
+                        if !SpeakerRename.extractSpeakerLabels(from: transcriptDraft).isEmpty {
+                            Button("重新命名講者") { openSpeakerRenameSheet() }
+                        }
                         Menu("Export") {
                             ForEach(TranscriptionExportFormat.allCases) { format in
                                 Button(format.rawValue) { export(entry, as: format) }
@@ -178,12 +206,25 @@ extension ContentView {
     func triggerDiarization(_ entry: TranscriptionHistoryEntry) {
         do {
             diarizationTargetEntryID = entry.id
-            try worker.diarize(audioPath: entry.audioPath, segments: entry.segments)
+            let numSpeakers = Int(knownSpeakerCount.trimmingCharacters(in: .whitespaces))
+            try worker.diarize(audioPath: entry.audioPath, segments: entry.segments, numSpeakers: numSpeakers)
             errorMessage = nil
         } catch {
             diarizationTargetEntryID = nil
             errorMessage = "無法啟動講者辨識：\(error.localizedDescription)"
         }
+    }
+
+    func openSpeakerRenameSheet() {
+        let labels = SpeakerRename.extractSpeakerLabels(from: transcriptDraft)
+        speakerRenameInputs = Dictionary(uniqueKeysWithValues: labels.map { ($0, $0) })
+        isRenamingSpeakers = true
+    }
+
+    func applySpeakerRenameSheet() {
+        transcriptDraft = SpeakerRename.applySpeakerRenames(speakerRenameInputs, in: transcriptDraft)
+        isDraftDirty = true
+        isRenamingSpeakers = false
     }
 
     func triggerDiarizationWarmup() {

@@ -63,3 +63,66 @@ def test_diarize_runs_pipeline_and_merges_when_cached(tmp_path):
         result = diarize(str(audio_path), [{"start": 0.0, "end": 1.0, "text": "hi"}], manager=manager)
 
     assert result == [{"start": 0.0, "end": 1.0, "text": "hi", "speaker": "Speaker A"}]
+
+
+def test_diarize_passes_num_speakers_to_build_pipeline(tmp_path):
+    manager = _cached_manager(tmp_path)
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(b"fake")
+
+    fake_result = SimpleNamespace(sort_by_start_time=lambda: [])
+    fake_pipeline = SimpleNamespace(process=lambda samples: fake_result)
+
+    with patch("diarization_service._build_pipeline", return_value=fake_pipeline) as build_pipeline, \
+         patch("diarization_service._read_audio", return_value=[0.0] * 16000):
+        diarize(str(audio_path), [], manager=manager, num_speakers=2)
+
+    build_pipeline.assert_called_once_with(manager, num_speakers=2, threshold=0.5)
+
+
+def test_diarize_passes_threshold_to_build_pipeline(tmp_path):
+    manager = _cached_manager(tmp_path)
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(b"fake")
+
+    fake_result = SimpleNamespace(sort_by_start_time=lambda: [])
+    fake_pipeline = SimpleNamespace(process=lambda samples: fake_result)
+
+    with patch("diarization_service._build_pipeline", return_value=fake_pipeline) as build_pipeline, \
+         patch("diarization_service._read_audio", return_value=[0.0] * 16000):
+        diarize(str(audio_path), [], manager=manager, threshold=0.75)
+
+    build_pipeline.assert_called_once_with(manager, num_speakers=None, threshold=0.75)
+
+
+def test_build_pipeline_maps_num_speakers_and_threshold_to_fast_clustering_config(tmp_path):
+    manager = _cached_manager(tmp_path)
+    captured = {}
+
+    class FakeFastClusteringConfig:
+        def __init__(self, num_clusters, threshold):
+            captured["num_clusters"] = num_clusters
+            captured["threshold"] = threshold
+
+    class FakeConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def validate(self):
+            return True
+
+    fake_sherpa_onnx = SimpleNamespace(
+        OfflineSpeakerDiarizationConfig=lambda **kwargs: FakeConfig(**kwargs),
+        OfflineSpeakerSegmentationModelConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+        OfflineSpeakerSegmentationPyannoteModelConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+        SpeakerEmbeddingExtractorConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+        FastClusteringConfig=FakeFastClusteringConfig,
+        OfflineSpeakerDiarization=lambda config: SimpleNamespace(config=config),
+    )
+
+    import diarization_service
+
+    with patch.dict("sys.modules", {"sherpa_onnx": fake_sherpa_onnx}):
+        diarization_service._build_pipeline(manager, num_speakers=2, threshold=0.75)
+
+    assert captured == {"num_clusters": 2, "threshold": 0.75}

@@ -306,7 +306,7 @@ final class WorkerSupervisor {
     }
 
     @discardableResult
-    func diarize(audioPath: String, segments: [TranscriptionSegment]) throws -> String {
+    func diarize(audioPath: String, segments: [TranscriptionSegment], numSpeakers: Int? = nil) throws -> String {
         guard activeRequestID == nil else { throw WorkerSupervisorError.transcriptionAlreadyActive }
         guard !diarizationOperationInProgress else { throw WorkerSupervisorError.diarizationOperationActive }
         let requestID = UUID().uuidString
@@ -316,10 +316,9 @@ final class WorkerSupervisor {
         do {
             let segmentsData = try encoder.encode(segments)
             let segmentsJSON = try decoder.decode(JSONValue.self, from: segmentsData)
-            try send(WorkerCommand(
-                requestID: requestID, command: "diarize",
-                payload: ["audio_path": .string(audioPath), "segments": segmentsJSON]
-            ))
+            var payload: [String: JSONValue] = ["audio_path": .string(audioPath), "segments": segmentsJSON]
+            if let numSpeakers { payload["num_speakers"] = .number(Double(numSpeakers)) }
+            try send(WorkerCommand(requestID: requestID, command: "diarize", payload: payload))
         } catch {
             diarizationRequestID = nil
             diarizationOperationInProgress = false
