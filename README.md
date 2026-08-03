@@ -1,10 +1,10 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-08-03 11:04
-Phase: 講者辨識過度分裂修復 + 講者重新命名功能 — 已完成並 push
-Working: 使用者發現真實錄音的講者辨識結果出現 `Speaker 31`/`33`/`39`/`46`/`55` 等異常高編號（實際會議只有 4~6 位講者），追查根因是 `diarization_service.py` 呼叫 sherpa-onnx `FastClusteringConfig()` 時未帶參數，等於用預設 `num_clusters=-1`（自動偵測）+ `threshold=0.5`，對這類錄音過度敏感導致過度分裂。透過 codex-handoff/codex-receive 跨帳號分工完成修復：Python 側 `diarization_service.diarize()`/`_build_pipeline` 新增可選 `num_speakers`/`threshold` 參數（不強改預設值，只加介面——沒有真實錄音驗證新門檻前不做臆測式調整），`worker_entrypoint._diarize` 透傳 `payload.get("num_speakers")`；Swift 側 `WorkerSupervisor.diarize` 新增 `numSpeakers` 參數，UI 加「已知講者人數」輸入欄位。另外新增純函式 `SpeakerRename`（`extractSpeakerLabels`/`applySpeakerRenames`），在 `ContentView+Results.swift` 加「重新命名講者」sheet，把逐字稿裡的 `[Speaker X]` 標籤直接取代成使用者輸入的真實姓名，沿用既有 `transcriptDraft` → `儲存修改` → `history.updateText` 持久化路徑，未改動 `TranscriptionHistoryEntry`/`TranscriptionSegment` 資料模型。獨立驗收時逐檔比對 `git diff`，本機重跑 pytest 25/25、`SpeakerRenameTests` 5/5、完整 `swift test` 175/175、push 前 pre-push hook 額外跑過全專案 307 個 Python 測試全線，皆與對方回報一致，無範圍外洩。commit `4cece05` 已 push `origin/whisper-swift`。
-Next action：無立即待辦；`threshold` 目前只在 Python 層加了介面，Swift/UI 尚未曝露（HANDOFF 範圍排除），之後若需要在 UI 上也能調整敏感度可再開任務；「已知講者人數」欄位與「重新命名講者」功能需要使用者下次打包/跑真實會議錄音時實際驗證效果（自動化測試只覆蓋純函式邏輯，無法驗證 clustering 在真實音訊上是否真的減少過度分裂）
+Last checkpoint: 2026-08-03 11:20
+Phase: 講者辨識過度分裂修復 + 講者重新命名功能 — 已完成、已 push、真機驗證通過
+Working: 使用者發現真實錄音的講者辨識結果出現 `Speaker 31`/`33`/`39`/`46`/`55` 等異常高編號（實際會議只有 4~6 位講者），追查根因是 `diarization_service.py` 呼叫 sherpa-onnx `FastClusteringConfig()` 時未帶參數，等於用預設 `num_clusters=-1`（自動偵測）+ `threshold=0.5`，對這類錄音過度敏感導致過度分裂。透過 codex-handoff/codex-receive 跨帳號分工完成修復：Python 側 `diarization_service.diarize()`/`_build_pipeline` 新增可選 `num_speakers`/`threshold` 參數（不強改預設值，只加介面——沒有真實錄音驗證新門檻前不做臆測式調整），`worker_entrypoint._diarize` 透傳 `payload.get("num_speakers")`；Swift 側 `WorkerSupervisor.diarize` 新增 `numSpeakers` 參數，UI 加「已知講者人數」輸入欄位。另外新增純函式 `SpeakerRename`（`extractSpeakerLabels`/`applySpeakerRenames`），在 `ContentView+Results.swift` 加「重新命名講者」sheet，把逐字稿裡的 `[Speaker X]` 標籤直接取代成使用者輸入的真實姓名，沿用既有 `transcriptDraft` → `儲存修改` → `history.updateText` 持久化路徑，未改動 `TranscriptionHistoryEntry`/`TranscriptionSegment` 資料模型。獨立驗收時逐檔比對 `git diff`，本機重跑 pytest 25/25、`SpeakerRenameTests` 5/5、完整 `swift test` 175/175、push 前 pre-push hook 額外跑過全專案 307 個 Python 測試全線，皆與對方回報一致，無範圍外洩。commit `4cece05` 已 push `origin/whisper-swift`。重新打包（`build_worker_runtime.sh` + `build_swiftui_app.sh`）並安裝到 `~/Applications/Whisper Swift.app` 後，使用者在真機上手動測試確認：「已知講者人數」欄位有出現在「辨識講者」按鈕旁；「重新命名講者」功能實測正常（使用者原話：「目前測試重新命名講者測試正常」）。
+Next action：無立即待辦；`threshold` 目前只在 Python 層加了介面，Swift/UI 尚未曝露（HANDOFF 範圍排除），之後若需要在 UI 上也能調整敏感度可再開任務；clustering 過度分裂本身是否真的改善（用「已知講者人數」欄位帶入正確人數後，逐字稿是否不再出現 `Speaker 39` 這種異常編號）使用者尚未明確回報，僅確認了 UI 元件存在與重新命名功能可用
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始
 
 ## Checkpoint History
