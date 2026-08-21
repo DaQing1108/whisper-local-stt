@@ -9,7 +9,7 @@ Flask-Cors==6.0.5
 waitress==3.0.2
 
 # ── Utilities ──────────────────────────────────────────────────
-python-dotenv==1.2.2
+python-dotenv==1.2.3
 notion-client==3.1.0
 opencc-python-reimplemented>=0.1.7
 
