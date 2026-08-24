@@ -12,6 +12,16 @@ struct PendingDiarizationOverwrite: Identifiable {
     let segments: [TranscriptionSegment]
 }
 
+/// A "重新轉錄" request against an entry that's currently open in the workspace
+/// with unsaved manual edits, so submitting it right away would risk the
+/// completion later overwriting those edits without the user ever having
+/// agreed to it. Drives a confirmation dialog before the transcribe request
+/// is actually sent.
+struct PendingRetranscribeOverwrite: Identifiable {
+    let id = UUID()
+    let entry: TranscriptionHistoryEntry
+}
+
 enum WorkspaceTab: Hashable, Identifiable, CaseIterable {
     case transcript
     case summary
@@ -91,6 +101,24 @@ extension ContentView {
             }
         } message: { _ in
             Text("目前逐字稿已被手動編輯（含重新命名講者）。是否要用新的講者辨識結果覆蓋？選擇取消將捨棄本次辨識結果，無法復原。")
+        }
+        .confirmationDialog(
+            "此記錄已被手動編輯，確定要重新轉錄嗎？",
+            isPresented: Binding(
+                get: { pendingRetranscribeOverwrite != nil },
+                set: { isPresented in if !isPresented { pendingRetranscribeOverwrite = nil } }
+            ),
+            presenting: pendingRetranscribeOverwrite
+        ) { pending in
+            Button("覆蓋，重新轉錄", role: .destructive) {
+                pendingRetranscribeOverwrite = nil
+                startRetranscribe(pending.entry)
+            }
+            Button("取消", role: .cancel) {
+                pendingRetranscribeOverwrite = nil
+            }
+        } message: { _ in
+            Text("目前逐字稿已被手動編輯（含重新命名講者）。重新轉錄完成後將覆蓋這筆記錄的內容。選擇取消將不會送出重新轉錄請求。")
         }
         .sheet(item: $speakerRenameSheetData) { data in
             SpeakerRenameSheetView(
@@ -231,6 +259,31 @@ extension ContentView {
         } catch {
             diarizationTargetEntryID = nil
             errorMessage = "無法啟動講者辨識：\(error.localizedDescription)"
+        }
+    }
+
+    func retranscribe(_ entry: TranscriptionHistoryEntry) {
+        if currentEntryID == entry.id, isDraftDirty {
+            pendingRetranscribeOverwrite = PendingRetranscribeOverwrite(entry: entry)
+            return
+        }
+        startRetranscribe(entry)
+    }
+
+    private func startRetranscribe(_ entry: TranscriptionHistoryEntry) {
+        do {
+            retranscribeTargetEntryID = entry.id
+            try worker.transcribe(
+                audioURL: URL(fileURLWithPath: entry.audioPath),
+                modelName: entry.model,
+                language: entry.language,
+                domain: entry.domain,
+                extraTerms: entry.extraTerms
+            )
+            errorMessage = nil
+        } catch {
+            retranscribeTargetEntryID = nil
+            errorMessage = "無法啟動重新轉錄：\(error.localizedDescription)"
         }
     }
 
@@ -501,6 +554,27 @@ extension ContentView {
                 )
                 transcriptDraft = liveRecording.transcriptText
                 isDraftDirty = false
+                errorMessage = "History update failed: \(error.localizedDescription)"
+            }
+            return
+        }
+        if let targetID = retranscribeTargetEntryID {
+            retranscribeTargetEntryID = nil
+            do {
+                if let updated = try history.updateResult(
+                    id: targetID,
+                    text: completed.text,
+                    segments: completed.segments,
+                    durationSeconds: completed.durationSeconds,
+                    audioURL: nil
+                ) {
+                    if currentEntryID == updated.id {
+                        transcriptDraft = updated.text
+                        isDraftDirty = false
+                    }
+                }
+                errorMessage = nil
+            } catch {
                 errorMessage = "History update failed: \(error.localizedDescription)"
             }
             return

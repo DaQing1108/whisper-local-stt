@@ -63,6 +63,27 @@ struct TranscriptionHistoryStoreTests {
     }
 
     @Test
+    func updateResultIsNoOpWhenEntryWasDeleted() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("history.json")
+        let store = TranscriptionHistoryStore(fileURL: url)
+        let audio = directory.appendingPathComponent("meeting.wav")
+        let entry = try store.recordCompleted(audioURL: audio, model: "base", language: "zh", text: "會議完成")
+
+        try store.remove(entry)
+        #expect(store.entries.isEmpty)
+
+        let result = try store.updateResult(id: entry.id, text: "重新轉錄後的文字", segments: [], durationSeconds: nil)
+        #expect(result == nil)
+        #expect(store.entries.isEmpty)
+
+        let restored = TranscriptionHistoryStore(fileURL: url)
+        #expect(restored.entries.isEmpty)
+    }
+
+    @Test
     func corruptHistoryIsReportedWithoutInventingEntries() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("history-\(UUID()).json")
         try Data("not-json".utf8).write(to: url)

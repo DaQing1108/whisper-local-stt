@@ -349,6 +349,7 @@ final class WorkerSupervisor {
     ) throws -> String {
         guard activeRequestID == nil else { throw WorkerSupervisorError.transcriptionAlreadyActive }
         guard !modelOperationInProgress else { throw WorkerSupervisorError.modelOperationActive }
+        guard !diarizationOperationInProgress else { throw WorkerSupervisorError.diarizationOperationActive }
         let requestID = UUID().uuidString
         var payload: [String: JSONValue] = [
             "audio_path": .string(audioURL.path),

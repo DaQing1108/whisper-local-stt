@@ -41,6 +41,12 @@ extension ContentView {
                                         notionStatus = "已解除重試鎖定"
                                     }
                                 }
+                                if entry.segments.isEmpty && FileManager.default.fileExists(atPath: entry.audioPath) {
+                                    Button("重新轉錄") { retranscribe(entry) }
+                                        .disabled(worker.activeRequestID != nil
+                                                  || worker.diarizationOperationInProgress
+                                                  || worker.modelOperationInProgress)
+                                }
                                 Spacer()
                                 Button("刪除", role: .destructive) { removeHistory(entry) }
                             }

@@ -35,9 +35,11 @@ struct ContentView: View {
     @State var transcriptDraft = ""
     @State var isDraftDirty = false
     @State var diarizationTargetEntryID: UUID?
+@State var retranscribeTargetEntryID: UUID?
     @State var knownSpeakerCount = ""
     @State var speakerRenameSheetData: SpeakerRenameSheetData?
     @State var pendingDiarizationOverwrite: PendingDiarizationOverwrite?
+@State var pendingRetranscribeOverwrite: PendingRetranscribeOverwrite?
     @State var audioPlayer: AVAudioPlayer?
     @State var playingSegmentIndex: Int?
     @State var playbackPollTimer: Timer?

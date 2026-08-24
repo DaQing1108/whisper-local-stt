@@ -148,6 +148,40 @@ struct WorkerSupervisorTests {
     }
 
     @Test
+    func transcribeRejectsWhenDiarizationActive() async throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let audio = temporary.appendingPathComponent("sample.wav")
+        try Data("audio".utf8).write(to: audio)
+        let workerScript = temporary.appendingPathComponent("fake_worker.py")
+        try fakeWorkerScript.write(to: workerScript, atomically: true, encoding: .utf8)
+        let supervisor = WorkerSupervisor()
+
+        try supervisor.start(
+            pythonURL: URL(fileURLWithPath: "/usr/bin/python3"),
+            workerURL: workerScript, workingDirectory: temporary
+        )
+        try await waitUntil { supervisor.state == .ready }
+
+        _ = try supervisor.diarize(
+            audioPath: audio.path,
+            segments: [TranscriptionSegment(start: 0, end: 30, text: "placeholder")]
+        )
+        #expect(supervisor.diarizationOperationInProgress)
+
+        #expect(throws: WorkerSupervisorError.diarizationOperationActive) {
+            try supervisor.transcribe(
+                audioURL: audio, modelName: "base", language: "zh",
+                domain: "technology", extraTerms: "VIA"
+            )
+        }
+        try await waitUntil { !supervisor.diarizedSegments.isEmpty }
+        supervisor.stop()
+    }
+
+    @Test
     func injectsKeychainCredentialIntoWorkerEnvironmentAndEnablesLLMPunctuation() async throws {
         let temporary = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
