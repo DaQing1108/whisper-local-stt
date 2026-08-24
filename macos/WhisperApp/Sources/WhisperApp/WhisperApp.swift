@@ -34,6 +34,27 @@ struct WhisperDesktopApp: App {
         worker.transcriptionCompletedHandler = { [weak history, weak mixedAudioRecording, weak liveRecording] completed in
             guard mixedAudioRecording?.ownsChunk(completed.audioURL) != true,
                   liveRecording?.ownsChunk(completed.audioURL) != true else { return }
+            // See TranscriptionCompletionRouting: a completion whose audio file
+            // already matches an existing history entry (re-transcribing that
+            // entry via "重新轉錄") must update that entry in place, not create
+            // a duplicate. Without this check, every re-transcribe request
+            // landed here (mixed/live never own the file) and unconditionally
+            // called recordCompleted, producing a brand-new entry every time
+            // regardless of what ContentView's own completion routing (which
+            // does know about the retranscribe target) decided.
+            if let existingID = TranscriptionCompletionRouting.existingEntryID(
+                forAudioPath: completed.audioURL.path,
+                in: history?.entries ?? []
+            ) {
+                _ = try? history?.updateResult(
+                    id: existingID,
+                    text: completed.text,
+                    segments: completed.segments,
+                    durationSeconds: completed.durationSeconds,
+                    audioURL: nil
+                )
+                return
+            }
             _ = try? history?.recordCompleted(
                 audioURL: completed.audioURL,
                 model: completed.modelName,
