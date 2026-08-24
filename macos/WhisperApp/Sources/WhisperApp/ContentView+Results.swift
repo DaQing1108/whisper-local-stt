@@ -1,6 +1,17 @@
 import SwiftUI
 import AVFoundation
 
+/// A completed speaker-diarization result that arrived while the draft had
+/// unsaved manual edits (including a prior speaker rename), so it can't be
+/// applied automatically. Drives a confirmation dialog instead of being
+/// silently discarded — the previous behavior only logged an inline message
+/// suggesting "複製" as a recovery path, which didn't actually work since the
+/// new segments were never written anywhere the user could copy from.
+struct PendingDiarizationOverwrite: Identifiable {
+    let id = UUID()
+    let segments: [TranscriptionSegment]
+}
+
 enum WorkspaceTab: Hashable, Identifiable, CaseIterable {
     case transcript
     case summary
@@ -53,37 +64,45 @@ extension ContentView {
         .onChange(of: worker.diarizedSegments) { _, segments in
             guard !segments.isEmpty else { return }
             guard diarizationTargetEntryID != nil, diarizationTargetEntryID == currentEntry?.id else { return }
+            diarizationTargetEntryID = nil
             guard !isDraftDirty else {
-                errorMessage = "講者辨識已完成，但逐字稿已被手動編輯，未覆蓋；請用「複製」另外取用結果。"
+                pendingDiarizationOverwrite = PendingDiarizationOverwrite(segments: segments)
                 return
             }
             transcriptDraft = Self.renderSpeakerLabeled(segments)
             isDraftDirty = true
-            diarizationTargetEntryID = nil
         }
         .onDisappear { stopPlaybackPolling() }
-        .sheet(isPresented: $isRenamingSpeakers) { speakerRenameSheet }
-    }
-
-    private var speakerRenameSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("重新命名講者").font(.headline)
-            ForEach(speakerRenameInputs.keys.sorted(), id: \.self) { label in
-                TextField(label, text: Binding(
-                    get: { speakerRenameInputs[label] ?? label },
-                    set: { speakerRenameInputs[label] = $0 }
-                ))
+        .confirmationDialog(
+            "講者辨識已完成，但逐字稿已被手動編輯",
+            isPresented: Binding(
+                get: { pendingDiarizationOverwrite != nil },
+                set: { isPresented in if !isPresented { pendingDiarizationOverwrite = nil } }
+            ),
+            presenting: pendingDiarizationOverwrite
+        ) { pending in
+            Button("覆蓋逐字稿，套用新結果", role: .destructive) {
+                transcriptDraft = Self.renderSpeakerLabeled(pending.segments)
+                isDraftDirty = true
+                pendingDiarizationOverwrite = nil
             }
-            HStack {
-                Spacer()
-                Button("取消") { isRenamingSpeakers = false }
-                Button("確認") { applySpeakerRenameSheet() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(DaylightPalette.accentActive)
+            Button("取消，捨棄新結果", role: .cancel) {
+                pendingDiarizationOverwrite = nil
             }
+        } message: { _ in
+            Text("目前逐字稿已被手動編輯（含重新命名講者）。是否要用新的講者辨識結果覆蓋？選擇取消將捨棄本次辨識結果，無法復原。")
         }
-        .padding(20)
-        .frame(minWidth: 320)
+        .sheet(item: $speakerRenameSheetData) { data in
+            SpeakerRenameSheetView(
+                labels: data.labels,
+                onConfirm: { renames in
+                    transcriptDraft = SpeakerRename.applySpeakerRenames(renames, in: transcriptDraft)
+                    isDraftDirty = true
+                    speakerRenameSheetData = nil
+                },
+                onCancel: { speakerRenameSheetData = nil }
+            )
+        }
     }
 
     private var transcriptContent: some View {
@@ -217,14 +236,7 @@ extension ContentView {
 
     func openSpeakerRenameSheet() {
         let labels = SpeakerRename.extractSpeakerLabels(from: transcriptDraft)
-        speakerRenameInputs = Dictionary(uniqueKeysWithValues: labels.map { ($0, $0) })
-        isRenamingSpeakers = true
-    }
-
-    func applySpeakerRenameSheet() {
-        transcriptDraft = SpeakerRename.applySpeakerRenames(speakerRenameInputs, in: transcriptDraft)
-        isDraftDirty = true
-        isRenamingSpeakers = false
+        speakerRenameSheetData = SpeakerRenameSheetData(labels: labels)
     }
 
     func triggerDiarizationWarmup() {
