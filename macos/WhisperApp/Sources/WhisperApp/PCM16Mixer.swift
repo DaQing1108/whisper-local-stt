@@ -7,7 +7,7 @@ enum PCM16Mixer {
         for index in 0..<sampleCount {
             let left = sample(at: index, in: first)
             let right = sample(at: index, in: second)
-            var mixed = Int16(clamping: (Int32(left) + Int32(right)) / 2).littleEndian
+            var mixed = Int16(clamping: Int32(left) + Int32(right)).littleEndian
             Swift.withUnsafeBytes(of: &mixed) { output.append(contentsOf: $0) }
         }
         return output
