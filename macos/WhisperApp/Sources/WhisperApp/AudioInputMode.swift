@@ -56,6 +56,13 @@ enum CaptureUIRules {
     ) -> Bool {
         explicitlyRequestedPresentation || !isDraftDirty
     }
+
+    /// Whether a just-finalized mixed-audio result should be reflected in the
+    /// visible workspace. Mirrors the existing "don't clobber an in-progress
+    /// manual edit" guard used elsewhere (diarization apply, retranscribe apply).
+    static func shouldSyncFinalizedMixedAudioResult(isDraftDirty: Bool) -> Bool {
+        !isDraftDirty
+    }
 }
 
 struct PendingSummaryDraft {

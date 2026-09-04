@@ -182,6 +182,10 @@ extension ContentView {
                 }
                 Text(worker.llmPunctuationEnabled ? "✨ 語意校對：已啟用" : "🔇 語意校對：未設定 API Key，已跳過")
                     .font(.caption2).foregroundStyle(.secondary)
+                if mixedAudioRecording.isDraining {
+                    Text("⏳ 混音錄音已停止，最後片段仍在轉錄中…")
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 ProgressView(value: worker.progress)
                 TextEditor(text: Binding(
                     get: { transcriptDraft },

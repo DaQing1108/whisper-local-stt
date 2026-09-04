@@ -193,14 +193,17 @@ extension ContentView {
                     domain: settings.domain, extraTerms: effectiveExtraTerms
                 )
                 if let id = mixedAudioHistoryEntryID,
-                   let sessionURL = mixedAudioRecording.sessionFinalizedURL {
-                    _ = try history.updateResult(
-                        id: id,
-                        text: mixedAudioRecording.transcriptText,
-                        segments: mixedAudioRecording.transcriptSegments,
-                        durationSeconds: mixedAudioRecording.transcriptDurationSeconds,
-                        audioURL: sessionURL
-                    )
+                   let sessionURL = mixedAudioRecording.sessionFinalizedURL,
+                   let updated = try history.updateResult(
+                       id: id,
+                       text: mixedAudioRecording.transcriptText,
+                       segments: mixedAudioRecording.transcriptSegments,
+                       durationSeconds: mixedAudioRecording.transcriptDurationSeconds,
+                       audioURL: sessionURL
+                   ) {
+                    if CaptureUIRules.shouldSyncFinalizedMixedAudioResult(isDraftDirty: isDraftDirty) {
+                        restore(updated)
+                    }
                 }
                 errorMessage = nil
             } catch {

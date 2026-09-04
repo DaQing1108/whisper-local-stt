@@ -52,4 +52,10 @@ struct CaptureUIRulesTests {
             explicitlyRequestedPresentation: false
         ))
     }
+
+    @Test
+    func finalizedMixedAudioResultSyncsOnlyWhenDraftIsClean() {
+        #expect(CaptureUIRules.shouldSyncFinalizedMixedAudioResult(isDraftDirty: false))
+        #expect(!CaptureUIRules.shouldSyncFinalizedMixedAudioResult(isDraftDirty: true))
+    }
 }
