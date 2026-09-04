@@ -22,6 +22,19 @@ struct PendingRetranscribeOverwrite: Identifiable {
     let entry: TranscriptionHistoryEntry
 }
 
+/// A completed "重新轉錄" result whose text is dramatically shorter than the
+/// entry it would replace (per `TranscriptOverwriteGuard`). Instead of letting
+/// `history.updateResult` silently overwrite a full transcript with a truncated
+/// one, this drives a confirmation dialog; the store still keeps a pre-change
+/// backup regardless of the user's choice here.
+struct PendingRetranscribeResultOverwrite: Identifiable {
+    let id = UUID()
+    let entryID: UUID
+    let text: String
+    let segments: [TranscriptionSegment]
+    let durationSeconds: Double?
+}
+
 enum WorkspaceTab: Hashable, Identifiable, CaseIterable {
     case transcript
     case summary
@@ -75,11 +88,19 @@ extension ContentView {
             guard !segments.isEmpty else { return }
             guard diarizationTargetEntryID != nil, diarizationTargetEntryID == currentEntry?.id else { return }
             diarizationTargetEntryID = nil
+            let rendered = Self.renderSpeakerLabeled(segments)
             guard !isDraftDirty else {
                 pendingDiarizationOverwrite = PendingDiarizationOverwrite(segments: segments)
                 return
             }
-            transcriptDraft = Self.renderSpeakerLabeled(segments)
+            if TranscriptOverwriteGuard.isDestructiveShrink(
+                existingText: currentEntry?.text ?? "",
+                incomingText: rendered
+            ) {
+                pendingDiarizationOverwrite = PendingDiarizationOverwrite(segments: segments)
+                return
+            }
+            transcriptDraft = rendered
             isDraftDirty = true
         }
         .onDisappear { stopPlaybackPolling() }
@@ -99,8 +120,8 @@ extension ContentView {
             Button("取消，捨棄新結果", role: .cancel) {
                 pendingDiarizationOverwrite = nil
             }
-        } message: { _ in
-            Text("目前逐字稿已被手動編輯（含重新命名講者）。是否要用新的講者辨識結果覆蓋？選擇取消將捨棄本次辨識結果，無法復原。")
+        } message: { pending in
+            Text("目前逐字稿 \(currentEntry?.text.count ?? 0) 字，新結果 \(Self.renderSpeakerLabeled(pending.segments).count) 字。逐字稿已被手動編輯，或新結果大幅縮水。是否要用新的講者辨識結果覆蓋？選擇取消將捨棄本次辨識結果，無法復原。")
         }
         .confirmationDialog(
             "此記錄已被手動編輯，確定要重新轉錄嗎？",
@@ -119,6 +140,24 @@ extension ContentView {
             }
         } message: { _ in
             Text("目前逐字稿已被手動編輯（含重新命名講者）。重新轉錄完成後將覆蓋這筆記錄的內容。選擇取消將不會送出重新轉錄請求。")
+        }
+        .confirmationDialog(
+            "重新轉錄結果比現有逐字稿短很多",
+            isPresented: Binding(
+                get: { pendingRetranscribeResultOverwrite != nil },
+                set: { isPresented in if !isPresented { pendingRetranscribeResultOverwrite = nil } }
+            ),
+            presenting: pendingRetranscribeResultOverwrite
+        ) { pending in
+            Button("覆蓋，套用新結果", role: .destructive) {
+                applyRetranscribeResultOverwrite(pending)
+                pendingRetranscribeResultOverwrite = nil
+            }
+            Button("取消，保留現有逐字稿", role: .cancel) {
+                pendingRetranscribeResultOverwrite = nil
+            }
+        } message: { pending in
+            Text("目前逐字稿 \(history.entries.first { $0.id == pending.entryID }?.text.count ?? 0) 字，重新轉錄結果 \(pending.text.count) 字。套用後會覆蓋這筆記錄（舊內容已自動存一份備份）。選擇取消將捨棄本次重新轉錄結果，記錄維持不變。")
         }
         .sheet(item: $speakerRenameSheetData) { data in
             SpeakerRenameSheetView(
@@ -284,6 +323,29 @@ extension ContentView {
         } catch {
             retranscribeTargetEntryID = nil
             errorMessage = "無法啟動重新轉錄：\(error.localizedDescription)"
+        }
+    }
+
+    /// Commit a retranscribe result the user confirmed despite it shrinking the
+    /// transcript. Mirrors the non-shrink completion path in
+    /// `showLatestWorkerResultIfNeeded`; the store writes a backup on its own.
+    func applyRetranscribeResultOverwrite(_ pending: PendingRetranscribeResultOverwrite) {
+        do {
+            if let updated = try history.updateResult(
+                id: pending.entryID,
+                text: pending.text,
+                segments: pending.segments,
+                durationSeconds: pending.durationSeconds,
+                audioURL: nil
+            ) {
+                if currentEntryID == updated.id {
+                    transcriptDraft = updated.text
+                    isDraftDirty = false
+                }
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = "History update failed: \(error.localizedDescription)"
         }
     }
 
@@ -560,6 +622,19 @@ extension ContentView {
         }
         if let targetID = retranscribeTargetEntryID {
             retranscribeTargetEntryID = nil
+            let existing = history.entries.first { $0.id == targetID }
+            if let existing, TranscriptOverwriteGuard.isDestructiveShrink(
+                existingText: existing.text,
+                incomingText: completed.text
+            ) {
+                pendingRetranscribeResultOverwrite = PendingRetranscribeResultOverwrite(
+                    entryID: targetID,
+                    text: completed.text,
+                    segments: completed.segments,
+                    durationSeconds: completed.durationSeconds
+                )
+                return
+            }
             do {
                 if let updated = try history.updateResult(
                     id: targetID,

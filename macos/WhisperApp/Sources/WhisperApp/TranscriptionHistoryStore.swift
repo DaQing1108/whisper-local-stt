@@ -87,6 +87,7 @@ final class TranscriptionHistoryStore {
     private(set) var writeError: String?
     private let fileURL: URL
     private var maximumEntries: Int
+    private let maxBackupsPerEntry = 5
 
     init(fileURL: URL = TranscriptionHistoryStore.defaultFileURL(), maximumEntries: Int = 200) {
         self.fileURL = fileURL
@@ -133,6 +134,7 @@ final class TranscriptionHistoryStore {
 
     func updateText(id: UUID, text: String) throws {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        backupEntry(entries[index])
         let previous = entries
         entries[index].text = text
         do {
@@ -156,6 +158,7 @@ final class TranscriptionHistoryStore {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return nil }
         let previous = entries
         let existing = entries[index]
+        backupEntry(existing)
         entries[index] = TranscriptionHistoryEntry(
             id: existing.id,
             completedAt: existing.completedAt,
@@ -253,6 +256,57 @@ final class TranscriptionHistoryStore {
             throw error
         }
         return removed
+    }
+
+    /// Most recent pre-change snapshot for `id`, or nil if none / unreadable.
+    func latestBackup(for id: UUID) -> TranscriptionHistoryEntry? {
+        let directory = backupDirectory(for: id)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        ) else { return nil }
+        let latest = files
+            .filter { $0.pathExtension == "json" }
+            .max { backupTimestamp($0) < backupTimestamp($1) }
+        guard let latest, let data = try? Data(contentsOf: latest) else { return nil }
+        return try? JSONDecoder().decode(TranscriptionHistoryEntry.self, from: data)
+    }
+
+    private func backupDirectory(for id: UUID) -> URL {
+        fileURL.deletingLastPathComponent()
+            .appendingPathComponent("history-backups/\(id.uuidString)", isDirectory: true)
+    }
+
+    private func backupTimestamp(_ url: URL) -> Int {
+        Int(url.deletingPathExtension().lastPathComponent) ?? 0
+    }
+
+    /// Best-effort pre-change JSON snapshot of `entry` (its OLD text/segments).
+    /// Any failure here is non-fatal: it must never throw and never block the
+    /// caller's main persist. On failure it records a non-fatal `writeError`
+    /// note, which the caller's successful `persist()` then clears.
+    private func backupEntry(_ entry: TranscriptionHistoryEntry) {
+        let directory = backupDirectory(for: entry.id)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let filename = "\(Int(Date().timeIntervalSince1970 * 1000)).json"
+            let data = try JSONEncoder().encode(entry)
+            try data.write(to: directory.appendingPathComponent(filename), options: .atomic)
+            pruneBackups(in: directory)
+        } catch {
+            writeError = "備份失敗（不影響主儲存）：\(error.localizedDescription)"
+        }
+    }
+
+    private func pruneBackups(in directory: URL) {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        ) else { return }
+        let jsonFiles = files.filter { $0.pathExtension == "json" }
+        guard jsonFiles.count > maxBackupsPerEntry else { return }
+        let oldestFirst = jsonFiles.sorted { backupTimestamp($0) < backupTimestamp($1) }
+        for file in oldestFirst.prefix(jsonFiles.count - maxBackupsPerEntry) {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     private func load() {

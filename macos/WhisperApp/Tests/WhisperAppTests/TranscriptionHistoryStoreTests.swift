@@ -200,6 +200,122 @@ struct TranscriptionHistoryStoreTests {
         #expect(store.writeError != nil)
     }
 
+    // MARK: - Pre-change backup snapshots (transcript overwrite guard)
+
+    private func backupFiles(in directory: URL, entryID: UUID) -> [URL] {
+        let dir = directory.appendingPathComponent("history-backups/\(entryID.uuidString)", isDirectory: true)
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "json" }
+            .sorted { ($0.deletingPathExtension().lastPathComponent) < ($1.deletingPathExtension().lastPathComponent) }
+    }
+
+    @Test("updateResult and updateText snapshot the pre-overwrite entry before mutating")
+    func backupCapturesPreOverwriteValues() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("history.json")
+        let store = TranscriptionHistoryStore(fileURL: url)
+        let entry = try store.recordCompleted(
+            audioURL: directory.appendingPathComponent("meeting.wav"),
+            model: "base", language: "zh", text: "原始完整逐字稿內容",
+            segments: [.init(start: 0, end: 3, text: "原始完整逐字稿內容")], durationSeconds: 3
+        )
+
+        _ = try store.updateResult(id: entry.id, text: "殘缺短版", segments: [], durationSeconds: 1)
+
+        let afterResult = backupFiles(in: directory, entryID: entry.id)
+        #expect(afterResult.count == 1)
+        let snap1 = try JSONDecoder().decode(
+            TranscriptionHistoryEntry.self, from: Data(contentsOf: afterResult[0])
+        )
+        #expect(snap1.text == "原始完整逐字稿內容")
+        #expect(snap1.segments == entry.segments)
+        #expect(snap1.durationSeconds == 3)
+
+        Thread.sleep(forTimeInterval: 0.003)
+        try store.updateText(id: entry.id, text: "又被改一次")
+        let afterText = backupFiles(in: directory, entryID: entry.id)
+        #expect(afterText.count == 2)
+        let snap2 = try JSONDecoder().decode(
+            TranscriptionHistoryEntry.self, from: Data(contentsOf: afterText[1])
+        )
+        #expect(snap2.text == "殘缺短版")
+    }
+
+    @Test("latestBackup returns the most recent pre-change snapshot")
+    func latestBackupReadsNewestSnapshot() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("history.json")
+        let store = TranscriptionHistoryStore(fileURL: url)
+        let entry = try store.recordCompleted(
+            audioURL: directory.appendingPathComponent("m.wav"),
+            model: "base", language: "zh", text: "v1"
+        )
+
+        #expect(store.latestBackup(for: entry.id) == nil)
+
+        try store.updateText(id: entry.id, text: "v2")
+        Thread.sleep(forTimeInterval: 0.003)
+        try store.updateText(id: entry.id, text: "v3")
+
+        let latest = try #require(store.latestBackup(for: entry.id))
+        #expect(latest.text == "v2")
+        #expect(latest.id == entry.id)
+    }
+
+    @Test("Backup directory keeps only the newest 5 snapshots after 7 updates")
+    func backupRotationKeepsNewestFive() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("history.json")
+        let store = TranscriptionHistoryStore(fileURL: url)
+        let entry = try store.recordCompleted(
+            audioURL: directory.appendingPathComponent("m.wav"),
+            model: "base", language: "zh", text: "gen-0"
+        )
+
+        for generation in 1...7 {
+            try store.updateText(id: entry.id, text: "gen-\(generation)")
+            Thread.sleep(forTimeInterval: 0.003)
+        }
+
+        let files = backupFiles(in: directory, entryID: entry.id)
+        #expect(files.count == 5)
+        let texts = try files.map {
+            try JSONDecoder().decode(TranscriptionHistoryEntry.self, from: Data(contentsOf: $0)).text
+        }
+        // 7 updates snapshot the OLD text each time: gen-0 .. gen-6. Newest 5 kept.
+        #expect(texts == ["gen-2", "gen-3", "gen-4", "gen-5", "gen-6"])
+    }
+
+    @Test("updateText/updateResult still succeed when the backup directory cannot be created")
+    func backupFailureNeverBlocksMainPersist() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("history.json")
+        let store = TranscriptionHistoryStore(fileURL: url)
+        let entry = try store.recordCompleted(
+            audioURL: directory.appendingPathComponent("m.wav"),
+            model: "base", language: "zh", text: "original"
+        )
+        // Occupy the backup root path with a plain file so directory creation fails.
+        try Data("blocker".utf8).write(to: directory.appendingPathComponent("history-backups"))
+
+        try store.updateText(id: entry.id, text: "edited-text")
+        _ = try store.updateResult(id: entry.id, text: "retranscribed", segments: [], durationSeconds: 2)
+
+        let restored = TranscriptionHistoryStore(fileURL: url)
+        #expect(restored.entries.count == 1)
+        #expect(restored.entries[0].text == "retranscribed")
+        #expect(restored.entries[0].durationSeconds == 2)
+        #expect(store.latestBackup(for: entry.id) == nil)
+    }
+
     @Test func retentionTrimAndClearAllPersistImmediately() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
