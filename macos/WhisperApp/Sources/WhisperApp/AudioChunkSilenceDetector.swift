@@ -9,10 +9,25 @@ enum AudioChunkSilenceDetector {
     /// transient I/O problem never causes real audio to be silently dropped without being
     /// sent to the worker. A file that reads successfully but contains no PCM samples past
     /// the WAV header is legitimately empty audio, not a read failure, and is treated as silent.
-    static func isSilent(contentsOf url: URL, threshold: Double = defaultThreshold) -> Bool {
+    static func isSilent(
+        contentsOf url: URL,
+        threshold: Double = defaultThreshold,
+        windowSeconds: Double = 1.0,
+        sampleRate: Double = Double(PCM16WAVWriter.sampleRate)
+    ) -> Bool {
         guard let data = try? Data(contentsOf: url) else { return false }
         guard data.count > 44 else { return true }
-        return rootMeanSquare(ofPCM16LittleEndian: data.suffix(from: 44)) < threshold
+        let samples = data.suffix(from: 44)
+        let windowByteCount = max(2, Int(windowSeconds * sampleRate) * 2)  // 2 bytes/sample (Int16)
+        var offset = samples.startIndex
+        while offset < samples.endIndex {
+            let end = min(offset + windowByteCount, samples.endIndex)
+            if rootMeanSquare(ofPCM16LittleEndian: samples[offset..<end]) >= threshold {
+                return false
+            }
+            offset = end
+        }
+        return true
     }
 
     /// Actual audio duration of a finalized chunk, derived from its PCM byte count — not the
