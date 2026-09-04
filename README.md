@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-09-05（第三輪）
-Phase: 混音 chunk 靜音判定改分窗，修 segments 系統性掉尾根因（codex-handoff/codex-receive）
-Working: 承接「混音模式 segments 掉尾」的根因調查——`AudioChunkSilenceDetector.isSilent()` 對每個 ~15 秒 chunk 算**整個 chunk 的平均 RMS**，低於門檻 500 就整段判定靜音、直接刪除音檔、以空文字入帳（duration 照計但 segments 空）。真實對話有停頓，15 秒裡只要有幾秒說話、其餘安靜，整段平均就容易被稀釋到門檻以下——不是真靜音，是被平均掉了。用 Python 對 F8CF06E9 那筆會議的完整音檔模擬新舊演算法：219 個模擬 chunk 中，舊演算法（整塊平均）判定靜音 33 個，新演算法（分窗格）只剩 11 個——**22 個 chunk（~5.5 分鐘）被舊邏輯冤枉丟棄**，證實假設。考慮過縮短 `flushInterval` 當替代方案，因為只是把問題往後挪、且會動到有 SPIKE 的檔案而放棄。用 `/codex-handoff` 產出 `HANDOFF_CODEX_SILENCE_DETECTOR_WINDOWING.md`（AC-1~9，人工列出），透過 Agent 交另一個 Claude 開發：`isSilent` 改成分窗格判定（任一窗格 RMS ≥ 門檻就不算靜音），新增 `windowSeconds`/`sampleRate` 參數皆有預設值，`MixedAudioRecordingController.swift` 唯一呼叫端完全不用改一行、也完全沒被讀取或觸碰。對方本機 commit（`42768d2`+`56301de`）不 push，新增 5 個邊界測試（核心稀釋案例、全靜音、全響亮、殘餘尾端窗格、預設取樣率）。`/codex-receive` 獨立驗證：`swift build` 乾淨、`AudioChunkSilenceDetectorTests` 13/13（8 既有逐字未改 + 5 新增）、完整 `swift test` 201 tests 僅已知例外（SPIKE env var + `LiveRecordingControllerTests` 並行負載 flake，`--filter` 單獨全過）、diff 範圍精確（commit-scoped 只 2 檔）、SPIKE 完全未觸碰、schema 未改。FF-merge 進 `whisper-swift`，push（pre-push hook Python 307 tests 全過）→ `56301de`。
-Next action：真機驗證——錄一段 3-5 分鐘、中間刻意停頓幾次的測試混音錄音，比對修復前後 segments coverage 是否改善；連同前兩輪（TranscriptOverwriteGuard 兩個確認對話框 + 混音停止畫面同步）一起併入下次 build/安裝走查。混音振幅減半（`PCM16Mixer` 平均混音法）是否為複合成因，仍待既有 SPIKE 收尾後確認。混音停止時 session 合併音檔與最後一段轉錄的時序問題（上一輪發現，audioPath 有時指向已清掉的 chunk 檔）仍待另開任務查根因。
-Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始；`MixedAudioRecordingController.swift` 及其測試仍是既有未收尾 WIP（SPIKE：`WHISPER_DEBUG_SEPARATE_TRACKS`），連續三次任務皆刻意未觸碰
+Last checkpoint: 2026-09-05（第四輪）
+Phase: `PCM16Mixer` 改用加總取代平均，修單一音源振幅腰斬（codex-handoff/codex-receive）
+Working: 承接工作區既有三週的 SPIKE（`WHISPER_DEBUG_SEPARATE_TRACKS`，未提交、本次仍未觸碰其程式碼，只用它的診斷輸出）——用現有工作區（含 SPIKE）build 一份測試版 App，透過 Terminal 直接執行繞開 Gatekeeper，用電腦操作工具驅動真實錄音（`say` 播放測試語音當系統音源）。發現使用者原本卡住的「命令錯誤」根因：`~/Applications` 正式版跟測試版共用同一個 bundle identifier `com.via.whisper-swiftui` 同時在跑，兩個搶麥克風/系統音權限；先關掉正式版才能正常錄。錄完用 RMS 分析比對三個輸出檔（混音版/麥克風單獨/系統音單獨）：混音後 RMS 961 對系統音單獨軌 RMS 1796，**只剩 53.5%**，證實 `PCM16Mixer.mix()` 的平均法（`(left+right)/2`）在單一音源時會把振幅腰斬，且跟前一輪修的靜音判定是同一條供應鏈上會疊加的問題。用 `/codex-handoff` 產出 `HANDOFF_CODEX_PCM16MIXER_SUM.md`（AC-1~7，人工列出），交另一個 Claude 開發：拿掉 `/2`，改成加總後用既有的 `Int16(clamping:)` 自動 clip 溢位（單一音源時振幅完全不衰減；兩軌同時大聲時才會短暫削波，刻意接受的權衡），更新既有測試 + 新增 5 個測試（正常相加、雙向單一音源核心案例、正負溢位 clamp）。對方本機 commit（`f65b146`+`c1fd1d0`）不 push。`/codex-receive` 獨立驗證：`swift build` 乾淨、`PCM16MixerTests` 6/6、完整 `swift test` 206 tests 僅已知例外（SPIKE + `LiveRecordingControllerTests` 並行 flake，`--filter` 單獨全過）、diff commit-scoped 僅 2 檔、SPIKE 完全未觸碰。FF-merge 進 `whisper-swift`，push（pre-push hook Python 307 tests 全過）→ `c1fd1d0`。附帶驗證：真機測試中觀察到輪 2 修的「混音錄音已停止，最後片段仍在轉錄中…」收尾提示確實有正常顯示。
+Next action：四輪修復全部待真機走查（TranscriptOverwriteGuard 兩個確認對話框、混音停止畫面同步、silence-detector 分窗化對 coverage 的改善、這次的振幅修復對轉錄準確率的實際影響）——建議一次 build 新版後全部一起測。混音停止時 session 合併音檔時序問題（audioPath 指向已清掉的 chunk 檔）仍待另開任務查根因。三週的 SPIKE 診斷程式碼可以考慮清掉了——本次已經用它拿到關鍵數據，假設已驗證、修復已完成。
+Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始；`MixedAudioRecordingController.swift` 及其測試仍是既有未收尾 SPIKE（`WHISPER_DEBUG_SEPARATE_TRACKS`），連續四次任務皆刻意未觸碰——目的已達成，下次可以考慮直接清掉這份 WIP
 
 ## Checkpoint History
+### 2026-09-05（第四輪）｜PCM16Mixer 改用加總，修單一音源振幅腰斬（codex-handoff/codex-receive）
+- Completed: 用工作區既有三週的 SPIKE 診斷程式碼 build 測試版、電腦操作工具驅動真機錄音（`say` 產生系統音源），RMS 分析證實混音後單一音源振幅只剩原本的 53.5%（`PCM16Mixer.mix()` 用 `(left+right)/2` 平均法）。過程中也發現並排除了使用者原本卡住的「命令錯誤」根因（正式版跟測試版共用 bundle ID 同時搶音訊權限）。透過 codex-handoff/codex-receive 修復：拿掉 `/2`，改加總 + 既有 `Int16(clamping:)` 自動 clip 溢位
+- State: `swift build` 乾淨；`PCM16MixerTests` 6/6（1 既有改名更新 + 5 新增）；完整 `swift test` 206 tests 僅已知例外；diff commit-scoped 僅 2 檔，SPIKE 未觸碰；FF-merge `whisper-swift`，push（pre-push hook 307 Python tests 全過）→ `c1fd1d0`。真機測試中順便驗證到輪 2 的收尾提示正常顯示
+- Next: 四輪修復（TranscriptOverwriteGuard、停止畫面同步、silence-detector 分窗化、這次的振幅修復）一次 build 新版後全部真機走查；SPIKE 診斷程式碼可以考慮收尾清掉
+
 ### 2026-09-05（第三輪）｜混音 chunk 靜音判定分窗化，修 segments 掉尾根因（codex-handoff/codex-receive）
 - Completed: 找到「混音模式 segments 系統性掉尾」的根因——`AudioChunkSilenceDetector.isSilent()` 用整個 ~15 秒 chunk 的平均 RMS 判靜音，真實停頓型對話容易被稀釋到門檻以下、整段被刪除音檔+清空 segments。用 Python 對真實會議音檔模擬新舊演算法，實測 22/33 個模擬 chunk（~5.5 分鐘）被舊邏輯冤枉丟棄。透過 codex-handoff/codex-receive 修復：`isSilent` 改分窗格判定，任一窗格夠大聲就不算靜音，新參數皆有預設值、唯一呼叫端不用改
 - State: `swift build` 乾淨；`AudioChunkSilenceDetectorTests` 13/13；完整 `swift test` 201 tests 僅已知例外（SPIKE env var + LiveRecordingController 並行 flake，皆 `--filter` 驗證非本次引入）；diff commit-scoped 僅 2 檔，SPIKE 完全未觸碰；FF-merge `whisper-swift`，push（pre-push hook 307 Python tests 全過）→ `56301de`
