@@ -127,6 +127,26 @@ private extension Array where Element == Int16 {
     }
 }
 
+/// Production ChunkRotationDecider only cuts at the real 15s nominal window or 30s hard cap,
+/// which would force tests unrelated to chunk timing (submission ordering, failure handling,
+/// device recovery) to synthesize tens of seconds of PCM per fire() to trigger a rotation —
+/// needlessly slow across a whole suite of such tests. Tests that need a deterministic
+/// "fire() rotates immediately" behavior inject this scaled-down decider instead: same 16kHz
+/// sample rate (duration math elsewhere depends on it), but a maximum window of just 2 samples,
+/// so a couple of emitted samples reach the hard cap immediately.
+private func testChunkRotationDecider() -> ChunkRotationDecider {
+    ChunkRotationDecider(
+        nominalSeconds: 1.0 / 16_000,
+        minimumSeconds: 1.0 / 16_000,
+        maximumSeconds: 2.0 / 16_000,
+        valleySearchWindowSeconds: 1.0 / 16_000
+    )
+}
+
+private func loudSamples(_ value: Int16 = 12_000, count: Int = 2) -> [Int16] {
+    Array(repeating: value, count: count)
+}
+
 @MainActor
 private final class ManualAudioEventMonitor: AudioCaptureEventMonitoring {
     private var handler: (@MainActor @Sendable (AudioCaptureSystemEvent) -> Void)?
@@ -151,20 +171,21 @@ struct MixedAudioRecordingControllerTests {
             microphoneBackend: mic,
             systemBackend: system,
             scheduler: scheduler,
-            transcriber: transcriber
+            transcriber: transcriber,
+            chunkRotationDecider: testChunkRotationDecider()
         )
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-\(UUID()).wav")
 
         try await controller.start(outputURL: url)
-        mic.emit([1000, 3000])
-        system.emit([3000, 1000])
+        mic.emit(loudSamples())
+        system.emit(loudSamples())
         scheduler.fire()
         #expect(controller.finalizedChunkURLs.count == 1)
         #expect(transcriber.submittedURLs.count == 1)
         #expect(transcriber.submittedURLs.first == controller.finalizedChunkURLs.first)
 
-        mic.emit([5000, 9000])
-        system.emit([1000, 2000])
+        mic.emit(loudSamples())
+        system.emit(loudSamples())
         scheduler.fire()
         // Second chunk queues behind the first, which is still in flight.
         #expect(controller.finalizedChunkURLs.count == 2)
@@ -252,14 +273,18 @@ struct MixedAudioRecordingControllerTests {
         mic.emit(Array(repeating: Int16(5), count: 50))
         system.emit(Array(repeating: Int16(5), count: 50))
         scheduler.fire()
+        // Below the 8s rotation minimum: fire() buffers the silent PCM but does not yet finalize
+        // a chunk. The residual is still delivered via the final flush on stop below (AC-B4).
         #expect(transcriber.submittedURLs.isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: controller.finalizedChunkURLs[0].path))
+        #expect(controller.finalizedChunkURLs.isEmpty)
 
         let finalized = try await controller.stopAndTranscribe(modelName: "base")
         #expect(finalized == url)
         #expect(controller.transcriptText.isEmpty)
         #expect(controller.transcriptDurationSeconds == Double(50) / 16_000)
         #expect(transcriber.submittedURLs.isEmpty)
+        #expect(controller.finalizedChunkURLs.count == 1)
+        #expect(!FileManager.default.fileExists(atPath: controller.finalizedChunkURLs[0].path))
     }
 
     @Test
@@ -281,13 +306,14 @@ struct MixedAudioRecordingControllerTests {
             systemBackend: system,
             scheduler: scheduler,
             transcriber: transcriber,
+            chunkRotationDecider: testChunkRotationDecider(),
             chunkOutputURLFactory: { try sequence.next() }
         )
         let url = directory.appendingPathComponent("full-session.wav")
 
         try await controller.start(outputURL: url)
-        mic.emit([1000, 3000])
-        system.emit([3000, 1000])
+        mic.emit(loudSamples())
+        system.emit(loudSamples())
         scheduler.fire()
         for _ in 0..<50 where mic.stopCount == 0 {
             try await Task.sleep(for: .milliseconds(20))
@@ -312,7 +338,8 @@ struct MixedAudioRecordingControllerTests {
             systemBackend: system,
             scheduler: scheduler,
             transcriber: transcriber,
-            flushInterval: 15
+            flushInterval: 15,
+            chunkRotationDecider: testChunkRotationDecider()
         )
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-silent-\(UUID()).wav")
         try await controller.start(outputURL: url)
@@ -321,19 +348,18 @@ struct MixedAudioRecordingControllerTests {
             for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
         }
 
-        mic.emit(Array(repeating: Int16(5), count: 50))
-        system.emit(Array(repeating: Int16(5), count: 50))
+        mic.emit(Array(repeating: Int16(5), count: 2))
+        system.emit(Array(repeating: Int16(5), count: 2))
         scheduler.fire()
 
         #expect(controller.finalizedChunkURLs.count == 1)
         #expect(transcriber.submittedURLs.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: controller.finalizedChunkURLs[0].path))
-        // Duration reflects the mixed chunk's actual 50-sample content (50/16000s), not the
-        // nominal 15s flush interval.
-        #expect(controller.transcriptDurationSeconds == Double(50) / 16_000)
+        // Duration reflects the mixed chunk's actual 2-sample content, not the nominal flush interval.
+        #expect(controller.transcriptDurationSeconds == Double(2) / 16_000)
 
-        mic.emit(Array(repeating: Int16(12_000), count: 50))
-        system.emit(Array(repeating: Int16(12_000), count: 50))
+        mic.emit(loudSamples())
+        system.emit(loudSamples())
         scheduler.fire()
         transcriber.completeActiveJob()
 
@@ -388,12 +414,13 @@ struct MixedAudioRecordingControllerTests {
             systemBackend: system,
             scheduler: scheduler,
             transcriber: transcriber,
-            flushInterval: 15
+            flushInterval: 15,
+            chunkRotationDecider: testChunkRotationDecider()
         )
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-cumulative-\(UUID()).wav")
         try await controller.start(outputURL: url)
-        mic.emit([1000, 3000])
-        system.emit([3000, 1000])
+        mic.emit(loudSamples())
+        system.emit(loudSamples())
         scheduler.fire()
         let firstChunkURL = controller.finalizedChunkURLs[0]
 
@@ -405,8 +432,8 @@ struct MixedAudioRecordingControllerTests {
         #expect(controller.transcriptDurationSeconds == 4)
         #expect(controller.transcriptText.contains("第一段"))
 
-        mic.emit([2000, 4000])
-        system.emit([1000, 2000])
+        mic.emit(loudSamples())
+        system.emit(loudSamples())
         scheduler.fire()
         let secondChunkURL = controller.finalizedChunkURLs[1]
         #expect(controller.acceptCompletedChunk(
@@ -517,12 +544,13 @@ struct MixedAudioRecordingControllerTests {
             microphoneBackend: mic,
             systemBackend: system,
             scheduler: scheduler,
-            transcriber: transcriber
+            transcriber: transcriber,
+            chunkRotationDecider: testChunkRotationDecider()
         )
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-retry-\(UUID()).wav")
         try await controller.start(outputURL: url)
-        mic.emit([1000, 3000])
-        system.emit([3000, 1000])
+        mic.emit(loudSamples())
+        system.emit(loudSamples())
         scheduler.fire()
         #expect(controller.finalizedChunkURLs.count == 1)
 
@@ -620,12 +648,13 @@ struct MixedAudioRecordingControllerTests {
             systemBackend: system,
             scheduler: scheduler,
             eventMonitor: monitor,
-            transcriber: MixedTranscriber()
+            transcriber: MixedTranscriber(),
+            chunkRotationDecider: testChunkRotationDecider()
         )
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-sleep-\(UUID()).wav")
         try await controller.start(outputURL: url)
-        mic.emit([1000, 3000])
-        system.emit([3000, 1000])
+        mic.emit(loudSamples())
+        system.emit(loudSamples())
         scheduler.fire()
         #expect(controller.finalizedChunkURLs.count == 1)
         let chunksBeforeSleep = controller.finalizedChunkURLs
@@ -658,7 +687,8 @@ struct MixedAudioRecordingControllerTests {
             systemBackend: system,
             scheduler: scheduler,
             eventMonitor: monitor,
-            transcriber: MixedTranscriber()
+            transcriber: MixedTranscriber(),
+            chunkRotationDecider: testChunkRotationDecider()
         )
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-wake-\(UUID()).wav")
         try await controller.start(outputURL: url)
@@ -674,8 +704,8 @@ struct MixedAudioRecordingControllerTests {
         #expect(controller.state == .recording)
         #expect(system.startCount == 2)
 
-        mic.emit([1000, 2000])
-        system.emit([2000, 1000])
+        mic.emit(loudSamples())
+        system.emit(loudSamples())
         scheduler.fire()
         #expect(controller.finalizedChunkURLs.count == 1)
 
@@ -758,6 +788,92 @@ struct MixedAudioRecordingControllerTests {
 
         try? FileManager.default.removeItem(at: url)
         for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+    }
+}
+
+/// Direct tests of ChunkRotationDecider's cut-point policy (AC-B2, AC-B3, AC-B4), independent of
+/// the full controller. Uses a 100Hz test sample rate — proportionally identical to the real
+/// 16kHz 8s/15s/30s/3s thresholds, but with a few thousand samples instead of hundreds of
+/// thousands, so "45 seconds" of synthetic audio runs in milliseconds.
+struct ChunkRotationDeciderTests {
+    private let sampleRate = 100.0
+
+    private func decider() -> ChunkRotationDecider {
+        ChunkRotationDecider(
+            nominalSeconds: 15, minimumSeconds: 8, maximumSeconds: 30,
+            valleySearchWindowSeconds: 3, sampleRate: sampleRate
+        )
+    }
+
+    private func pcm(_ value: Int16, seconds: Double) -> Data {
+        let count = Int(seconds * sampleRate)
+        return Array(repeating: value, count: count).withUnsafeBytes { Data($0) }
+    }
+
+    @Test
+    func continuousSpeechWithNoSilenceFallsBackToTheThirtySecondHardCap() {
+        // AC-B2: 45s of continuous loud audio with no silence never yields an energy valley, so
+        // the decider must force a cut at the 30s hard cap rather than waiting indefinitely.
+        let decider = decider()
+        let first = decider.append(pcm(20_000, seconds: 45))
+        #expect(first != nil)
+        #expect(Double(first?.count ?? 0) / 2 / sampleRate == 30)
+
+        // The 15s remainder is buffered; draining it confirms nothing was lost.
+        let remainder = decider.drainRemainder()
+        #expect(Double(remainder.count) / 2 / sampleRate == 15)
+    }
+
+    @Test
+    func everyChunkFallsWithinTheEightToThirtySecondBounds() {
+        // AC-B2: feeding 45s continuously, every finalized chunk (including the final drained
+        // remainder) must fall within [8, 30] seconds.
+        let decider = decider()
+        var chunkDurations: [Double] = []
+        if let chunk = decider.append(pcm(20_000, seconds: 45)) {
+            chunkDurations.append(Double(chunk.count) / 2 / sampleRate)
+        }
+        let remainder = decider.drainRemainder()
+        if !remainder.isEmpty {
+            chunkDurations.append(Double(remainder.count) / 2 / sampleRate)
+        }
+        // The unconditional final drain intentionally bypasses the 8s minimum (AC-B4), so only
+        // rotation-triggered chunks are checked against the full [8, 30] band here.
+        #expect(chunkDurations.allSatisfy { $0 <= 30 })
+        #expect(chunkDurations.dropLast().allSatisfy { $0 >= 8 })
+    }
+
+    @Test
+    func silentGapBetweenEighteenAndTwentyTwoSecondsBecomesTheFirstCutPoint() {
+        // AC-B3: 45s total, with silence at [18, 22)s. The first chunk's cut point must land in
+        // that silent region rather than at a fixed 15s boundary. Fed in small increments — like
+        // the controller's real per-tick drain — so the decider evaluates the cut as soon as the
+        // buffer crosses the 15s nominal window, instead of seeing the whole 45s (which would
+        // short-circuit straight to the 30s hard cap the moment 30s worth of data is appended).
+        let decider = decider()
+        var firstChunk: Data?
+        var elapsed = 0.0
+        let stepSeconds = 1.0
+        while firstChunk == nil && elapsed < 45 {
+            let remaining = 45 - elapsed
+            let stepDuration = min(stepSeconds, remaining)
+            let value: Int16 = (elapsed >= 18 && elapsed < 22) ? 0 : 20_000
+            firstChunk = decider.append(pcm(value, seconds: stepDuration))
+            elapsed += stepDuration
+        }
+        #expect(firstChunk != nil)
+        let cutSeconds = Double(firstChunk?.count ?? 0) / 2 / sampleRate
+        #expect(cutSeconds >= 18 && cutSeconds <= 22)
+    }
+
+    @Test
+    func residualShorterThanEightSecondsIsStillDrainedOnFinalFlush() {
+        // AC-B4: a residual chunk under the 8s minimum must still be returned by drainRemainder(),
+        // not silently discarded, so the trailing few seconds of a stopped recording aren't lost.
+        let decider = decider()
+        #expect(decider.append(pcm(20_000, seconds: 5)) == nil)
+        let remainder = decider.drainRemainder()
+        #expect(Double(remainder.count) / 2 / sampleRate == 5)
     }
 }
 

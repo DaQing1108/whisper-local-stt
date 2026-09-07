@@ -49,7 +49,7 @@ private final class MixedAudioAccumulator: @unchecked Sendable {
             }
             if microphone.isEmpty { return system }
             if system.isEmpty { return microphone }
-            return PCM16Mixer.mix(microphone, system)
+            return PCM16Mixer.mixNormalized(microphone, system)
         }
     }
 }
@@ -59,6 +59,104 @@ private final class MixedAudioErrorBox: @unchecked Sendable {
     private var error: Error?
     func record(_ newError: Error) { lock.withLock { if error == nil { error = newError } } }
     var value: Error? { lock.withLock { error } }
+}
+
+/// Decides where to cut mixed-audio chunks: aligned to a local energy valley near the nominal
+/// interval when one exists, bounded below by `minimumSeconds` (never cut a chunk shorter than
+/// this, to avoid ballooning chunk count) and above by `maximumSeconds` (a hard cap so silence-free
+/// speech doesn't grow unboundedly). Pure/deterministic given the same accumulated PCM — the only
+/// state is the buffered PCM itself, which the caller drains via `takeChunk()`.
+final class ChunkRotationDecider: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = Data()
+    private let nominalSeconds: Double
+    private let minimumSeconds: Double
+    private let maximumSeconds: Double
+    private let valleySearchWindowSeconds: Double
+    private let sampleRate: Double
+
+    init(
+        nominalSeconds: Double = 15,
+        minimumSeconds: Double = 8,
+        maximumSeconds: Double = 30,
+        valleySearchWindowSeconds: Double = 3,
+        sampleRate: Double = Double(PCM16WAVWriter.sampleRate)
+    ) {
+        self.nominalSeconds = nominalSeconds
+        self.minimumSeconds = minimumSeconds
+        self.maximumSeconds = maximumSeconds
+        self.valleySearchWindowSeconds = valleySearchWindowSeconds
+        self.sampleRate = sampleRate
+    }
+
+    private func byteOffset(forSeconds seconds: Double) -> Int {
+        Int(seconds * sampleRate) * MemoryLayout<Int16>.size
+    }
+
+    /// Appends newly mixed PCM and, if a rotation point has been reached, returns the chunk to
+    /// finalize (leaving any remainder buffered for the next chunk). Returns `nil` when the
+    /// accumulated audio hasn't reached a valid cut point yet.
+    func append(_ pcm: Data) -> Data? {
+        lock.withLock {
+            buffer.append(pcm)
+            let minimumBytes = byteOffset(forSeconds: minimumSeconds)
+            let maximumBytes = byteOffset(forSeconds: maximumSeconds)
+
+            guard buffer.count >= minimumBytes else { return nil }
+
+            if buffer.count >= maximumBytes {
+                return takeChunk(cutAt: maximumBytes)
+            }
+
+            let nominalBytes = byteOffset(forSeconds: nominalSeconds)
+            let valleyWindowBytes = byteOffset(forSeconds: valleySearchWindowSeconds)
+            let searchRegionStart = max(minimumBytes, nominalBytes - valleyWindowBytes)
+            // Wait until the buffer covers at least the search window centered on the nominal
+            // boundary — otherwise the region searched the instant buffer.count == nominalBytes
+            // is only its left half, before any silence on the right side of the nominal boundary
+            // has even arrived yet. Once that minimum is met, the search region keeps growing
+            // with the buffer (up to the hard cap) on every subsequent append, so silence
+            // anywhere before the 30s cap is still found — not just within a fixed window frozen
+            // at the moment the nominal boundary was first crossed.
+            guard buffer.count >= min(nominalBytes + valleyWindowBytes, maximumBytes) else { return nil }
+            let searchRegionEnd = min(buffer.count, maximumBytes)
+
+            let searchRegion = buffer[searchRegionStart..<searchRegionEnd]
+            guard let valleyOffset = AudioChunkSilenceDetector.findEnergyValley(
+                in: Data(searchRegion), searchWindowSeconds: valleySearchWindowSeconds, sampleRate: sampleRate
+            ) else { return nil }
+
+            let cutAt = searchRegionStart + valleyOffset
+            let cutWindow = buffer[cutAt..<min(cutAt + valleyWindowBytes, buffer.count)]
+            // Only cut on an actually-quiet window (below the same threshold the downstream
+            // silence filter uses) — otherwise, on continuous speech with no real pause, this
+            // would pick the "least loud of several loud windows" as a fake valley instead of
+            // falling through to the 30s hard cap, contradicting AC-B2's silence-free fallback.
+            guard AudioChunkSilenceDetector.rootMeanSquare(ofPCM16LittleEndian: Data(cutWindow))
+                < AudioChunkSilenceDetector.defaultThreshold else { return nil }
+            guard cutAt >= minimumBytes else { return nil }
+            return takeChunk(cutAt: cutAt)
+        }
+    }
+
+    /// Drains all remaining buffered PCM unconditionally, regardless of `minimumSeconds` — used
+    /// for the final flush on stop, where a short trailing chunk must still be transcribed rather
+    /// than silently dropped.
+    func drainRemainder() -> Data {
+        lock.withLock {
+            defer { buffer.removeAll(keepingCapacity: true) }
+            return buffer
+        }
+    }
+
+    private func takeChunk(cutAt byteOffset: Int) -> Data {
+        // Rebuild `buffer` from a fresh Data rather than mutating it in place with
+        // prefix/removeFirst: Foundation's Data can end up with a non-zero internal start index
+        // after such slicing, which has been observed to trap inside a later removeAll() call.
+        let chunk = Data(buffer.prefix(byteOffset))
+        buffer = Data(buffer.suffix(from: byteOffset))
+        return chunk
+    }
 }
 
 @MainActor
@@ -81,6 +179,7 @@ final class MixedAudioRecordingController {
     private let flushInterval: TimeInterval
     private let chunkOutputURLFactory: @Sendable () throws -> URL
     private var accumulator: MixedAudioAccumulator?
+    private let chunkRotationDecider: ChunkRotationDecider
     private var chunkSession: RotatingCaptureSession?
     private var fullSession: SystemAudioWAVSession?
     private var completedChunkURLs: Set<URL> = []
@@ -133,7 +232,10 @@ final class MixedAudioRecordingController {
         scheduler: any ChunkRotationScheduling,
         eventMonitor: any AudioCaptureEventMonitoring = SystemAudioCaptureEventMonitor(),
         transcriber: any LiveAudioTranscribing,
-        flushInterval: TimeInterval = 15,
+        // Scheduler check cadence, not the chunk length itself: chunkRotationDecider decides the
+        // actual cut point (energy-valley-aligned, 8s-30s bounded) each time this fires.
+        flushInterval: TimeInterval = 1,
+        chunkRotationDecider: ChunkRotationDecider = ChunkRotationDecider(),
         chunkOutputURLFactory: @escaping @Sendable () throws -> URL = {
             try MixedAudioRecordingController.makeChunkOutputURL()
         }
@@ -145,6 +247,7 @@ final class MixedAudioRecordingController {
         self.scheduler = scheduler
         self.eventMonitor = eventMonitor
         self.flushInterval = flushInterval
+        self.chunkRotationDecider = chunkRotationDecider
         self.chunkOutputURLFactory = chunkOutputURLFactory
         submissionQueue = OrderedChunkSubmissionQueue(transcriber: transcriber, modelName: "base")
         submissionQueue.queueDrainedHandler = { [weak self] in
@@ -325,8 +428,11 @@ final class MixedAudioRecordingController {
         let pcm = accumulator.drain()
         guard !pcm.isEmpty else { return }
         do {
+            // The full session recording always receives every mixed sample immediately,
+            // independent of chunk-cut decisions below.
             try fullSession.append(pcm)
-            try chunkSession.append(pcm)
+            guard let readyChunk = chunkRotationDecider.append(pcm) else { return }
+            try chunkSession.append(readyChunk)
             if let url = try chunkSession.rotate() { acceptFinalizedChunk(url) }
         } catch {
             scheduler.cancel()
@@ -444,7 +550,12 @@ final class MixedAudioRecordingController {
         do {
             if !pcm.isEmpty {
                 try fullSession.append(pcm)
-                try chunkSession.append(pcm)
+            }
+            // Drain unconditionally: a residual chunk shorter than the 8s minimum must still be
+            // transcribed on stop, not silently dropped (AC-B4).
+            let remainder = chunkRotationDecider.drainRemainder() + pcm
+            if !remainder.isEmpty {
+                try chunkSession.append(remainder)
             }
             if let url = try chunkSession.finish() { acceptFinalizedChunk(url) }
         } catch {

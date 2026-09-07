@@ -38,6 +38,38 @@ enum AudioChunkSilenceDetector {
         return Double(sampleCount) / sampleRate
     }
 
+    /// Searches a window of raw PCM16-little-endian samples for the quietest sub-window
+    /// ("energy valley"), so chunk rotation can align its cut point to a natural pause instead of
+    /// slicing through the middle of a spoken word. Pure function over the given buffer: same
+    /// input always yields the same byte offset (O(n) single pass over the windows).
+    ///
+    /// `searchWindowSeconds` sizes each candidate sub-window; the returned offset is the start of
+    /// the quietest one, aligned to a 2-byte (Int16) sample boundary. Returns `nil` when `samples`
+    /// is too short to contain even one full sub-window.
+    static func findEnergyValley(
+        in samples: Data,
+        searchWindowSeconds: Double,
+        sampleRate: Double = Double(PCM16WAVWriter.sampleRate)
+    ) -> Int? {
+        let windowByteCount = max(2, Int(searchWindowSeconds * sampleRate) * 2)
+        guard samples.count >= windowByteCount else { return nil }
+
+        let start = samples.startIndex
+        var bestOffset: Int?
+        var bestRMS = Double.greatestFiniteMagnitude
+        var offset = start
+        while offset + windowByteCount <= samples.endIndex {
+            let window = samples[offset..<(offset + windowByteCount)]
+            let windowRMS = rootMeanSquare(ofPCM16LittleEndian: window)
+            if windowRMS < bestRMS {
+                bestRMS = windowRMS
+                bestOffset = offset - start
+            }
+            offset += windowByteCount
+        }
+        return bestOffset
+    }
+
     static func rootMeanSquare(ofPCM16LittleEndian samples: Data) -> Double {
         guard samples.count >= 2 else { return 0 }
         var sumOfSquares: Double = 0

@@ -191,4 +191,55 @@ struct AudioChunkSilenceDetectorTests {
         // and rootMeanSquare's own signature/behavior is unchanged (called per-window here).
         #expect(Double(PCM16WAVWriter.sampleRate) == 16_000)
     }
+
+    // MARK: - findEnergyValley (AC-B1)
+
+    @Test
+    func findEnergyValleyLocatesTheSilentWindowBetweenTwoLoudRegions() {
+        // speech - silence - speech, at a 10Hz test sample rate with 1s windows.
+        var data = Data()
+        appendSamples(20_000, count: 20, to: &data)  // 2s loud
+        appendSamples(0, count: 20, to: &data)        // 2s silent
+        appendSamples(20_000, count: 20, to: &data)   // 2s loud
+
+        let offset = AudioChunkSilenceDetector.findEnergyValley(
+            in: data, searchWindowSeconds: 1.0, sampleRate: 10
+        )
+
+        // Silent region spans byte offsets [40, 80). The returned window start must fall within
+        // one window (10 bytes at this rate) of that region.
+        let windowByteCount = 10
+        #expect(offset != nil)
+        if let offset {
+            #expect(offset >= 40 - windowByteCount && offset < 80 + windowByteCount)
+            let window = data[offset..<min(offset + windowByteCount, data.endIndex)]
+            #expect(AudioChunkSilenceDetector.rootMeanSquare(ofPCM16LittleEndian: window) == 0)
+        }
+    }
+
+    @Test
+    func findEnergyValleyReturnsNilWhenBufferShorterThanOneWindow() {
+        var data = Data()
+        appendSamples(0, count: 3, to: &data)
+        let offset = AudioChunkSilenceDetector.findEnergyValley(
+            in: data, searchWindowSeconds: 1.0, sampleRate: 10
+        )
+        #expect(offset == nil)
+    }
+
+    @Test
+    func findEnergyValleyIsDeterministicForTheSameInput() {
+        var data = Data()
+        appendSamples(20_000, count: 20, to: &data)
+        appendSamples(100, count: 20, to: &data)
+        appendSamples(15_000, count: 20, to: &data)
+
+        let first = AudioChunkSilenceDetector.findEnergyValley(
+            in: data, searchWindowSeconds: 1.0, sampleRate: 10
+        )
+        let second = AudioChunkSilenceDetector.findEnergyValley(
+            in: data, searchWindowSeconds: 1.0, sampleRate: 10
+        )
+        #expect(first == second)
+    }
 }
