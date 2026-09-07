@@ -46,6 +46,12 @@ enum AudioChunkSilenceDetector {
     /// `searchWindowSeconds` sizes each candidate sub-window; the returned offset is the start of
     /// the quietest one, aligned to a 2-byte (Int16) sample boundary. Returns `nil` when `samples`
     /// is too short to contain even one full sub-window.
+    ///
+    /// Known limitation: candidate windows are non-overlapping (stepped by a full window each
+    /// time), not a sliding window. A real silent gap that straddles two adjacent window
+    /// boundaries gets its energy split across both, so neither window's RMS may register as low
+    /// as the gap's true quietness — an acceptable approximation for this stopgap, not a
+    /// correctness bug, but worth knowing if cut points look slightly off from the actual pause.
     static func findEnergyValley(
         in samples: Data,
         searchWindowSeconds: Double,

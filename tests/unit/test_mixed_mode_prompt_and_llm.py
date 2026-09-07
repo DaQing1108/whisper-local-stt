@@ -1,4 +1,4 @@
-"""unit/test_mixed_mode_prompt_and_llm.py — 混音路徑 build_prompt / llm_punctuate 生效驗證。
+"""unit/test_mixed_mode_prompt_and_llm.py — build_prompt / llm_punctuate 生效驗證（共用進入點）。
 
 混音模式（MixedAudioRecordingController → WorkerSupervisor → worker_entrypoint.py
 的 JSONL transcribe 命令）與純麥克風/純系統音模式共用同一個 Python 呼叫鏈：
@@ -12,6 +12,11 @@ _transcribe_file（實際 Whisper 推論）與 llm_punctuate（LLM API 呼叫）
 - AC-C2：輸出逐字稿不含 prompt echo。
 - AC-D1：有 LLM key 時 llm_punctuate 被呼叫，且其回傳值出現在最終文字。
 - AC-D2：無 LLM key 時 llm_punctuate 不被呼叫，轉錄仍正常完成、不拋例外。
+
+範圍限制：本檔只驗證 run_whisper() 內部邏輯（Python 側 domain/extra_terms → prompt
+→ llm_punctuate 的處理鏈），不驗證 Swift 端 MixedAudioRecordingController.domain/
+extraTerms 是否經 WorkerSupervisor → JSONL payload 正確傳遞到這裡的 kwargs——那段
+Swift→Python 參數傳遞由 WorkerSupervisorTests（Swift 測試）涵蓋。
 """
 from __future__ import annotations
 
