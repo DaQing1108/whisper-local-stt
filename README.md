@@ -1,6 +1,11 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
+Last checkpoint: 2026-09-15（initial_prompt 覆蓋 bug 修復，main 分支移植）
+Phase: 修復分段轉錄（15秒即時/混音模式）從第二段起，領域詞彙 initial_prompt 被前段結尾文字覆蓋、導致專有名詞（TVBS/DGX/ASR 等）辨識率偏低的 bug；先在 main 分支（已凍結）修復（`74b0dc1`），發現使用者實際使用的是本分支後，移植同一套 `_merge_prompt()` 修復過來（commit `127cfc2`）。開發交給 peer Claude 帳號 `whisper-4d`（本機 commit 不 push），規劃/驗收/push 留本 session。`/codex-receive` 獨立驗證：本機重跑 `tests/unit/test_prompts.py` + `tests/unit/test_mixed_mode_prompt_and_llm.py` 共 31 passed（含新增的 `TestMergePrompt` 7 案例 + 1 個驗證 override 情境下 domain prompt 仍生效的案例），push 到 `origin/whisper-swift`。重跑 `scripts/build_worker_runtime.sh`（PyInstaller 重新打包含修復的 whisper_core.py）→ `scripts/build_swiftui_app.sh` → `dist/Whisper Swift.app`，簽章 `WhisperSTT Local` 驗證通過，Gate B worker 握手 `ready`/`pong` 確認正常。
+Next action: 使用者需在 Finder 雙擊 `dist/Whisper Swift.app` 手動核准 Gatekeeper（無法自動化繞過），複製到 `~/Applications` 後用真實混音會議音檔（含專有名詞）實測辨識率改善程度。A（音量平衡）與 B（切點對齊）仍缺「舊 build 同素材」對照，待與本輪一起排入下次真機走查。
+
+### 舊記錄
 Last checkpoint: 2026-09-07（第五輪）
 Phase: 混音模式逐字稿品質「便宜止血」包 A/B/C/D（spec-writer → codex-handoff → codex-receive）
 Working: 用 `/spec-writer` 把「混音逐字稿破碎、人聲被系統音壓過」展成有 13 條 Locked AC 的規格（`docs/Whisper_Mixed_Mode_Quality_Stopgap_Spec_v1.md`），target `whisper-swift`。四項變更：(A) `PCM16Mixer.mixNormalized()` per-source RMS 正規化再加總（target RMS 3000、floor 100 防近靜音底噪被放大）；(B) 新 `ChunkRotationDecider` 把混音 chunk 由固定 15s 硬切改為能量低谷對齊（8s 下限 / 30s 硬上限，`flushInterval` 15→1 只當 scheduler 檢查頻率），新增 `AudioChunkSilenceDetector.findEnergyValley` 純函式；(C)(D) 新增 `tests/unit/test_mixed_mode_prompt_and_llm.py` 驗證 `build_prompt`/`llm_punctuate` 在混音共用路徑（`run_whisper()`）生效。限制守住：無新依賴、無 2x 推論、`TranscriptionHistoryEntry`/`TranscriptionSegment` schema 未動。開發交給 peer Claude 帳號 `whisper-7c`（本機 commit 不 push），規劃/驗收/上線留本 session。`/codex-receive` 獨立驗證：逐檔比對 diff（7 檔全在允許清單）、自己重跑 `pytest` 312 passed、`swift` 新 4 suite 隔離 ×3 全綠、release build 乾淨、`LiveRecordingControllerTests` 全套 flake 在 base `5280f14` 交叉比對確認為既有（HEAD 2/3 fail、base 2/3 fail、同測試同斷言）非本次引入。打包 `scripts/build_swiftui_app.sh`（沿用 `swiftui-python-poc/dist/WhisperWorker`，worker Python 碼未動、省一次 PyInstaller）→ `dist/Whisper Swift.app` 簽章 `WhisperSTT Local` 驗證通過、Gate B worker 握手 `ready`、`ChunkRotationDecider` 符號在 release binary 內。FF-merge `whisper-swift`，push（pre-push hook 307 Python tests 全過）→ `a6602e9`。清掉工作區既有三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE（`git restore`，使用者確認已棄用）。
@@ -9,6 +14,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-09-15｜initial_prompt 覆蓋 bug 修復（main 分支移植，跨帳號交接）
+- Completed: 使用者回報混音模式逐字稿專有名詞辨識率低，診斷出 `whisper_core.py` 的 `run_whisper()` 分段轉錄從第二段起用前段結尾文字覆蓋領域詞彙 initial_prompt（而非合併），先在 main 分支修復並打包驗證後，確認使用者實際使用 whisper-swift 分支，移植同一套 `_merge_prompt()` + `MERGED_PROMPT_MAX_CHARS=200` 修復過來；開發交 peer Claude 帳號 `whisper-4d`（本機 commit 不 push），規劃/驗收/push 留本 session
+- State: 本機獨立重跑 `tests/unit/test_prompts.py` + `tests/unit/test_mixed_mode_prompt_and_llm.py` 共 31 passed（`TestMergePrompt` 7 案例 + 1 個 override 情境案例）；push `origin/whisper-swift`（`127cfc2`）；`scripts/build_worker_runtime.sh` 重新打包 PyInstaller worker（含修復）→ `scripts/build_swiftui_app.sh` → `dist/Whisper Swift.app`，簽章 `WhisperSTT Local` 驗證通過、Gate B worker `ready`/`pong` 握手正常
+- Next: 使用者 Finder 雙擊核准 Gatekeeper 後，用真實混音會議音檔（含專有名詞）實測辨識率改善程度——自動測試只能驗證字串合併邏輯，無法驗證 Whisper 實際辨識準確率
+
 ### 2026-09-07（第五輪）｜混音逐字稿品質便宜止血包 A/B/C/D（spec-writer → codex-handoff → codex-receive）
 - Completed: `/spec-writer` 展開 13 條 Locked AC 規格（`docs/Whisper_Mixed_Mode_Quality_Stopgap_Spec_v1.md`）。(A) `PCM16Mixer.mixNormalized()` per-source RMS 正規化再加總（target 3000 / floor 100）；(B) 新 `ChunkRotationDecider` 能量低谷對齊切點（8s 下限 / 30s 上限、`flushInterval` 15→1 當 scheduler 頻率），新增 `AudioChunkSilenceDetector.findEnergyValley`；(C)(D) `tests/unit/test_mixed_mode_prompt_and_llm.py` 驗證 `build_prompt`/`llm_punctuate` 在混音共用路徑生效。開發交 peer Claude 帳號 `whisper-7c`（本機 commit 不 push），規劃/驗收/上線留本 session。
 - State: `/codex-receive` 獨立複驗——逐檔比對 diff（7 檔全在允許清單、`TranscriptionHistoryEntry`/`TranscriptionSegment` diff 空）；自跑 `pytest` 312 passed；`swift` 新 4 suite 隔離 ×3 全綠、`swift build -c release` 乾淨；`LiveRecordingControllerTests` 全套 flake 在 base `5280f14` 交叉比對（HEAD 2/3 fail、base 2/3 fail、同測試同斷言）確認為既有非本次引入。打包 `scripts/build_swiftui_app.sh` → `dist/Whisper Swift.app` 簽章 `WhisperSTT Local` 驗證通過、Gate B worker 握手 `ready`、`ChunkRotationDecider` 符號在 release binary 內。FF-merge `whisper-swift` push（pre-push hook 307 Python tests 全過）→ `a6602e9`；`mixed-mode-stopgap` 分支 push 留痕。清除工作區三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE（使用者確認棄用）。真機驗證：C ✅ D ✅（無 domain/key vs 有 domain/key 兩份逐字稿對比，密涅瓦/專利/認知差/機要秘書/暢銷書全轉正確 + 出現句讀）。
