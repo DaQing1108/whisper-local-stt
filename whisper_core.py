@@ -186,6 +186,31 @@ def build_prompt(domain: str, extra_terms: str = "") -> str:
     return "、".join(parts) if parts else ""
 
 
+MERGED_PROMPT_MAX_CHARS = 200  # initial_prompt 合併後長度上限，避免過長被截斷或誤判為 prompt echo
+
+
+def _merge_prompt(domain_prompt: str, override: str) -> str:
+    """合併領域詞彙 prompt 與分段語境 override，取代直接覆蓋。
+
+    domain_prompt 放前面（穩定術語），override 放後面（最近語境，離待轉錄音訊更近，
+    對 Whisper next-token 預測更有效）。任一為空時維持原行為。合併後超過長度上限，
+    優先保留 domain_prompt 全文，截斷 override 尾端內容。
+    """
+    if not domain_prompt:
+        return override or ""
+    if not override:
+        return domain_prompt
+
+    merged = f"{domain_prompt}。{override}"
+    if len(merged) <= MERGED_PROMPT_MAX_CHARS:
+        return merged
+
+    available = MERGED_PROMPT_MAX_CHARS - len(domain_prompt) - 1  # 1 為分隔符「。」
+    if available <= 0:
+        return domain_prompt[:MERGED_PROMPT_MAX_CHARS]
+    return f"{domain_prompt}。{override[-available:]}"
+
+
 def _strip_prompt_echo(text: str, prompt: str) -> str:
     """移除 Whisper 把 initial_prompt 誤當轉錄內容輸出的情況。"""
     import re as _re
@@ -537,9 +562,8 @@ def run_whisper(
         domain      = kwargs.get("domain", "general")
         extra_terms = kwargs.get("extra_terms", "")
         prompt      = build_prompt(domain, extra_terms)
-        # 分段錄音：用前段結尾覆蓋 initial_prompt 增加連貫性
-        if kwargs.get("initial_prompt_override"):
-            prompt = kwargs["initial_prompt_override"]
+        # 分段錄音：合併前段結尾語境與領域詞彙 prompt，兩者皆保留
+        prompt      = _merge_prompt(prompt, kwargs.get("initial_prompt_override", ""))
         normalized_language = _normalize_language_code(language)
         print(f"[Whisper] prompt={repr(prompt[:60])}, lang={normalized_language or 'auto'}", flush=True)
 

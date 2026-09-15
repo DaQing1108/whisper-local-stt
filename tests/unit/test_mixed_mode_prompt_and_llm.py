@@ -80,6 +80,30 @@ class TestMixedModePromptEffective:
         assert "Claude" in expected_prompt
         assert captured_opts.get("initial_prompt") == expected_prompt
 
+    def test_initial_prompt_override_merges_with_domain_prompt(self, monkeypatch):
+        """分段錄音第二段起帶 initial_prompt_override 時，domain prompt 不應被覆蓋清空，
+        兩者須同時出現在最終送進 Whisper 的 initial_prompt。"""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        captured_opts = {}
+
+        def fake_transcribe_file(wav_path, model_name, opts, cancellation=None):
+            captured_opts.update(opts)
+            return _mock_transcribe_result("混音逐字稿內容（第二段）")
+
+        with patch("whisper_core._transcribe_file", side_effect=fake_transcribe_file):
+            run_whisper(
+                make_tone_wav(440.0, 1.0), ".wav", "base", "zh",
+                domain="media", extra_terms="",
+                initial_prompt_override="上一段的結尾文字",
+            )
+
+        final_prompt = captured_opts.get("initial_prompt", "")
+        assert "ASR" in final_prompt or "TVBS" in final_prompt
+        assert "上一段的結尾文字" in final_prompt
+
     def test_output_does_not_contain_prompt_echo(self, monkeypatch):
         """AC-C2: Whisper 若把 prompt 誤當內容輸出，_strip_prompt_echo 必須在混音路徑生效。"""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
