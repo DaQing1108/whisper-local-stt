@@ -1,6 +1,12 @@
 """unit/test_prompts.py — build_prompt() 各 domain × extra_terms 測試。"""
 import pytest
-from whisper_core import build_prompt, DOMAIN_TERMS, _strip_prompt_echo
+from whisper_core import (
+    build_prompt,
+    DOMAIN_TERMS,
+    _strip_prompt_echo,
+    _merge_prompt,
+    MERGED_PROMPT_MAX_CHARS,
+)
 
 
 class TestBuildPrompt:
@@ -77,3 +83,46 @@ class TestStripPromptEcho:
         text = f"{prompt}今天的重點是 API 設計"
         result = _strip_prompt_echo(text, prompt)
         assert "軟體開發" not in result or "今天的重點" in result
+
+
+class TestMergePrompt:
+    def test_domain_and_override_both_present_merges_both(self):
+        domain_prompt = "ASR、DGX、TVBS"
+        override = "剛才提到的預算數字"
+        result = _merge_prompt(domain_prompt, override)
+        assert "ASR" in result
+        assert "TVBS" in result
+        assert "剛才提到的預算數字" in result
+
+    def test_override_empty_returns_domain_prompt_unchanged(self):
+        domain_prompt = "ASR、DGX、TVBS"
+        result = _merge_prompt(domain_prompt, "")
+        assert result == domain_prompt
+
+    def test_override_none_like_falsy_returns_domain_prompt_unchanged(self):
+        domain_prompt = "ASR、DGX、TVBS"
+        result = _merge_prompt(domain_prompt, None)
+        assert result == domain_prompt
+
+    def test_domain_prompt_empty_returns_override_unchanged(self):
+        override = "剛才提到的預算數字"
+        result = _merge_prompt("", override)
+        assert result == override
+
+    def test_both_empty_returns_empty_string(self):
+        result = _merge_prompt("", "")
+        assert result == ""
+
+    def test_merged_over_limit_truncates_but_keeps_domain_terms(self):
+        domain_prompt = "ASR、DGX、TVBS、RNG、timecode、字幕、後製"
+        long_override = "很長的前段語境內容" * 40  # 遠超過門檻
+        result = _merge_prompt(domain_prompt, long_override)
+        assert len(result) <= MERGED_PROMPT_MAX_CHARS
+        # domain 詞彙必須至少保留一部分，不能被完全截掉
+        assert "ASR" in result
+        assert "DGX" in result
+
+    def test_merge_respects_configured_max_chars_constant(self):
+        # 確保長度上限是可讀取的具名常數，而非裸數字寫死在函式內
+        assert isinstance(MERGED_PROMPT_MAX_CHARS, int)
+        assert MERGED_PROMPT_MAX_CHARS > 0
