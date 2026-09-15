@@ -3,7 +3,8 @@
 ## Current State
 Last checkpoint: 2026-09-15（initial_prompt 覆蓋 bug 修復，main 分支移植）
 Phase: 修復分段轉錄（15秒即時/混音模式）從第二段起，領域詞彙 initial_prompt 被前段結尾文字覆蓋、導致專有名詞（TVBS/DGX/ASR 等）辨識率偏低的 bug；先在 main 分支（已凍結）修復（`74b0dc1`），發現使用者實際使用的是本分支後，移植同一套 `_merge_prompt()` 修復過來（commit `127cfc2`）。開發交給 peer Claude 帳號 `whisper-4d`（本機 commit 不 push），規劃/驗收/push 留本 session。`/codex-receive` 獨立驗證：本機重跑 `tests/unit/test_prompts.py` + `tests/unit/test_mixed_mode_prompt_and_llm.py` 共 31 passed（含新增的 `TestMergePrompt` 7 案例 + 1 個驗證 override 情境下 domain prompt 仍生效的案例），push 到 `origin/whisper-swift`。重跑 `scripts/build_worker_runtime.sh`（PyInstaller 重新打包含修復的 whisper_core.py）→ `scripts/build_swiftui_app.sh` → `dist/Whisper Swift.app`，簽章 `WhisperSTT Local` 驗證通過，Gate B worker 握手 `ready`/`pong` 確認正常。
-Next action: 使用者需在 Finder 雙擊 `dist/Whisper Swift.app` 手動核准 Gatekeeper（無法自動化繞過），複製到 `~/Applications` 後用真實混音會議音檔（含專有名詞）實測辨識率改善程度。A（音量平衡）與 B（切點對齊）仍缺「舊 build 同素材」對照，待與本輪一起排入下次真機走查。
+Working（追加）: 已用 `ditto` 複製新版到 `~/Applications/Whisper Swift.app`（覆蓋舊版），`xattr -cr` 清除 quarantine 屬性，`codesign --verify --deep --strict` 驗證通過。
+Next action: 使用者需在 Finder **雙擊** `~/Applications/Whisper Swift.app` 手動核准 Gatekeeper（macOS 設計上無法自動化繞過人工同意），核准後用真實混音會議音檔（含專有名詞）實測辨識率改善程度。A（音量平衡）與 B（切點對齊）仍缺「舊 build 同素材」對照，待與本輪一起排入下次真機走查。
 
 ### 舊記錄
 Last checkpoint: 2026-09-07（第五輪）
