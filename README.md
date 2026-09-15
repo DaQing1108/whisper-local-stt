@@ -1,13 +1,17 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.1
 
 ## Current State
-Last checkpoint: 2026-07-23（codex/fix-v2-4-1-timecodes 分支收斂與清理）
-Phase: 確認並收斂 `codex/fix-v2-4-1-timecodes` 分支狀態——修復內容早已透過 PR #8 squash merge 進 `main`，分支上後續累積的 2 個 checkpoint commit 手動合併補齊，分支已刪除
-Working: `main` HEAD `361e082`，與 origin 同步；`main` 與已刪除的 `codex/fix-v2-4-1-timecodes` 分支內容一致（僅少一行合併時順手修掉的重複標題）；`whisper-swift` 分支（HEAD `fca3769`）狀態不變，未受本次操作影響
-Next action: 無待辦；回到 `whisper-swift` 分支繼續「完整快捷鍵台式 parity」等既有待辦
+Last checkpoint: 2026-09-15（initial_prompt 覆蓋 bug 修復 — 跨帳號交接）
+Phase: 修復分段轉錄（15秒即時/混音模式）從第二段起，領域詞彙 initial_prompt 被前段結尾文字覆蓋、導致專有名詞（TVBS/DGX/ASR 等）辨識率偏低的 bug；改用 `_merge_prompt()` 合併兩者，取代原本的直接覆蓋
+Working: `main` HEAD `74b0dc1`，已 push 至 origin；本機獨立重跑驗收 `test_prompts.py` 25/25、`test_transcribe_sync_and_upload.py` 15/15 全綠；由另一 Claude Code 帳號（whisper-4d）實作 + commit，本帳號負責 PLAN／獨立驗收／push（分工依 CLAUDE.md）
+Next action: 使用者用真實會議音檔實測，確認混音模式長時間錄音的專有名詞辨識率是否改善（此為人工驗證項目，自動測試僅能驗證字串合併邏輯，無法驗證 Whisper 實際辨識準確率）
 Blockers: none
 
 ## Checkpoint History
+### 2026-09-15｜initial_prompt 覆蓋 bug 修復（跨帳號交接：PLAN + 驗收 vs 開發分工）
+- Completed: 診斷出 `whisper_core.py` 分段轉錄從第二段起會用前段結尾文字覆蓋領域詞彙 prompt（而非合併），這是「混音模式逐字稿專有名詞辨識率低」問題的實際根因（非錄音方式或音質問題）；透過 `/codex-handoff` 產出 PLAN + HANDOFF 文件，交由另一 Claude Code 帳號（whisper-4d）實作；`/codex-receive` 獨立重跑測試驗收後 push
+- State: `main` HEAD `74b0dc1`，已 push；新增 `_merge_prompt()` + `MERGED_PROMPT_MAX_CHARS=200` 具名常數；`tests/unit/test_prompts.py` 新增 `TestMergePrompt` 7 案例，全部通過；回歸測試 25/25、15/15 全綠
+- Next: 使用者實測真實會議錄音驗證辨識率改善程度
 ### 2026-07-23｜codex/fix-v2-4-1-timecodes 分支收斂與清理
 - Completed:
   (1) 使用者從 UI 看到 `codex/fix-v2-4-1-timecodes` 分支，詢問是否需要合併或由 codex 執行；查證發現該分支最早的兩個 commit（Obsidian 逐字稿時間碼修復）已於 2026-07-22 透過 PR #8 squash merge 進 `main`，不需 codex 再執行；
