@@ -114,11 +114,16 @@ final class OrderedChunkSubmissionQueue {
     /// (process alive, job hung) — without this, activeURL never clears and the queue stalls forever.
     private let jobStallTimeout: TimeInterval
     private var jobStallWatchdog: Task<Void, Never>?
+    /// Fallback un-pause path: after a submission failure, the Worker may already be `.ready`
+    /// (it was never "not ready") and so never re-emits the ready event that normally clears
+    /// isPausedAfterFailure. Poll state directly so the queue can't stay paused indefinitely.
+    private let pauseRecoveryPollInterval: TimeInterval
+    private var pauseRecoveryTask: Task<Void, Never>?
 
     init(
         transcriber: any LiveAudioTranscribing, modelName: String,
         language: String? = nil, domain: String = "general", extraTerms: String = "",
-        jobStallTimeout: TimeInterval = 180
+        jobStallTimeout: TimeInterval = 180, pauseRecoveryPollInterval: TimeInterval = 5
     ) {
         self.transcriber = transcriber
         self.modelName = modelName
@@ -126,6 +131,7 @@ final class OrderedChunkSubmissionQueue {
         self.domain = domain
         self.extraTerms = extraTerms
         self.jobStallTimeout = jobStallTimeout
+        self.pauseRecoveryPollInterval = pauseRecoveryPollInterval
         _ = transcriber.addTerminalObserver { [weak self] requestID, status in
             self?.jobDidReachTerminal(requestID: requestID, status: status)
         }
@@ -133,9 +139,28 @@ final class OrderedChunkSubmissionQueue {
             self?.jobWasLost(requestID: requestID)
         }
         _ = transcriber.addReadyObserver { [weak self] in
+            self?.pauseRecoveryTask?.cancel()
+            self?.pauseRecoveryTask = nil
             self?.isPausedAfterFailure = false
             self?.submitNextIfPossible()
         }
+    }
+
+    private func schedulePauseRecovery() {
+        pauseRecoveryTask?.cancel()
+        pauseRecoveryTask = Task { [weak self, pauseRecoveryPollInterval] in
+            try? await Task.sleep(for: .seconds(pauseRecoveryPollInterval))
+            guard !Task.isCancelled else { return }
+            self?.attemptPauseRecovery()
+        }
+    }
+
+    private func attemptPauseRecovery() {
+        guard isPausedAfterFailure else { pauseRecoveryTask = nil; return }
+        guard isWorkerReady else { schedulePauseRecovery(); return }
+        isPausedAfterFailure = false
+        pauseRecoveryTask = nil
+        submitNextIfPossible()
     }
 
     func enqueue(_ url: URL) {
@@ -162,6 +187,7 @@ final class OrderedChunkSubmissionQueue {
         } catch {
             pendingURLs.insert(next, at: 0)
             isPausedAfterFailure = true
+            schedulePauseRecovery()
             errorMessage = error.localizedDescription
             submissionFailureHandler?(error)
         }
@@ -194,6 +220,7 @@ final class OrderedChunkSubmissionQueue {
             activeURL = nil
             activeRequestID = nil
             isPausedAfterFailure = true
+            schedulePauseRecovery()
             let error = ChunkSubmissionTerminalError(status: status)
             errorMessage = error.localizedDescription
             submissionFailureHandler?(error)
@@ -271,6 +298,7 @@ final class LiveRecordingController {
         rotationInterval: TimeInterval = 15,
         modelName: String = "base",
         jobStallTimeout: TimeInterval = 180,
+        pauseRecoveryPollInterval: TimeInterval = 5,
         outputURLFactory: @escaping @Sendable () throws -> URL = {
             try LiveRecordingController.makeOutputURL()
         }
@@ -282,7 +310,8 @@ final class LiveRecordingController {
         self.rotationInterval = rotationInterval
         self.outputURLFactory = outputURLFactory
         submissionQueue = OrderedChunkSubmissionQueue(
-            transcriber: transcriber, modelName: modelName, jobStallTimeout: jobStallTimeout
+            transcriber: transcriber, modelName: modelName, jobStallTimeout: jobStallTimeout,
+            pauseRecoveryPollInterval: pauseRecoveryPollInterval
         )
         submissionQueue.queueDrainedHandler = { [weak self] in
             if self?.state == .draining { self?.state = .idle }

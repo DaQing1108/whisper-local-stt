@@ -98,6 +98,12 @@ private final class LiveTranscriber: LiveAudioTranscribing {
         state = .ready
         readyObservers.values.forEach { $0() }
     }
+    /// Simulates the Worker settling back to `.ready` without emitting a fresh ready event —
+    /// the case where the Worker was never "not ready" after a stall/cancel, so the normal
+    /// ready-observer path never fires.
+    func becomeReadySilently() {
+        state = .ready
+    }
     func becomePermanentlyUnavailable() {
         state = .failed("restart exhausted")
         if let requestID = requestIDs.last { lostObservers.values.forEach { $0(requestID) } }
@@ -626,6 +632,48 @@ struct LiveRecordingControllerTests {
         #expect(controller.submissionQueue.activeURL == nil)
         #expect(controller.submissionQueue.pendingURLs == [url])
         if case .failed = controller.state {} else { Issue.record("Expected failed state after stalled job was cancelled") }
+    }
+
+    @Test
+    func pauseRecoversViaPollingWhenWorkerBecomesReadyWithoutEmittingReadyEvent() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("live-pause-recovery-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let urls = (1...2).map { directory.appendingPathComponent("chunk-\($0).wav") }
+        let sequence = ChunkURLSequence(urls)
+        let backend = LiveCaptureBackend()
+        let scheduler = ManualRotationScheduler()
+        let transcriber = LiveTranscriber()
+        let controller = LiveRecordingController(
+            permissionProvider: LivePermissionProvider(),
+            backend: backend,
+            scheduler: scheduler,
+            transcriber: transcriber,
+            pauseRecoveryPollInterval: 0.05,
+            outputURLFactory: { try sequence.next() }
+        )
+
+        await controller.start()
+        backend.emit(Data([0x01, 0x02]))
+        scheduler.fire()
+        backend.emit(Data([0x03, 0x04]))
+        #expect(transcriber.submittedURLs == [urls[0]])
+
+        // Non-"Completed" terminal status pauses the queue — the only remaining hope for
+        // resumption is the poll-based fallback, since we never fire a ready observer below.
+        transcriber.failActiveJob("Cancelled")
+        #expect(controller.submissionQueue.activeURL == nil)
+        #expect(controller.submissionQueue.pendingURLs == [urls[0], urls[1]])
+
+        // Worker silently settles back to .ready — no addReadyObserver callback fires.
+        transcriber.becomeReadySilently()
+
+        // Without the poll fallback the queue would stay paused forever; assert it resumes on its own.
+        try await Task.sleep(for: .milliseconds(300))
+
+        #expect(controller.submissionQueue.activeURL == urls[0])
+        #expect(transcriber.submittedURLs == [urls[0], urls[0]])
     }
 
     @Test
