@@ -1,10 +1,11 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-09-15（initial_prompt 覆蓋 bug 修復，main 分支移植）
-Phase: 修復分段轉錄（15秒即時/混音模式）從第二段起，領域詞彙 initial_prompt 被前段結尾文字覆蓋、導致專有名詞（TVBS/DGX/ASR 等）辨識率偏低的 bug；先在 main 分支（已凍結）修復（`74b0dc1`），發現使用者實際使用的是本分支後，移植同一套 `_merge_prompt()` 修復過來（commit `127cfc2`）。開發交給 peer Claude 帳號 `whisper-4d`（本機 commit 不 push），規劃/驗收/push 留本 session。`/codex-receive` 獨立驗證：本機重跑 `tests/unit/test_prompts.py` + `tests/unit/test_mixed_mode_prompt_and_llm.py` 共 31 passed（含新增的 `TestMergePrompt` 7 案例 + 1 個驗證 override 情境下 domain prompt 仍生效的案例），push 到 `origin/whisper-swift`。重跑 `scripts/build_worker_runtime.sh`（PyInstaller 重新打包含修復的 whisper_core.py）→ `scripts/build_swiftui_app.sh` → `dist/Whisper Swift.app`，簽章 `WhisperSTT Local` 驗證通過，Gate B worker 握手 `ready`/`pong` 確認正常。
-Working（追加）: 已用 `ditto` 複製新版到 `~/Applications/Whisper Swift.app`（覆蓋舊版），`xattr -cr` 清除 quarantine 屬性，`codesign --verify --deep --strict` 驗證通過。
-Next action: 使用者需在 Finder **雙擊** `~/Applications/Whisper Swift.app` 手動核准 Gatekeeper（macOS 設計上無法自動化繞過人工同意），核准後用真實混音會議音檔（含專有名詞）實測辨識率改善程度。A（音量平衡）與 B（切點對齊）仍缺「舊 build 同素材」對照，待與本輪一起排入下次真機走查。
+Last checkpoint: 2026-09-19 00:50
+Phase: 三個獨立 bug 修復——(1) 即時錄音 chunk 送出佇列卡住後永久暫停不會自救、(2) 批次匯入長音檔（>30分鐘）轉錄過程中 UI 完全無進度回饋看似當機、(3) 按鈕排版在 macOS 26 Tahoe 被系統自動分組成融合膠囊+圖示疊字。
+Working: 全程用 sendmessage 分工——開發交給三個不同 peer Claude session（whisper-57/whisper-3a/whisper-fb，本機 commit 不 push），規劃/獨立驗證/push/打包留本 session。(3) 花了三輪才修對：第一輪 overlay 移位沒解決疊字症狀、第二輪 buttonStyle 修好膠囊融合但沒發現同一個浮動 overlay 疊到逐字稿內容上，每輪都親自重新打包 app、用電腦操作工具截圖比對，不只信任對方回報的「測試通過」，才抓出前兩輪「邏輯合理但實際沒修好」的假修復；最終根因是浮動複製/匯出 icon 與按鈕列裡本來就有的「複製」/「Export」功能完全重複，直接刪除解決。三個修復皆獨立重跑測試通過（Swift 218/218、Python 322/322，另確認 `LiveRecordingControllerTests` 在全套並行執行下的 flaky 為既有問題非本輪引入）、push 到 `origin/whisper-swift`（`f4e5ade`、`6bef8ed`、`4f7e9f6`）。打包 `scripts/build_swiftui_app.sh` → `dist/Whisper Swift.app`（含最新 worker runtime），`ditto` 安裝到 `~/Applications/Whisper Swift.app`，Finder 雙擊開啟（此次本機憑證已被信任，未再跳 Gatekeeper 警告），Gate B worker `ready` 握手正常，畫面截圖確認三個修復皆生效。
+Next action: 使用者需實測兩項自動化測試無法驗證的行為：(1) 錄 >30 分鐘即時混音，確認遇到卡頓後會自動恢復繼續轉錄，不用手動介入；(2) 匯入 >30 分鐘音檔，確認轉錄過程中有「⏳ 轉錄中 chunk X/N...」進度文字持續更新而非畫面凍結。
+Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍，沿用舊記錄）
 
 ### 舊記錄
 Last checkpoint: 2026-09-07（第五輪）
@@ -15,6 +16,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-09-19 00:50｜三項獨立 bug 修復（佇列卡死自救／批次進度回饋／按鈕排版，多 peer 分工）
+- Completed: 使用者回報即時錄音卡在 30 分鐘不動，追出 `OrderedChunkSubmissionQueue.isPausedAfterFailure` 卡住後只靠 worker 重發 ready 事件才會恢復、但 worker 本來就是 ready 狀態不會再發事件，永久卡死；補上 `schedulePauseRecovery`/`attemptPauseRecovery` 輪詢自救機制（`f4e5ade`）。順帶發現批次匯入長音檔（30分鐘切一段、CPU 重載大模型）轉錄中 UI 完全無回饋看似當機，實為使用者自己等到失去耐心手動取消；補上 chunk 進度 heartbeat 事件（`6bef8ed`）。裝新版時使用者發現按鈕列排版壞掉，追出 macOS 26 Tahoe 對無明確 `.buttonStyle` 的相鄰按鈕會自動分組成 Liquid Glass 膠囊+合成圖示，且同區另有一個功能重複的浮動 overlay 疊到內容——三輪來回才修對（`4f7e9f6`）。全程 sendmessage 分工給 3 個不同 peer session（whisper-57/whisper-3a/whisper-fb，本機不 push），規劃/驗收/打包留本 session。
+- State: 三個修復皆獨立重跑測試（Swift 218/218、Python 322/322）、獨立重建 app 用電腦操作工具截圖驗證（不只信任對方回報）——抓到兩次「測試過但視覺症狀沒消失」的假修復才逼出真正根因；push `origin/whisper-swift`；`scripts/build_swiftui_app.sh` → `ditto` 裝到 `~/Applications/Whisper Swift.app`，Finder 開啟、Gate B worker ready 握手正常，畫面截圖確認正常
+- Next: 使用者需實測兩項自動測試驗不到的行為——錄 >30 分鐘即時混音確認卡頓後自動恢復；匯入 >30 分鐘音檔確認有 chunk 進度文字持續更新
+
 ### 2026-09-15｜initial_prompt 覆蓋 bug 修復（main 分支移植，跨帳號交接）
 - Completed: 使用者回報混音模式逐字稿專有名詞辨識率低，診斷出 `whisper_core.py` 的 `run_whisper()` 分段轉錄從第二段起用前段結尾文字覆蓋領域詞彙 initial_prompt（而非合併），先在 main 分支修復並打包驗證後，確認使用者實際使用 whisper-swift 分支，移植同一套 `_merge_prompt()` + `MERGED_PROMPT_MAX_CHARS=200` 修復過來；開發交 peer Claude 帳號 `whisper-4d`（本機 commit 不 push），規劃/驗收/push 留本 session
 - State: 本機獨立重跑 `tests/unit/test_prompts.py` + `tests/unit/test_mixed_mode_prompt_and_llm.py` 共 31 passed（`TestMergePrompt` 7 案例 + 1 個 override 情境案例）；push `origin/whisper-swift`（`127cfc2`）；`scripts/build_worker_runtime.sh` 重新打包 PyInstaller worker（含修復）→ `scripts/build_swiftui_app.sh` → `dist/Whisper Swift.app`，簽章 `WhisperSTT Local` 驗證通過、Gate B worker `ready`/`pong` 握手正常
