@@ -68,22 +68,6 @@ extension ContentView {
             }
         }
         .cardStyle()
-        .overlay(alignment: .bottomTrailing) {
-            if selectedWorkspaceTab == .transcript, !transcriptDraft.isEmpty {
-                HStack(spacing: 8) {
-                    Button { copyDraft() } label: { Image(systemName: "doc.on.doc") }
-                    if let entry = currentEntry {
-                        Menu { ForEach(TranscriptionExportFormat.allCases) { format in
-                            Button(format.rawValue) { export(entry, as: format) }
-                                .disabled(format == .srt && entry.segments.isEmpty)
-                        } } label: { Image(systemName: "square.and.arrow.up") }
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(DaylightPalette.accentActive)
-                .padding(14)
-            }
-        }
         .onChange(of: worker.diarizedSegments) { _, segments in
             guard !segments.isEmpty else { return }
             guard diarizationTargetEntryID != nil, diarizationTargetEntryID == currentEntry?.id else { return }
@@ -206,23 +190,30 @@ extension ContentView {
                 }
                 HStack {
                     Button("儲存修改") { saveDraft() }.disabled(currentEntryID == nil)
+                        .buttonStyle(.bordered)
                     Button("複製") { copyDraft() }.disabled(transcriptDraft.isEmpty)
+                        .buttonStyle(.bordered)
                     Button("清空文字") { transcriptDraft = ""; isDraftDirty = true }.disabled(transcriptDraft.isEmpty)
+                        .buttonStyle(.bordered)
                     if let entry = currentEntry {
                         Button(audioPlayer?.isPlaying == true ? "暫停音訊" : "播放音訊") { togglePlayback(entry) }
+                            .buttonStyle(.bordered)
                         if !worker.diarizationAvailable && worker.diarizationStatus != "ready" {
                             Button(worker.diarizationStatus == "loading" ? "下載模型中…" : "下載講者辨識模型") {
                                 triggerDiarizationWarmup()
                             }
                             .disabled(worker.diarizationOperationInProgress || worker.activeRequestID != nil)
+                            .buttonStyle(.bordered)
                         }
                         TextField("已知講者人數", text: $knownSpeakerCount)
                             .frame(width: 90)
                             .disabled(worker.diarizationOperationInProgress || worker.activeRequestID != nil)
                         Button("辨識講者") { triggerDiarization(entry) }
                             .disabled(entry.segments.isEmpty || worker.diarizationOperationInProgress || worker.activeRequestID != nil)
+                            .buttonStyle(.bordered)
                         if !SpeakerRename.extractSpeakerLabels(from: transcriptDraft).isEmpty {
                             Button("重新命名講者") { openSpeakerRenameSheet() }
+                                .buttonStyle(.bordered)
                         }
                         Menu("Export") {
                             ForEach(TranscriptionExportFormat.allCases) { format in
@@ -230,6 +221,8 @@ extension ContentView {
                                     .disabled(format == .srt && entry.segments.isEmpty)
                             }
                         }
+                        .buttonStyle(.bordered)
+                        .menuStyle(.button)
                     }
                 }
                 if worker.diarizationStatus == "processing" {
