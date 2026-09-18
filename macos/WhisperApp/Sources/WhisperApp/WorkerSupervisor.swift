@@ -118,6 +118,7 @@ final class WorkerSupervisor {
     private var lostObservers: [UUID: @MainActor @Sendable (String) -> Void] = [:]
     private var readyObservers: [UUID: @MainActor @Sendable () -> Void] = [:]
     private var unavailableObservers: [UUID: @MainActor @Sendable (WorkerState) -> Void] = [:]
+    private var statusObservers: [UUID: @MainActor @Sendable (String?, String) -> Void] = [:]
 
     private var process: Process?
     private var input: FileHandle?
@@ -419,11 +420,22 @@ final class WorkerSupervisor {
         return id
     }
 
+    /// Fires whenever a "status" event lands for the currently active request — e.g. a
+    /// per-chunk progress heartbeat during a long batch-import job. Not a terminal signal.
+    func addStatusObserver(
+        _ observer: @escaping @MainActor @Sendable (String?, String) -> Void
+    ) -> UUID {
+        let id = UUID()
+        statusObservers[id] = observer
+        return id
+    }
+
     func removeObserver(_ id: UUID) {
         terminalObservers[id] = nil
         lostObservers[id] = nil
         readyObservers[id] = nil
         unavailableObservers[id] = nil
+        statusObservers[id] = nil
     }
 
     func stop() {
@@ -511,6 +523,7 @@ final class WorkerSupervisor {
         case "status":
             guard event.requestID == activeRequestID else { return }
             jobStatus = event.payload["status"]?.string ?? event.payload["msg"]?.string ?? "Running"
+            for observer in statusObservers.values { observer(event.requestID, jobStatus) }
         case "progress":
             guard event.requestID == activeRequestID else { return }
             let done = event.payload["done"]?.number ?? 0

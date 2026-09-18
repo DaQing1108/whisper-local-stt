@@ -31,6 +31,7 @@ final class BatchTranscriptionController {
     private var lostObserverID: UUID?
     private var readyObserverID: UUID?
     private var unavailableObserverID: UUID?
+    private var statusObserverID: UUID?
     private var model = "base"
     private var language: String?
     private var domain = "general"
@@ -48,6 +49,9 @@ final class BatchTranscriptionController {
         readyObserverID = worker.addReadyObserver { [weak self] in self?.submitNext() }
         unavailableObserverID = worker.addUnavailableObserver { [weak self] state in
             self?.workerBecameUnavailable(state)
+        }
+        statusObserverID = worker.addStatusObserver { [weak self] requestID, status in
+            self?.statusUpdated(requestID: requestID, status: status)
         }
     }
 
@@ -123,6 +127,13 @@ final class BatchTranscriptionController {
         self.activeItemID = nil
         activeRequestID = nil
         if worker.state == .ready { submitNext() }
+    }
+
+    private func statusUpdated(requestID: String?, status: String) {
+        guard requestID == activeRequestID,
+              let activeItemID,
+              let index = items.firstIndex(where: { $0.id == activeItemID }) else { return }
+        items[index].message = status
     }
 
     private func workerBecameUnavailable(_ state: WorkerState) {

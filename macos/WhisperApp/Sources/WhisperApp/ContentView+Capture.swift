@@ -151,7 +151,8 @@ extension ContentView {
                         Text(item.status.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
                     }
                     if let message = item.message {
-                        Text(message).font(.caption).foregroundStyle(.red)
+                        Text(message).font(.caption)
+                            .foregroundStyle(item.status == .failed ? .red : .secondary)
                     }
                 }
             }

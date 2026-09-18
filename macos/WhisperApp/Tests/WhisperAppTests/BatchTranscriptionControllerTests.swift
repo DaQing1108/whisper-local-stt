@@ -73,6 +73,30 @@ struct BatchTranscriptionControllerTests {
         #expect(controller.items.allSatisfy { $0.status == .failed })
     }
 
+    @Test func statusEventUpdatesRunningItemMessage() async throws {
+        let temporary = try makeTemporaryWorker(script: statusThenCompletingWorker)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let worker = WorkerSupervisor()
+        try worker.start(
+            pythonURL: URL(fileURLWithPath: "/usr/bin/python3"),
+            workerURL: temporary.appendingPathComponent("worker.py"), workingDirectory: temporary
+        )
+        try await waitUntil { worker.state == .ready }
+        let controller = BatchTranscriptionController(worker: worker)
+        let urls = [temporary.appendingPathComponent("a.wav")]
+        try controller.replaceFiles(urls)
+        try controller.start(model: "large-v3", language: "zh", domain: "general", extraTerms: "")
+
+        try await waitUntil {
+            controller.items.first?.message == "Transcribing chunk 1/4"
+        }
+        #expect(controller.items.first?.status == .running)
+
+        try await waitUntil { !controller.isRunning }
+        #expect(controller.items.first?.status == .completed)
+        worker.stop()
+    }
+
     private func makeTemporaryWorker(script: String) throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -118,6 +142,23 @@ struct BatchTranscriptionControllerTests {
             c = json.loads(line)
             if c["command"] == "transcribe":
                 emit(c["request_id"], "accepted", {"job_id":c["request_id"]})
+        """
+    }
+
+    private var statusThenCompletingWorker: String {
+        """
+        import json, sys, time
+        def emit(r, e, p):
+            print(json.dumps({"protocol":"whisper.worker","version":1,"type":"event","request_id":r,"event":e,"payload":p}), flush=True)
+        emit("worker", "ready", {"status":"ready"})
+        for line in sys.stdin:
+            c = json.loads(line)
+            if c["command"] == "transcribe":
+                r = c["request_id"]
+                emit(r, "accepted", {"job_id":r})
+                emit(r, "status", {"job_id":r,"msg":"Transcribing chunk 1/4"})
+                time.sleep(0.3)
+                emit(r, "completed", {"job_id":r,"text":c["payload"]["audio_path"],"language":"zh","info":{"segments":[]}})
         """
     }
 }

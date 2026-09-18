@@ -617,6 +617,9 @@ def run_whisper(
                 with wave.open(chunk_path, 'wb') as cw:
                     cw.setparams(params)
                     cw.writeframes(frames)
+                emit("status", {
+                    "msg": f"⏳ 轉錄中 chunk {i + 1}/{n_chunks}（大型模型於 CPU 推論可能需數分鐘）..."
+                })
                 try:
                     result   = _transcribe_file(chunk_path, model_name, opts, cancellation)
                     if cancellation:
