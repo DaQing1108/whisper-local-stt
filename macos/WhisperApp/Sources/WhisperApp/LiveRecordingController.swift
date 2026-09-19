@@ -121,6 +121,35 @@ final class TaskRecoveryWatchdogScheduler: RecoveryWatchdogScheduling {
 }
 
 @MainActor
+protocol PauseRecoveryScheduling: AnyObject {
+    func scheduleRecovery(after interval: TimeInterval, action: @escaping @MainActor @Sendable () -> Void)
+    func cancelRecovery()
+}
+
+@MainActor
+final class TaskPauseRecoveryScheduler: PauseRecoveryScheduling {
+    private var task: Task<Void, Never>?
+
+    // Unlike TaskRecoveryWatchdogScheduler, each poll cycle must reset the deadline: the
+    // caller reschedules itself from attemptPauseRecovery() while still pending, and that
+    // retry needs its own full interval rather than being dropped by a "still pending" guard.
+    func scheduleRecovery(after interval: TimeInterval, action: @escaping @MainActor @Sendable () -> Void) {
+        task?.cancel()
+        task = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(interval))
+            guard !Task.isCancelled else { return }
+            self?.task = nil
+            action()
+        }
+    }
+
+    func cancelRecovery() {
+        task?.cancel()
+        task = nil
+    }
+}
+
+@MainActor
 @Observable
 final class OrderedChunkSubmissionQueue {
     private(set) var pendingURLs: [URL] = []
@@ -146,12 +175,13 @@ final class OrderedChunkSubmissionQueue {
     /// (it was never "not ready") and so never re-emits the ready event that normally clears
     /// isPausedAfterFailure. Poll state directly so the queue can't stay paused indefinitely.
     private let pauseRecoveryPollInterval: TimeInterval
-    private var pauseRecoveryTask: Task<Void, Never>?
+    private let pauseRecoveryScheduler: any PauseRecoveryScheduling
 
     init(
         transcriber: any LiveAudioTranscribing, modelName: String,
         language: String? = nil, domain: String = "general", extraTerms: String = "",
-        jobStallTimeout: TimeInterval = 180, pauseRecoveryPollInterval: TimeInterval = 5
+        jobStallTimeout: TimeInterval = 180, pauseRecoveryPollInterval: TimeInterval = 5,
+        pauseRecoveryScheduler: any PauseRecoveryScheduling = TaskPauseRecoveryScheduler()
     ) {
         self.transcriber = transcriber
         self.modelName = modelName
@@ -160,6 +190,7 @@ final class OrderedChunkSubmissionQueue {
         self.extraTerms = extraTerms
         self.jobStallTimeout = jobStallTimeout
         self.pauseRecoveryPollInterval = pauseRecoveryPollInterval
+        self.pauseRecoveryScheduler = pauseRecoveryScheduler
         _ = transcriber.addTerminalObserver { [weak self] requestID, status in
             self?.jobDidReachTerminal(requestID: requestID, status: status)
         }
@@ -167,27 +198,23 @@ final class OrderedChunkSubmissionQueue {
             self?.jobWasLost(requestID: requestID)
         }
         _ = transcriber.addReadyObserver { [weak self] in
-            self?.pauseRecoveryTask?.cancel()
-            self?.pauseRecoveryTask = nil
+            self?.pauseRecoveryScheduler.cancelRecovery()
             self?.isPausedAfterFailure = false
             self?.submitNextIfPossible()
         }
     }
 
     private func schedulePauseRecovery() {
-        pauseRecoveryTask?.cancel()
-        pauseRecoveryTask = Task { [weak self, pauseRecoveryPollInterval] in
-            try? await Task.sleep(for: .seconds(pauseRecoveryPollInterval))
-            guard !Task.isCancelled else { return }
+        pauseRecoveryScheduler.scheduleRecovery(after: pauseRecoveryPollInterval) { [weak self] in
             self?.attemptPauseRecovery()
         }
     }
 
     private func attemptPauseRecovery() {
-        guard isPausedAfterFailure else { pauseRecoveryTask = nil; return }
+        guard isPausedAfterFailure else { pauseRecoveryScheduler.cancelRecovery(); return }
         guard isWorkerReady else { schedulePauseRecovery(); return }
         isPausedAfterFailure = false
-        pauseRecoveryTask = nil
+        pauseRecoveryScheduler.cancelRecovery()
         submitNextIfPossible()
     }
 
@@ -328,6 +355,7 @@ final class LiveRecordingController {
         modelName: String = "base",
         jobStallTimeout: TimeInterval = 180,
         pauseRecoveryPollInterval: TimeInterval = 5,
+        pauseRecoveryScheduler: any PauseRecoveryScheduling = TaskPauseRecoveryScheduler(),
         outputURLFactory: @escaping @Sendable () throws -> URL = {
             try LiveRecordingController.makeOutputURL()
         }
@@ -341,7 +369,8 @@ final class LiveRecordingController {
         self.outputURLFactory = outputURLFactory
         submissionQueue = OrderedChunkSubmissionQueue(
             transcriber: transcriber, modelName: modelName, jobStallTimeout: jobStallTimeout,
-            pauseRecoveryPollInterval: pauseRecoveryPollInterval
+            pauseRecoveryPollInterval: pauseRecoveryPollInterval,
+            pauseRecoveryScheduler: pauseRecoveryScheduler
         )
         submissionQueue.queueDrainedHandler = { [weak self] in
             if self?.state == .draining { self?.state = .idle }

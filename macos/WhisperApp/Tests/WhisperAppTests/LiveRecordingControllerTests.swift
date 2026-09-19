@@ -57,6 +57,22 @@ private final class ManualRecoveryWatchdogScheduler: RecoveryWatchdogScheduling 
 }
 
 @MainActor
+private final class ManualPauseRecoveryScheduler: PauseRecoveryScheduling {
+    private var action: (@MainActor @Sendable () -> Void)?
+    private(set) var scheduleCallCount = 0
+    func scheduleRecovery(after interval: TimeInterval, action: @escaping @MainActor @Sendable () -> Void) {
+        self.action = action
+        scheduleCallCount += 1
+    }
+    func cancelRecovery() { action = nil }
+    func fire() {
+        let toRun = action
+        action = nil
+        toRun?()
+    }
+}
+
+@MainActor
 private final class ManualAudioEventMonitor: AudioCaptureEventMonitoring {
     private var handler: (@MainActor @Sendable (AudioCaptureSystemEvent) -> Void)?
     func start(handler: @escaping @MainActor @Sendable (AudioCaptureSystemEvent) -> Void) {
@@ -674,12 +690,14 @@ struct LiveRecordingControllerTests {
         let backend = LiveCaptureBackend()
         let scheduler = ManualRotationScheduler()
         let transcriber = LiveTranscriber()
+        let pauseRecoveryScheduler = ManualPauseRecoveryScheduler()
         let controller = LiveRecordingController(
             permissionProvider: LivePermissionProvider(),
             backend: backend,
             scheduler: scheduler,
             transcriber: transcriber,
             pauseRecoveryPollInterval: 0.05,
+            pauseRecoveryScheduler: pauseRecoveryScheduler,
             outputURLFactory: { try sequence.next() }
         )
 
@@ -698,8 +716,10 @@ struct LiveRecordingControllerTests {
         // Worker silently settles back to .ready — no addReadyObserver callback fires.
         transcriber.becomeReadySilently()
 
-        // Without the poll fallback the queue would stay paused forever; assert it resumes on its own.
-        try await Task.sleep(for: .milliseconds(300))
+        // Without the poll fallback the queue would stay paused forever; manually firing the
+        // injected scheduler (instead of sleeping past a real pauseRecoveryPollInterval) removes
+        // the dependency on wall-clock time that made this test flaky under TSAN instrumentation.
+        pauseRecoveryScheduler.fire()
 
         #expect(controller.submissionQueue.activeURL == urls[0])
         #expect(transcriber.submittedURLs == [urls[0], urls[0]])
