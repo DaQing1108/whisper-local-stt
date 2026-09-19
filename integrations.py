@@ -164,6 +164,12 @@ def build_destination_summary(transcript: str, destination: str) -> tuple[str, s
     system_prompt = _DESTINATION_SUMMARY_PROMPTS.get(destination)
     if not system_prompt:
         raise ValueError(f"不支援的摘要目的地：{destination}")
+    if os.environ.get("WHISPER_TEST") == "1" and not any((
+        os.environ.get("ANTHROPIC_API_KEY"),
+        os.environ.get("GEMINI_API_KEY"),
+        os.environ.get("OPENAI_API_KEY"),
+    )):
+        return "test", f"## {destination.title()} 測試摘要\n\n{transcript}"
     provider = _configured_llm_provider()
     user_message = f"請直接整理以下逐字稿，不要提問或要求補充。\n\n逐字稿如下：\n{transcript}"
     return provider, _call_llm(system_prompt, user_message)
