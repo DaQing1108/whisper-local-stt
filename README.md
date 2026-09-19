@@ -1,10 +1,10 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-09-19 23:45
-Phase: 對 `task_04ca9cd8`（TSAN recovery watchdog 修復，commit `c124362`）做最終獨立複驗時，抓到同一類問題的**第二個實例**尚未修，已開第三張 follow-up 任務。
-Working: `c124362` 本身驗證正確——獨立重跑 TSAN 隔離測試、完整 220 測試皆與對方回報一致。但額外把完整 `swift test --sanitize=thread` 套件連續跑 3 次（不只是重跑對方報告裡驗過的範圍），有 2/3 次在 `pauseRecoversViaPollingWhenWorkerBecomesReadyWithoutEmittingReadyEvent()` 出現斷言失敗，單獨隔離跑該測試 3 次卻全過——與已修復的 recovery watchdog 是同一種模式（TSAN 插樁減速下，`LiveRecordingController.swift:180` 的 `schedulePauseRecovery()` 直接 `Task.sleep(for: .seconds(pauseRecoveryPollInterval))`（真實 5 秒輪詢）跟已修復的 500ms recovery watchdog 用的是同一種未注入排程的寫法，只是這次沒被那輪修復涵蓋到）。已開 `task_1c1cecba` 交給下一輪處理，套用同樣的可注入 scheduler 模式。
-Next action: 待你決定是否啟動 `task_1c1cecba`；另外 `.worktrees/ci-fix-tmp` 裡有一份未 commit 的殘留改動（`BatchTranscriptionControllerTests.swift`/`WorkerSupervisorTests.swift` 加 `@Suite(.serialized)` + timeout 5s→20s），推測是 ffmpeg/TSAN 任務探索階段的未完成嘗試、未併入最終方案，尚未決定要保留繼續或捨棄，需要你確認；以及優化評估報告裡 Task 2-5 的優先順序仍待排序。
+Last checkpoint: 2026-09-19 23:55
+Phase: 修復 `swift-tests` job 中 `WorkerSupervisorTests`/`BatchTranscriptionControllerTests` 逾時失敗——上一輪 checkpoint 記錄裡「`.worktrees/ci-fix-tmp` 未 commit 殘留改動」現已釐清並非探索期廢棄嘗試，是本輪的正式修復，已完成、驗證、push。
+Working: 根因是兩檔案的 `waitUntil` helper 預設 5 秒逾時，等待 spawn 的真實 `/usr/bin/python3` subprocess 送出 ready/pong IPC 時在 CI macOS runner 上系統性超時（CI 實測失敗落在 5.09–6.77 秒，本機同測試僅需 0.05–0.5 秒）；先用 CI log 排除「`swift-tests`／`swift-tsan` 兩 job 搶同一台機器」假設（各自獨立 VM，時間戳不重疊），實際成因是 Swift Testing 預設同一 suite 內併發跑測試，十幾個測試同時 spawn subprocess 互搶 CPU。修法：兩檔案各加 `@Suite(.serialized)`（suite 內序列化）+ timeout 5s→20s（純安全邊際，通過測試不受影響）。本機 build + 全套 198 測試通過，獨立 code-reviewer agent 在乾淨 checkout 重跑一次結果一致（APPROVE，0 CRITICAL/HIGH，1 MEDIUM 已記錄：`.serialized` 只序列化單一 suite 內部，兩 suite 之間仍可各自並發 1 個 subprocess，非完全消除）。Push 後 CI 實測 `swift-tests`／`swift-tsan` 皆轉綠；`integration-tests` job 失敗但確認是推送前既有問題，與本次無關。Push 為 `5a5eb5e`。
+Next action: 待你決定是否啟動 `task_1c1cecba`（`schedulePauseRecovery()` 同類 TSAN 計時 flaky，上上輪 checkpoint 開的 follow-up，尚未處理）；以及優化評估報告裡 Task 2-5 的優先順序仍待排序。
 Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍，沿用舊記錄）
 
 ### 舊記錄
@@ -35,6 +35,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-09-19 23:55｜修復 swift-tests job 逾時失敗（waitUntil 5s timeout 太緊）
+- Completed: 修復 CI `swift-tests` job 中 `WorkerSupervisorTests`（15 個測試）與 `BatchTranscriptionControllerTests`（5 個測試）持續逾時失敗的問題（此為上一輪 checkpoint 記錄的「`.worktrees/ci-fix-tmp` 未 commit 殘留改動」，本輪確認並非探索期廢棄嘗試，是正式修復並完成）。根因：兩檔案的 `waitUntil` helper 等待真實 `/usr/bin/python3` subprocess 送出 ready/pong IPC 時，預設 5 秒逾時在 CI macOS runner 上系統性超時（CI 實測失敗落在 5.09–6.77 秒，本機同測試僅需 0.05–0.5 秒）；先用 CI log 排除「`swift-tests`／`swift-tsan` 兩 job 搶同一台機器」假設（各自獨立 VM，時間戳不重疊），確認實際成因是 Swift Testing 預設同一 suite 內併發跑測試，十幾個測試同時 spawn subprocess 互搶 CPU。
+- State: 兩檔案各加 `@Suite(.serialized)`（suite 內序列化執行）+ `waitUntil` timeout 5s→20s（純安全邊際，通過測試不受影響，因迴圈偵測到 condition 為真即跳出）。本機 `swift build` 乾淨、`WorkerSupervisorTests` 15/15、`BatchTranscriptionControllerTests` 5/5、全套（排除已知 flaky `LiveRecordingControllerTests`）198/198 皆通過。獨立 code-reviewer agent 在乾淨 checkout 重跑一次結果一致，APPROVE（0 CRITICAL/HIGH，1 MEDIUM 已記錄：`.serialized` 只序列化單一 suite 內部，`WorkerSupervisorTests` 與 `BatchTranscriptionControllerTests` 兩 suite 之間仍可各自並發 1 個 subprocess，最壞情況同時 spawn 數從 ~17 降到 ≤2、非完全消除，若日後仍偶發逾時應優先排查此處）。Push 前發現 `origin/whisper-swift` 已前進兩次（另兩個 peer session 的 docs checkpoint + TSAN 修復 commit `c124362`，皆確認檔案不重疊），rebase 兩次乾淨無衝突後 push 為 `5a5eb5e`。Push 後在真實 CI 驗證：`swift-tests`／`swift-tsan` 皆轉綠（含之前失敗的步驟）；`integration-tests` job 失敗但比對前一個 commit 的 CI run 同樣失敗，確認是推送前既有問題，與本次改動無關。
+- Next: 待你決定是否啟動 `task_1c1cecba`（`schedulePauseRecovery()` 同類 TSAN 計時 flaky，尚未處理）；以及優化評估報告裡 Task 2-5 的優先順序排序。
+
 ### 2026-09-19 23:45｜複驗 TSAN 修復時抓到第二個同類計時問題，開新 follow-up
 - Completed: 最終獨立複驗 `task_04ca9cd8` 的修復（commit `c124362`）——不只重跑對方報告驗過的範圍，額外把完整 `swift test --sanitize=thread`（220 測試）連續跑 3 次，多發現一個 recovery watchdog 之外、同一種寫法（真實 `Task.sleep` 輪詢）的計時 flaky：`OrderedChunkSubmissionQueue.schedulePauseRecovery()`（`LiveRecordingController.swift:180`）在完整套件 + TSAN 下 2/3 次讓 `pauseRecoversViaPollingWhenWorkerBecomesReadyWithoutEmittingReadyEvent()` 斷言失敗，單獨隔離跑該測試卻 3 次全過——確認是同一類「TSAN 減速下真實時間輪詢的測試斷言不成立」的模式，只是這次沒被上一輪修復涵蓋到。
 - State: `c124362` 本身驗證正確無誤（隔離測試、完整套件皆與回報一致）；新發現的第二個實例已開 `task_1c1cecba`，附上明確的根因位置與建議修法（套用同樣的可注入 scheduler 模式）。另在 `.worktrees/ci-fix-tmp` 發現一份未 commit 的殘留改動（`@Suite(.serialized)` + timeout 5s→20s，動到 `BatchTranscriptionControllerTests.swift`/`WorkerSupervisorTests.swift`），推測是探索階段未併入最終方案的嘗試，未動它，留給使用者確認去留。
