@@ -1,6 +1,13 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
+Last checkpoint: 2026-09-20 06:10
+Phase: 獨立複驗全部三張 follow-up 任務（`task_251995fe` ffmpeg、`c124362` TSAN watchdog、`task_1c1cecba` TSAN pause-recovery）在真實 GitHub Actions 上的最終結果——四個 job 轉綠，另發現一個全新、範圍外的既有問題並開第四張 follow-up。
+Working: 拉齊 `origin/whisper-swift` 到 `117e5a6`（三個 follow-up 全部到位）後重新獨立驗證，不只重現任何一方報告過的步驟：`swift test`（無 TSAN）220/220；`swift test --sanitize=thread` 連續 **5 次**全綠 220/220（比之前任何一輪都更穩定，過去兩輪複驗都在 2-3 次內就抓到問題，這次真的乾淨了）；`git diff --stat` 確認四個 commit 的改動範圍精準對應各自宣稱的檔案，無範圍外異動。真實 GitHub Actions（commit `9c1b505`，run `35470274149`）：`swift-tests`✅、`swift-tsan`✅、`unit-tests`✅（ffmpeg fallback 生效）、`bundle-dependency-check`✅，四個 job 全綠——這是這一連串修復以來 CI 第一次不是靠本機重跑推論、而是真的在 GitHub Actions 上看到全面綠燈。唯一仍紅的是 `integration-tests`（macos-latest）：`TestSystemAudioObsidian::test_obsidian_save_api_directly` 打 `/api/save_to_obsidian` 回傳 502（預期 200）。本機 pre-push hook 對這個測試是通過的，判斷是 CI macOS runner 環境差異（可能是路徑/權限相關），跟前面三個修復完全無關——是把 CI 觸發範圍擴大到 `whisper-swift` 後又一個「從未被這個分支的 CI 跑過、現在才第一次曝光」的既有問題，同一種模式在這輪已經第二次出現（第一次是 `bin/ffmpeg`）。已開獨立 follow-up `task_358e6194`。
+Next action: 待你決定是否啟動 `task_358e6194`（502 錯誤排查），以及優化評估報告裡 Task 2-5 的優先順序。
+Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍，沿用舊記錄）
+
+### 舊記錄
 Last checkpoint: 2026-09-20 00:20
 Phase: 修復 `task_1c1cecba`——`OrderedChunkSubmissionQueue.schedulePauseRecovery()` 的 TSAN 計時競態（上一輪複驗 `c124362` 時額外發現的第二個同類 follow-up，現已修復、驗證、push）。
 Working: 套用 `c124362` 完全相同的可注入排程器模式：新增 `PauseRecoveryScheduling` 協定 + `TaskPauseRecoveryScheduler`（production 用真實 `Task.sleep`，但保留原本「每次 poll 都重置 deadline」的 reset-and-schedule 語意——與 recovery watchdog 的「pending 中忽略」guard 語意不同，因為 `attemptPauseRecovery` 在 Worker 仍未 ready 時會自我重新排程，需要每次都拿到完整新的 interval），測試改用手動觸發的 `ManualPauseRecoveryScheduler`，讓 `pauseRecoversViaPollingWhenWorkerBecomesReadyWithoutEmittingReadyEvent` 不再依賴真實時間流逝（原本要睡 300ms，現在 0.006s 完成）。此為 Claude Code 一般 session（非 sendmessage 分工）在自己的 git worktree 裡直接執行，非本機 peer session。驗證：`swift test`（無 TSAN）220/220 通過；`swift test --sanitize=thread` 連續 5 次 220/220 全綠。過程中重現已知的 `FinderInfo`/`fileprovider` xattr（iCloud File Provider daemon 對 `~/Documents` 路徑即時重新附加，導致 codesign 失敗）卡 TSAN 建置的問題——這次連一般 `swift test`（無 TSAN）也一起被卡到，用 `--scratch-path` 指到 `/tmp` 繞開；已在**未改動的原始 whisper-swift worktree** 重現同樣阻擋以確認與本次改動無關。Diff 僅 2 個 Swift 檔案（`LiveRecordingController.swift` + 對應測試檔）。Push 前 `origin/whisper-swift` 已前進一次（另一 peer session 的 docs checkpoint commit `30d1214`，docs-only 不重疊），rebase 乾淨無衝突後重跑一次全套 + TSAN 仍綠燈才 push 為 `117e5a6`。
@@ -40,6 +47,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-09-20 06:10｜三張 follow-up 全數確認、CI 四個 job 轉綠，抓到第四個既有問題
+- Completed: 對 `task_251995fe`（ffmpeg，`da2c630`）、`c124362`（TSAN watchdog）、`task_1c1cecba`（TSAN pause-recovery，`117e5a6`）做最終彙整驗收，不只重複驗過的步驟，額外把 `swift test --sanitize=thread` 連續跑 5 次確認穩定性，並直接查真實 GitHub Actions（`gh run view`）而非只憑本機推論。
+- State: `swift-tests`/`swift-tsan`/`unit-tests`/`bundle-dependency-check` 四個 job 全部轉綠；`integration-tests` 曝露一個全新問題（`test_obsidian_save_api_directly` 回傳 502），本機測試通過、疑似 CI macOS runner 環境差異，與前三個修復無關——這是本輪第二次「擴大 CI 觸發範圍曝露既有問題」（第一次是 ffmpeg）。已開 `task_358e6194` 追蹤。
+- Next: 待使用者決定是否啟動 `task_358e6194`。
+
 ### 2026-09-20 00:20｜修復 schedulePauseRecovery() 第二個 TSAN 計時競態（task_1c1cecba）
 - Completed: 修掉上一輪複驗 `c124362` 時額外發現的 follow-up——`OrderedChunkSubmissionQueue.schedulePauseRecovery()`/`attemptPauseRecovery()` 靠真實 `Task.sleep`（5 秒）輪詢 Worker 是否恢復 ready，`pauseRecoversViaPollingWhenWorkerBecomesReadyWithoutEmittingReadyEvent` 在跑滿整個 220 測試 + TSAN 套件時 flaky。套用與 `c124362` 完全一致的可注入排程器模式：新增 `PauseRecoveryScheduling` 協定 + `TaskPauseRecoveryScheduler`（production 用，保留原本「每次 poll 重置 deadline」的語意，不同於 recovery watchdog 的「pending 中忽略」guard 語意），測試改用手動觸發的 `ManualPauseRecoveryScheduler`。
 - State: `swift test`（無 TSAN）220/220 通過；`swift test --sanitize=thread` 連續 5 次 220/220 全綠。過程中一般 `swift test` 也被本機已知的 `FinderInfo`/`fileprovider` xattr（iCloud File Provider daemon 對 `~/Documents` 路徑即時重新附加，導致 codesign 失敗）卡住，用 `--scratch-path` 指到 `/tmp` 繞開；已在未改動的原始 whisper-swift worktree 重現同樣阻擋以確認與本次改動無關，非重新引入的 bug。Diff 僅 2 個 Swift 檔案。Push 前 rebase 掉 `origin/whisper-swift` 上無關的 1 個 docs commit（`30d1214`），rebase 後重跑一次全套 + TSAN 仍綠燈才 push 為 `117e5a6`。
