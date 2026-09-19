@@ -38,6 +38,41 @@
   值得重新評估是否該提前推進 Gate E，而不是繼續忍受每次重裝都要手動點「仍要打開」
 - **確認時間**：2026-07-22（Whisper Swift 版號顯示功能打包驗證時發現並排查確認）
 
+### 🧪 `swift test`／`swift test --sanitize=thread` 建置期 codesign 失敗（`resource fork, Finder information...not allowed`）
+
+```
+症狀：swift build 成功，但 swift test（含 --sanitize=thread）在最後的
+      CodeSign WhisperAppTests.xctest 步驟報錯：
+      "resource fork, Finder information, or similar detritus not allowed"
+
+確認：
+1. xattr .build/out/Products/Debug/WhisperAppTests.xctest
+   → 看到 com.apple.FinderInfo 與 com.apple.fileprovider.fpfs#P
+2. 手動 `xattr -cr` 或 `xattr -d com.apple.FinderInfo` 清除後立刻重跑
+   codesign（或重新 swift test）→ 幾乎瞬間又報同樣的錯
+   → 代表不是一次性殘留，是 iCloud File Provider daemon 對這個
+     ~/Documents 底下路徑主動、即時重新附加該屬性（race），手動清除
+     本身沒用，重新整個 swift build 也一樣會再中招
+```
+
+- **根因**：這個專案在 `~/Documents/AI-Workspace/...` 底下，屬於 iCloud Drive
+  「桌面與文件夾」同步範圍。iCloud File Provider daemon 會持續監控並管理這個目錄樹
+  下的檔案中繼資料，新建立的 `.xctest` bundle 在 codesign 簽章前的極短時間窗口內
+  就可能被重新標記為「package」（附加 FinderInfo），與 codesign 產生 race。
+- **正確做法**：用 `--scratch-path` 把 SwiftPM 的建置輸出指到 iCloud 同步範圍外
+  （例如 `/tmp`），完全避開這個 race：
+  ```bash
+  swift test --scratch-path /tmp/<任意目錄名>
+  swift test --scratch-path /tmp/<任意目錄名> --sanitize=thread
+  ```
+  不要嘗試 `xattr -cr`／`COPYFILE_DISABLE=1`／重新整個 `rm -rf .build` 再 build——
+  這些都無法解決 race 本身，只有換到非 iCloud 同步路徑才有效。
+- **已知會重現的情境**：一般 `swift test`（無 TSAN）偶爾也會中招，不是只有
+  `--sanitize=thread` 才會發生；已在完全未改動的 `whisper-swift` checkout 上重現過
+  同樣阻擋，確認是環境問題、與任何特定程式改動無關。
+- **確認時間**：2026-09-20（複驗 `task_1c1cecba` pause-recovery TSAN 修復時，
+  `swift test --sanitize=thread` 連續 5 次驗證卡在此問題，排查後改用 `--scratch-path` 解決）
+
 ## Git 歷史已知瑕疵（commit message ≠ diff，2026-07-24 發現）
 
 - **`f27670f`**（訊息：「fix(swift): recover Standard-mode recording from mid-session audio device changes」）— 訊息描述了完整的 mic-device-recovery 修復（含 independent review APPROVE 記錄），但實際 diff **只新增了一份 66 行的 `HANDOFF_CODEX_MIC_DEVICE_RECOVERY.md` 文件，沒有動到任何 source code**。
