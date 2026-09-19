@@ -80,7 +80,9 @@ def _get_ffmpeg() -> str:
             subprocess.run([candidate, "-version"], capture_output=True, check=True)
             _FFMPEG = candidate
             return candidate
-        except (FileNotFoundError, subprocess.CalledProcessError):
+        except (OSError, subprocess.CalledProcessError):
+            # OSError 涵蓋 FileNotFoundError，也涵蓋 bundled binary 架構不符時的
+            # Exec format error（例如 Linux CI runner 執行到 macOS 專用的 bin/ffmpeg）
             continue
     raise TranscriptionError(
         "FFMPEG_MISSING",
