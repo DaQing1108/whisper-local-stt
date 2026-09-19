@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
+Last checkpoint: 2026-09-19 23:45
+Phase: 對 `task_04ca9cd8`（TSAN recovery watchdog 修復，commit `c124362`）做最終獨立複驗時，抓到同一類問題的**第二個實例**尚未修，已開第三張 follow-up 任務。
+Working: `c124362` 本身驗證正確——獨立重跑 TSAN 隔離測試、完整 220 測試皆與對方回報一致。但額外把完整 `swift test --sanitize=thread` 套件連續跑 3 次（不只是重跑對方報告裡驗過的範圍），有 2/3 次在 `pauseRecoversViaPollingWhenWorkerBecomesReadyWithoutEmittingReadyEvent()` 出現斷言失敗，單獨隔離跑該測試 3 次卻全過——與已修復的 recovery watchdog 是同一種模式（TSAN 插樁減速下，`LiveRecordingController.swift:180` 的 `schedulePauseRecovery()` 直接 `Task.sleep(for: .seconds(pauseRecoveryPollInterval))`（真實 5 秒輪詢）跟已修復的 500ms recovery watchdog 用的是同一種未注入排程的寫法，只是這次沒被那輪修復涵蓋到）。已開 `task_1c1cecba` 交給下一輪處理，套用同樣的可注入 scheduler 模式。
+Next action: 待你決定是否啟動 `task_1c1cecba`；另外 `.worktrees/ci-fix-tmp` 裡有一份未 commit 的殘留改動（`BatchTranscriptionControllerTests.swift`/`WorkerSupervisorTests.swift` 加 `@Suite(.serialized)` + timeout 5s→20s），推測是 ffmpeg/TSAN 任務探索階段的未完成嘗試、未併入最終方案，尚未決定要保留繼續或捨棄，需要你確認；以及優化評估報告裡 Task 2-5 的優先順序仍待排序。
+Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍，沿用舊記錄）
+
+### 舊記錄
 Last checkpoint: 2026-09-19 23:20
 Phase: 兩張 follow-up 任務（`task_04ca9cd8`、`task_251995fe`）皆已確認處理完畢。
 Working: `task_251995fe`（bin/ffmpeg 在 ubuntu-latest CI runner 上 Exec format error，已由另一 peer session 修復並 push 為 `da2c630`）經使用者確認可關閉。嘗試用 `dismiss_task` 撤回對應任務卡片，工具回報「非本 session 待處理任務」（卡片是另一 peer session 建立、非本 session 佇列裡的項目）——卡片本身的撤回動作留在原 session 端處理，但底層修復（commit `da2c630`）已確認存在於 `origin/whisper-swift`，功能性已完成，與任務追蹤卡片的顯示狀態無關。本次無程式碼異動，純狀態確認。
 Next action: 待你決定優化評估報告（`HANDOFF_CLAUDE_WHISPER_SWIFT_OPTIMIZATION_ASSESSMENT.md`）裡 Task 2-5（accuracy 語料、結構化診斷、soak 測試、批次匯入持久化）的優先順序。
 Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍，沿用舊記錄）
-
-### 舊記錄
 Last checkpoint: 2026-09-19 23:10
 Phase: 修復 `task_04ca9cd8`——`LiveRecordingControllerTests` 在 TSAN 下的計時斷言失敗（上一輪 checkpoint 開的 follow-up）。
 Working: 診斷根因是 `scheduleRecoveryWatchdog()` 的 500ms 真實 `Task.sleep` 被兩個測試用另一段真實時間（700ms/300ms×2）賭它先觸發，TSAN 插樁減速後賭輸——log 無 `ThreadSanitizer` race 警告，證實不是真正資料競爭。方案：抽成可注入的 `RecoveryWatchdogScheduling` 協定（production 用真實 `Task.sleep`、測試用手動 `.fire()` 的 fake），徹底消除真實時間 race，向後相容（新建構子參數有預設值）。流程：本 session PLAN + 鎖 AC（`/codex-handoff`）→ SendMessage 派工 `whisper-c7`（本機 commit `2eff2aa` 不 push）→ `/codex-receive` 獨立驗收。對方額外做了兩輪獨立 code-reviewer 審查，並依 HANDOFF 原始授權範圍（測試邊界第 4 點）把同根因的另外 3 個測試一併修掉（`deviceChangeFinalizesCurrentChunkAndResumesCapture`、`deviceChangeResumesWhenNoMatchingEndEventArrives`、`repeatedDeviceEventsDebounceBeforeRestartingCapture`），正確排除了不受影響的第 4 個候選（`sleepWaitsForWakeInsteadOfStartingTheDeviceRecoveryWatchdog`，因為只有 `.deviceChange` 原因才會排程 watchdog）。獨立驗收全部重跑：`swift build` 乾淨、`swift test --filter LiveRecordingControllerTests` 22/22、`--sanitize=thread` 連續 3 次全綠且 grep 無 race/warning 字樣、完整 `swift test` 220/220、`git diff --stat` 僅觸碰 2 個 Swift 檔案，皆與對方回報一致（這次沒有回報落差）。Push 前發現本地已落後 `origin/whisper-swift` 一個無關 commit（`da2c630`，另一 peer session 修的 CI ffmpeg 問題，檔案完全不重疊），rebase 乾淨無衝突後重新抽測一次仍綠燈，push 為 `c124362`。過程中重現本機已知的 `FinderInfo` xattr（iCloud sync race）卡 codesign 問題，改用 `--scratch-path` 指到 `/tmp` 繞開，非重新引入的 bug。
@@ -30,6 +35,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-09-19 23:45｜複驗 TSAN 修復時抓到第二個同類計時問題，開新 follow-up
+- Completed: 最終獨立複驗 `task_04ca9cd8` 的修復（commit `c124362`）——不只重跑對方報告驗過的範圍，額外把完整 `swift test --sanitize=thread`（220 測試）連續跑 3 次，多發現一個 recovery watchdog 之外、同一種寫法（真實 `Task.sleep` 輪詢）的計時 flaky：`OrderedChunkSubmissionQueue.schedulePauseRecovery()`（`LiveRecordingController.swift:180`）在完整套件 + TSAN 下 2/3 次讓 `pauseRecoversViaPollingWhenWorkerBecomesReadyWithoutEmittingReadyEvent()` 斷言失敗，單獨隔離跑該測試卻 3 次全過——確認是同一類「TSAN 減速下真實時間輪詢的測試斷言不成立」的模式，只是這次沒被上一輪修復涵蓋到。
+- State: `c124362` 本身驗證正確無誤（隔離測試、完整套件皆與回報一致）；新發現的第二個實例已開 `task_1c1cecba`，附上明確的根因位置與建議修法（套用同樣的可注入 scheduler 模式）。另在 `.worktrees/ci-fix-tmp` 發現一份未 commit 的殘留改動（`@Suite(.serialized)` + timeout 5s→20s，動到 `BatchTranscriptionControllerTests.swift`/`WorkerSupervisorTests.swift`），推測是探索階段未併入最終方案的嘗試，未動它，留給使用者確認去留。
+- Next: 待使用者決定是否啟動 `task_1c1cecba`，以及殘留改動的處置。
+
 ### 2026-09-19 23:10｜修復 TSAN 計時斷言（follow-up task_04ca9cd8，whisper-c7 分工）
 - Completed: 修掉上一輪 checkpoint 開的 follow-up——`LiveRecordingControllerTests` 兩個測試（`repeatedDeviceRecoveryFailureStopsAfterBoundedAttempts`、`laterDeviceEventCannotIndefinitelyPostponeRecovery`）在 TSAN 下穩定重現斷言失敗，根因是靠真實時間（700ms/300ms）賭 `scheduleRecoveryWatchdog()` 的 500ms 真實 `Task.sleep` 一定先觸發，TSAN 插樁減速後賭輸（log 無 race 警告，非真正資料競爭）。抽出 `RecoveryWatchdogScheduling` 協定，測試改用手動 `.fire()` 的 fake scheduler。流程：本 session PLAN + 鎖 AC（`/codex-handoff`）→ SendMessage 派工 `whisper-c7`（commit `2eff2aa` 不 push）→ `/codex-receive` 獨立驗收。
 - State: 對方依 HANDOFF 授權範圍主動擴大修復到另外 3 個同根因測試、補 2 個 scheduler 直接單元測試、兩輪獨立 code-reviewer 審查後 APPROVE。獨立驗收與對方回報一致（無落差）：`swift build` 乾淨、`LiveRecordingControllerTests` 22/22、TSAN 連續 3 次全綠且 grep 無 race/warning、完整 `swift test` 220/220、diff 僅 2 個 Swift 檔案。Push 前 rebase 掉 `origin/whisper-swift` 上無關的 1 個 commit（`da2c630`，另一 peer 修的 ffmpeg CI 問題，檔案無重疊），push 為 `c124362`。過程遇到本機已知的 `FinderInfo` xattr（iCloud sync race）卡 codesign，改 `--scratch-path` 到 `/tmp` 繞開。
