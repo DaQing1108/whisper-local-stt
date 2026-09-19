@@ -93,6 +93,34 @@ final class TimerChunkRotationScheduler: ChunkRotationScheduling {
 }
 
 @MainActor
+protocol RecoveryWatchdogScheduling: AnyObject {
+    func scheduleWatchdog(after interval: TimeInterval, action: @escaping @MainActor @Sendable () -> Void)
+    func cancelWatchdog()
+}
+
+@MainActor
+final class TaskRecoveryWatchdogScheduler: RecoveryWatchdogScheduling {
+    private var task: Task<Void, Never>?
+
+    // Preserves the original guard semantics: a watchdog already pending is left alone
+    // rather than reset, so a repeated schedule request doesn't postpone the deadline.
+    func scheduleWatchdog(after interval: TimeInterval, action: @escaping @MainActor @Sendable () -> Void) {
+        guard task == nil else { return }
+        task = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(interval))
+            guard !Task.isCancelled else { return }
+            self?.task = nil
+            action()
+        }
+    }
+
+    func cancelWatchdog() {
+        task?.cancel()
+        task = nil
+    }
+}
+
+@MainActor
 @Observable
 final class OrderedChunkSubmissionQueue {
     private(set) var pendingURLs: [URL] = []
@@ -284,7 +312,7 @@ final class LiveRecordingController {
     private let outputURLFactory: @Sendable () throws -> URL
     private let eventMonitor: any AudioCaptureEventMonitoring
     private var session: RotatingCaptureSession?
-    private var recoveryWatchdog: Task<Void, Never>?
+    private let recoveryWatchdogScheduler: any RecoveryWatchdogScheduling
     private var ignoreDeviceEventsUntil: Date?
     private var recoveryAttempts = 0
     private let maximumRecoveryAttempts = 2
@@ -294,6 +322,7 @@ final class LiveRecordingController {
         backend: any AudioCaptureBackend = AVAudioEngineCaptureBackend(),
         scheduler: any ChunkRotationScheduling = TimerChunkRotationScheduler(),
         eventMonitor: any AudioCaptureEventMonitoring = SystemAudioCaptureEventMonitor(),
+        recoveryWatchdogScheduler: any RecoveryWatchdogScheduling = TaskRecoveryWatchdogScheduler(),
         transcriber: any LiveAudioTranscribing,
         rotationInterval: TimeInterval = 15,
         modelName: String = "base",
@@ -307,6 +336,7 @@ final class LiveRecordingController {
         self.backend = backend
         self.scheduler = scheduler
         self.eventMonitor = eventMonitor
+        self.recoveryWatchdogScheduler = recoveryWatchdogScheduler
         self.rotationInterval = rotationInterval
         self.outputURLFactory = outputURLFactory
         submissionQueue = OrderedChunkSubmissionQueue(
@@ -327,8 +357,7 @@ final class LiveRecordingController {
     func start() async {
         guard state == .idle || isFailed else { return }
         ignoreDeviceEventsUntil = nil
-        recoveryWatchdog?.cancel()
-        recoveryWatchdog = nil
+        recoveryWatchdogScheduler.cancelWatchdog()
         finalizedChunkURLs = []
         transcriptText = ""
         transcriptSegments = []
@@ -364,8 +393,7 @@ final class LiveRecordingController {
     func stop() {
         guard state == .recording || state == .recovering else { return }
         ignoreDeviceEventsUntil = nil
-        recoveryWatchdog?.cancel()
-        recoveryWatchdog = nil
+        recoveryWatchdogScheduler.cancelWatchdog()
         state = .stopping
         scheduler.cancel()
         eventMonitor.stop()
@@ -447,8 +475,7 @@ final class LiveRecordingController {
 
     private func captureFailed(_ error: Error, sessionID: UUID?) {
         guard sessionID != nil, session?.id == sessionID else { return }
-        recoveryWatchdog?.cancel()
-        recoveryWatchdog = nil
+        recoveryWatchdogScheduler.cancelWatchdog()
         scheduler.cancel()
         let failedSession = session
         session = nil
@@ -458,8 +485,7 @@ final class LiveRecordingController {
     }
 
     private func submissionFailed(_ error: Error) {
-        recoveryWatchdog?.cancel()
-        recoveryWatchdog = nil
+        recoveryWatchdogScheduler.cancelWatchdog()
         guard state == .recording, let session else {
             fail(error.localizedDescription)
             return
@@ -475,8 +501,7 @@ final class LiveRecordingController {
     }
 
     private func workerBecameUnavailable(_ workerState: WorkerState) {
-        recoveryWatchdog?.cancel()
-        recoveryWatchdog = nil
+        recoveryWatchdogScheduler.cancelWatchdog()
         switch state {
         case .recording, .stopping:
             scheduler.cancel()
@@ -498,8 +523,7 @@ final class LiveRecordingController {
 
     private func fail(_ message: String) {
         ignoreDeviceEventsUntil = nil
-        recoveryWatchdog?.cancel()
-        recoveryWatchdog = nil
+        recoveryWatchdogScheduler.cancelWatchdog()
         eventMonitor.stop()
         errorMessage = message
         state = .failed(message)
@@ -560,8 +584,7 @@ final class LiveRecordingController {
     }
 
     private func resumeCaptureAfterInterruption() {
-        recoveryWatchdog?.cancel()
-        recoveryWatchdog = nil
+        recoveryWatchdogScheduler.cancelWatchdog()
         guard state == .recovering else { return }
         guard submissionQueue.isWorkerReady else {
             fail("Python Worker unavailable during audio recovery")
@@ -583,11 +606,7 @@ final class LiveRecordingController {
     }
 
     private func scheduleRecoveryWatchdog() {
-        guard recoveryWatchdog == nil else { return }
-        recoveryWatchdog = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
-            self?.recoveryWatchdog = nil
+        recoveryWatchdogScheduler.scheduleWatchdog(after: 0.5) { [weak self] in
             self?.resumeCaptureAfterInterruption()
         }
     }

@@ -41,6 +41,22 @@ private final class ManualRotationScheduler: ChunkRotationScheduling {
 }
 
 @MainActor
+private final class ManualRecoveryWatchdogScheduler: RecoveryWatchdogScheduling {
+    private var action: (@MainActor @Sendable () -> Void)?
+    private(set) var scheduleCallCount = 0
+    func scheduleWatchdog(after interval: TimeInterval, action: @escaping @MainActor @Sendable () -> Void) {
+        self.action = action
+        scheduleCallCount += 1
+    }
+    func cancelWatchdog() { action = nil }
+    func fire() {
+        let toRun = action
+        action = nil
+        toRun?()
+    }
+}
+
+@MainActor
 private final class ManualAudioEventMonitor: AudioCaptureEventMonitoring {
     private var handler: (@MainActor @Sendable (AudioCaptureSystemEvent) -> Void)?
     func start(handler: @escaping @MainActor @Sendable (AudioCaptureSystemEvent) -> Void) {
@@ -304,11 +320,13 @@ struct LiveRecordingControllerTests {
         let sequence = ChunkURLSequence(urls)
         let backend = LiveCaptureBackend()
         let monitor = ManualAudioEventMonitor()
+        let watchdogScheduler = ManualRecoveryWatchdogScheduler()
         let controller = LiveRecordingController(
             permissionProvider: LivePermissionProvider(),
             backend: backend,
             scheduler: ManualRotationScheduler(),
             eventMonitor: monitor,
+            recoveryWatchdogScheduler: watchdogScheduler,
             transcriber: LiveTranscriber(),
             outputURLFactory: { try sequence.next() }
         )
@@ -318,7 +336,7 @@ struct LiveRecordingControllerTests {
         monitor.emit(.deviceChanged)
 
         #expect(controller.state == .recovering)
-        try await Task.sleep(for: .milliseconds(700))
+        watchdogScheduler.fire()
 
         #expect(controller.state == .recording)
         #expect(controller.finalizedChunkURLs == [urls[0]])
@@ -367,11 +385,13 @@ struct LiveRecordingControllerTests {
         let sequence = ChunkURLSequence(urls)
         let backend = LiveCaptureBackend()
         let monitor = ManualAudioEventMonitor()
+        let watchdogScheduler = ManualRecoveryWatchdogScheduler()
         let controller = LiveRecordingController(
             permissionProvider: LivePermissionProvider(),
             backend: backend,
             scheduler: ManualRotationScheduler(),
             eventMonitor: monitor,
+            recoveryWatchdogScheduler: watchdogScheduler,
             transcriber: LiveTranscriber(),
             outputURLFactory: { try sequence.next() }
         )
@@ -381,7 +401,7 @@ struct LiveRecordingControllerTests {
         monitor.emit(.deviceChanged)
         #expect(controller.state == .recovering)
 
-        try await Task.sleep(for: .milliseconds(700))
+        watchdogScheduler.fire()
 
         #expect(controller.state == .recording)
         #expect(controller.finalizedChunkURLs == [urls[0]])
@@ -398,11 +418,13 @@ struct LiveRecordingControllerTests {
         let sequence = ChunkURLSequence(urls)
         let backend = LiveCaptureBackend()
         let monitor = ManualAudioEventMonitor()
+        let watchdogScheduler = ManualRecoveryWatchdogScheduler()
         let controller = LiveRecordingController(
             permissionProvider: LivePermissionProvider(),
             backend: backend,
             scheduler: ManualRotationScheduler(),
             eventMonitor: monitor,
+            recoveryWatchdogScheduler: watchdogScheduler,
             transcriber: LiveTranscriber(),
             outputURLFactory: { try sequence.next() }
         )
@@ -413,7 +435,7 @@ struct LiveRecordingControllerTests {
         #expect(controller.state == .recovering)
         #expect(backend.startCount == 1)
 
-        try await Task.sleep(for: .milliseconds(700))
+        watchdogScheduler.fire()
 
         #expect(controller.state == .recording)
         #expect(backend.startCount == 2)
@@ -430,20 +452,25 @@ struct LiveRecordingControllerTests {
         let sequence = ChunkURLSequence(urls)
         let backend = LiveCaptureBackend()
         let monitor = ManualAudioEventMonitor()
+        let watchdogScheduler = ManualRecoveryWatchdogScheduler()
         let controller = LiveRecordingController(
             permissionProvider: LivePermissionProvider(),
             backend: backend,
             scheduler: ManualRotationScheduler(),
             eventMonitor: monitor,
+            recoveryWatchdogScheduler: watchdogScheduler,
             transcriber: LiveTranscriber(),
             outputURLFactory: { try sequence.next() }
         )
 
         await controller.start()
         monitor.emit(.deviceChanged)
-        try await Task.sleep(for: .milliseconds(300))
         monitor.emit(.configurationChanged)
-        try await Task.sleep(for: .milliseconds(300))
+        // The second device event re-enters scheduleRecoveryWatchdog() while the first
+        // watchdog is still pending. Production coalesces this into a no-op internally
+        // (see TaskRecoveryWatchdogScheduler's `task == nil` guard) rather than resetting
+        // the deadline, so a single fire() must still be enough to resume recording.
+        watchdogScheduler.fire()
 
         #expect(controller.state == .recording)
         #expect(backend.startCount == 2)
@@ -489,18 +516,20 @@ struct LiveRecordingControllerTests {
         let backend = LiveCaptureBackend()
         backend.failStartsAfterFirst = true
         let monitor = ManualAudioEventMonitor()
+        let watchdogScheduler = ManualRecoveryWatchdogScheduler()
         let controller = LiveRecordingController(
             permissionProvider: LivePermissionProvider(),
             backend: backend,
             scheduler: ManualRotationScheduler(),
             eventMonitor: monitor,
+            recoveryWatchdogScheduler: watchdogScheduler,
             transcriber: LiveTranscriber(),
             outputURLFactory: { try sequence.next() }
         )
 
         await controller.start()
         monitor.emit(.configurationChanged)
-        try await Task.sleep(for: .milliseconds(700))
+        watchdogScheduler.fire()
 
         if case .failed = controller.state {} else { Issue.record("Expected bounded recovery failure") }
         #expect(backend.startCount == 3)
@@ -764,5 +793,36 @@ struct LiveRecordingControllerTests {
 
         #expect(!controller.ownsChunk(unrelatedURL))
         #expect(!controller.acceptCompletedChunk(unrelatedURL, text: "不屬於這個 controller"))
+    }
+
+    @Test
+    func recoveryWatchdogSchedulerIgnoresReschedulingWhilePending() async throws {
+        let scheduler = TaskRecoveryWatchdogScheduler()
+        var firstFired = false
+        var secondFired = false
+        scheduler.scheduleWatchdog(after: 0.01) { firstFired = true }
+        // A second schedule call while the first is still pending must be ignored:
+        // it must not replace the pending action or postpone the deadline. A generous
+        // real-time margin (vs. the 0.01s interval) keeps this from flaking under
+        // system load rather than betting on a tight race window.
+        scheduler.scheduleWatchdog(after: 0.01) { secondFired = true }
+
+        try await Task.sleep(for: .seconds(2))
+
+        #expect(firstFired)
+        #expect(!secondFired)
+    }
+
+    @Test
+    func recoveryWatchdogSchedulerAllowsReschedulingAfterCancel() async throws {
+        let scheduler = TaskRecoveryWatchdogScheduler()
+        var fired = false
+        scheduler.scheduleWatchdog(after: 0.01) { Issue.record("Cancelled watchdog must not fire") }
+        scheduler.cancelWatchdog()
+        scheduler.scheduleWatchdog(after: 0.01) { fired = true }
+
+        try await Task.sleep(for: .seconds(2))
+
+        #expect(fired)
     }
 }
