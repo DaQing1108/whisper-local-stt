@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, whisper-swift]
   pull_request:
 
 jobs:
@@ -107,3 +107,41 @@ jobs:
 
       - name: Check bundle does not contain pyannote packaging regression
         run: python3 ci/check_bundle_deps.py
+
+  swift-tests:
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build (debug)
+        working-directory: macos/WhisperApp
+        run: swift build -c debug --scratch-path /tmp/whisper-swift-ci
+
+      - name: Clean scratch path xattrs (defensive, matches build_swiftui_app.sh)
+        run: |
+          xattr -cr /tmp/whisper-swift-ci || true
+          xattr -d com.apple.FinderInfo /tmp/whisper-swift-ci 2>/dev/null || true
+
+      - name: Run tests (excluding known-flaky LiveRecordingControllerTests)
+        working-directory: macos/WhisperApp
+        run: swift test --scratch-path /tmp/whisper-swift-ci --skip LiveRecordingControllerTests
+
+      - name: Run LiveRecordingControllerTests in isolation (known flaky under parallel execution)
+        working-directory: macos/WhisperApp
+        run: swift test --scratch-path /tmp/whisper-swift-ci --filter LiveRecordingControllerTests
+
+  swift-tsan:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Run tests under Thread Sanitizer (advisory)
+        working-directory: macos/WhisperApp
+        run: swift test --sanitize=thread --scratch-path /tmp/whisper-swift-tsan-ci
