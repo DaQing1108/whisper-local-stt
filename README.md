@@ -1,10 +1,10 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-09-20 06:10
-Phase: 獨立複驗全部三張 follow-up 任務（`task_251995fe` ffmpeg、`c124362` TSAN watchdog、`task_1c1cecba` TSAN pause-recovery）在真實 GitHub Actions 上的最終結果——四個 job 轉綠，另發現一個全新、範圍外的既有問題並開第四張 follow-up。
-Working: 拉齊 `origin/whisper-swift` 到 `117e5a6`（三個 follow-up 全部到位）後重新獨立驗證，不只重現任何一方報告過的步驟：`swift test`（無 TSAN）220/220；`swift test --sanitize=thread` 連續 **5 次**全綠 220/220（比之前任何一輪都更穩定，過去兩輪複驗都在 2-3 次內就抓到問題，這次真的乾淨了）；`git diff --stat` 確認四個 commit 的改動範圍精準對應各自宣稱的檔案，無範圍外異動。真實 GitHub Actions（commit `9c1b505`，run `35470274149`）：`swift-tests`✅、`swift-tsan`✅、`unit-tests`✅（ffmpeg fallback 生效）、`bundle-dependency-check`✅，四個 job 全綠——這是這一連串修復以來 CI 第一次不是靠本機重跑推論、而是真的在 GitHub Actions 上看到全面綠燈。唯一仍紅的是 `integration-tests`（macos-latest）：`TestSystemAudioObsidian::test_obsidian_save_api_directly` 打 `/api/save_to_obsidian` 回傳 502（預期 200）。本機 pre-push hook 對這個測試是通過的，判斷是 CI macOS runner 環境差異（可能是路徑/權限相關），跟前面三個修復完全無關——是把 CI 觸發範圍擴大到 `whisper-swift` 後又一個「從未被這個分支的 CI 跑過、現在才第一次曝光」的既有問題，同一種模式在這輪已經第二次出現（第一次是 `bin/ffmpeg`）。已開獨立 follow-up `task_358e6194`。
-Next action: 待你決定是否啟動 `task_358e6194`（502 錯誤排查），以及優化評估報告裡 Task 2-5 的優先順序。
+Last checkpoint: 2026-09-20 06:50
+Phase: 修復 `task_358e6194`（`test_obsidian_save_api_directly` 502）——本輪最後一個既有問題收斂，`whisper-swift` 分支 CI 五個 job 首次全部同時轉綠。
+Working: 根因由另一 peer session（同機、cross-session SendMessage 協作）診斷：`integrations.py::build_destination_summary()` 缺少 `main` 分支 commit `a26a2a6`（PR #8）已加入、但從未同步移植到 `whisper-swift` 的 `WHISPER_TEST` stub fallback guard，導致 CI 無任何 LLM API key 時 `_configured_llm_provider()` 必定丟 `RuntimeError`，`routes.py:1478` 的 `except RuntimeError` 轉成 502。本 session 獨立驗證：`git show a26a2a6 -- integrations.py` 逐字比對確認對方給的 patch 與 main 分支實際 commit 完全一致，未照單全收就套用。用臨時 worktree（`obsidian-502-fix` 分支，因目標 worktree 被其他 session 占用不能直接編輯）套上 6 行改動，本機 `pytest tests/integration -m integration` 16/16 全過，push 為 `9ea763f` 後在真實 GitHub Actions（run `35474087693`）確認 `unit-tests`/`swift-tests`/`bundle-dependency-check`/`swift-tsan`/`integration-tests` 五個 job 全部 `success`——這是 `whisper-swift` 第一次接上完整 CI 以來，所有 job 第一次同時全綠，此前三輪（ffmpeg exec-format-error、swift-tests worker timeout、這次的 502）都是「擴大 CI 觸發範圍後才第一次曝光」的既有問題，同一種模式連續出現三次。已用 SendMessage 回覆診斷方 session 確認修復已驗證並 ship。
+Next action: 五個 CI job 全綠，這輪串連的既有問題已全數收斂。待你決定優化評估報告（`HANDOFF_CLAUDE_WHISPER_SWIFT_OPTIMIZATION_ASSESSMENT.md`）裡 Task 2-5（accuracy 語料、結構化診斷、soak 測試、批次匯入持久化）的優先順序。
 Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍，沿用舊記錄）
 
 ### 舊記錄
@@ -47,6 +47,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-09-20 06:50｜修復 test_obsidian_save_api_directly 502（task_358e6194），CI 五個 job 首次全綠
+- Completed: 跨 session 協作收斂——另一 peer session 診斷出根因（`integrations.py::build_destination_summary()` 缺 `main` commit `a26a2a6` 的 `WHISPER_TEST` stub fallback guard，CI 無 LLM key 時必定 `RuntimeError`→502），本 session 用 `git show a26a2a6 -- integrations.py` 逐字驗證後才套用，不是照單全收；臨時 worktree 套 6 行 patch，本機 `pytest tests/integration -m integration` 16/16 通過，push 為 `9ea763f`，並 SendMessage 回覆診斷方確認已 ship。
+- State: 真實 GitHub Actions run `35474087693` 確認 `unit-tests`/`swift-tests`/`bundle-dependency-check`/`swift-tsan`/`integration-tests` 五個 job 全部 `success`——`whisper-swift` CI 接上以來首次全綠。本輪連續第三次出現「擴大 CI 觸發範圍才曝光既有問題」模式（ffmpeg → swift-tests timeout → 這次的 502），三次都已收斂。
+- Next: 待使用者排序優化評估報告 Task 2-5。
+
 ### 2026-09-20 06:10｜三張 follow-up 全數確認、CI 四個 job 轉綠，抓到第四個既有問題
 - Completed: 對 `task_251995fe`（ffmpeg，`da2c630`）、`c124362`（TSAN watchdog）、`task_1c1cecba`（TSAN pause-recovery，`117e5a6`）做最終彙整驗收，不只重複驗過的步驟，額外把 `swift test --sanitize=thread` 連續跑 5 次確認穩定性，並直接查真實 GitHub Actions（`gh run view`）而非只憑本機推論。
 - State: `swift-tests`/`swift-tsan`/`unit-tests`/`bundle-dependency-check` 四個 job 全部轉綠；`integration-tests` 曝露一個全新問題（`test_obsidian_save_api_directly` 回傳 502），本機測試通過、疑似 CI macOS runner 環境差異，與前三個修復無關——這是本輪第二次「擴大 CI 觸發範圍曝露既有問題」（第一次是 ffmpeg）。已開 `task_358e6194` 追蹤。
