@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
+Last checkpoint: 2026-09-19 22:20
+Phase: Swift CI + 並發測試閘門上線——`whisper-swift` 分支第一次有真正跑 Swift 的 CI（先前 `.github/workflows/ci.yml` 只認 `main` 分支且三個 job 全是 Python），源自對 `HANDOFF_CLAUDE_WHISPER_SWIFT_OPTIMIZATION_ASSESSMENT.md` 優化評估的 Task 1。
+Working: 走 `/task-router`（判定 L1）→ `/codex-handoff`（`engineering-discipline-loop` 跑到 Step 2 Plan 核准）→ sendmessage 派工給 peer session `whisper-c7`（本機 commit 不 push）→ `/codex-receive` 獨立驗收。新增 `swift-tests` job（`swift build` + `swift test`，`--skip LiveRecordingControllerTests` 主測試 + `--filter LiveRecordingControllerTests` 隔離序列跑，避開該 suite 已知的並行執行下 flaky）與 advisory 的 `swift-tsan` job（`continue-on-error: true`，跑 `swift test --sanitize=thread`）。獨立驗收時**沒有照單全收對方回報**：自己重跑 `swift build`（12s）、主測試 198/198、隔離跑 flaky suite 連續 3 次全過（比對方多驗 2 次）；但 TSAN job 對方回報「218 全綠無資料競爭」，我獨立重跑 3 次（含完全隔離跑）都穩定重現約 2-10 個斷言失敗，log 裡沒有 `ThreadSanitizer: data race` 字樣，判斷是 TSAN 插樁減速讓測試對 recovery watchdog 計時的假設不成立，不是真的資料競爭——已修正記錄，不採用對方那句話，開一張獨立 follow-up 任務（`task_04ca9cd8`）排查。Push 後在真實 GitHub Actions 上驗證：`swift-tests` job 首次真實執行即綠燈（`45c424a` → run `35448235975`）；但同時發現把 `whisper-swift` 分支第一次接上 CI 也讓既有 `unit-tests`/`integration-tests` Python job 立刻曝露一個無關的既有問題——`bin/ffmpeg` 在 ubuntu-latest runner 上 `Exec format error`（8 個測試失敗），研判是提交進版控的 macOS 二進位檔在 Linux CI 跑不動，已開獨立 follow-up 任務（`task_251995fe`）處理，不在本次範圍內修。
+Next action: 待你決定要不要啟動兩張新開的 follow-up 任務（`task_251995fe` bin/ffmpeg CI 修復、`task_04ca9cd8` TSAN 計時斷言排查），以及先前評估報告裡 Task 2-5（accuracy 語料、結構化診斷、soak 測試、批次匯入持久化）的優先順序。
+Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍，沿用舊記錄）
+
+### 舊記錄
 Last checkpoint: 2026-09-19 00:50
 Phase: 三個獨立 bug 修復——(1) 即時錄音 chunk 送出佇列卡住後永久暫停不會自救、(2) 批次匯入長音檔（>30分鐘）轉錄過程中 UI 完全無進度回饋看似當機、(3) 按鈕排版在 macOS 26 Tahoe 被系統自動分組成融合膠囊+圖示疊字。
 Working: 全程用 sendmessage 分工——開發交給三個不同 peer Claude session（whisper-57/whisper-3a/whisper-fb，本機 commit 不 push），規劃/獨立驗證/push/打包留本 session。(3) 花了三輪才修對：第一輪 overlay 移位沒解決疊字症狀、第二輪 buttonStyle 修好膠囊融合但沒發現同一個浮動 overlay 疊到逐字稿內容上，每輪都親自重新打包 app、用電腦操作工具截圖比對，不只信任對方回報的「測試通過」，才抓出前兩輪「邏輯合理但實際沒修好」的假修復；最終根因是浮動複製/匯出 icon 與按鈕列裡本來就有的「複製」/「Export」功能完全重複，直接刪除解決。三個修復皆獨立重跑測試通過（Swift 218/218、Python 322/322，另確認 `LiveRecordingControllerTests` 在全套並行執行下的 flaky 為既有問題非本輪引入）、push 到 `origin/whisper-swift`（`f4e5ade`、`6bef8ed`、`4f7e9f6`）。打包 `scripts/build_swiftui_app.sh` → `dist/Whisper Swift.app`（含最新 worker runtime），`ditto` 安裝到 `~/Applications/Whisper Swift.app`，Finder 雙擊開啟（此次本機憑證已被信任，未再跳 Gatekeeper 警告），Gate B worker `ready` 握手正常，畫面截圖確認三個修復皆生效。
 Next action: 使用者需實測兩項自動化測試無法驗證的行為：(1) 錄 >30 分鐘即時混音，確認遇到卡頓後會自動恢復繼續轉錄，不用手動介入；(2) 匯入 >30 分鐘音檔，確認轉錄過程中有「⏳ 轉錄中 chunk X/N...」進度文字持續更新而非畫面凍結。
 Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍，沿用舊記錄）
-
-### 舊記錄
 Last checkpoint: 2026-09-07（第五輪）
 Phase: 混音模式逐字稿品質「便宜止血」包 A/B/C/D（spec-writer → codex-handoff → codex-receive）
 Working: 用 `/spec-writer` 把「混音逐字稿破碎、人聲被系統音壓過」展成有 13 條 Locked AC 的規格（`docs/Whisper_Mixed_Mode_Quality_Stopgap_Spec_v1.md`），target `whisper-swift`。四項變更：(A) `PCM16Mixer.mixNormalized()` per-source RMS 正規化再加總（target RMS 3000、floor 100 防近靜音底噪被放大）；(B) 新 `ChunkRotationDecider` 把混音 chunk 由固定 15s 硬切改為能量低谷對齊（8s 下限 / 30s 硬上限，`flushInterval` 15→1 只當 scheduler 檢查頻率），新增 `AudioChunkSilenceDetector.findEnergyValley` 純函式；(C)(D) 新增 `tests/unit/test_mixed_mode_prompt_and_llm.py` 驗證 `build_prompt`/`llm_punctuate` 在混音共用路徑（`run_whisper()`）生效。限制守住：無新依賴、無 2x 推論、`TranscriptionHistoryEntry`/`TranscriptionSegment` schema 未動。開發交給 peer Claude 帳號 `whisper-7c`（本機 commit 不 push），規劃/驗收/上線留本 session。`/codex-receive` 獨立驗證：逐檔比對 diff（7 檔全在允許清單）、自己重跑 `pytest` 312 passed、`swift` 新 4 suite 隔離 ×3 全綠、release build 乾淨、`LiveRecordingControllerTests` 全套 flake 在 base `5280f14` 交叉比對確認為既有（HEAD 2/3 fail、base 2/3 fail、同測試同斷言）非本次引入。打包 `scripts/build_swiftui_app.sh`（沿用 `swiftui-python-poc/dist/WhisperWorker`，worker Python 碼未動、省一次 PyInstaller）→ `dist/Whisper Swift.app` 簽章 `WhisperSTT Local` 驗證通過、Gate B worker 握手 `ready`、`ChunkRotationDecider` 符號在 release binary 內。FF-merge `whisper-swift`，push（pre-push hook 307 Python tests 全過）→ `a6602e9`。清掉工作區既有三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE（`git restore`，使用者確認已棄用）。
@@ -16,6 +21,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-09-19 22:20｜Swift CI + 並發測試閘門上線（whisper-c7 分工，獨立驗收抓到兩個回報落差）
+- Completed: 依 `HANDOFF_CLAUDE_WHISPER_SWIFT_OPTIMIZATION_ASSESSMENT.md` 優化評估的 Task 1，讓 `whisper-swift` 分支第一次有真正的 Swift CI：新增 `swift-tests` job（build + test，隔離已知 flaky 的 `LiveRecordingControllerTests`）與 advisory 的 `swift-tsan` job。流程走 `/task-router`（L1）→ `/codex-handoff`（`engineering-discipline-loop` Step 2 Plan 核准）→ sendmessage 派工 `whisper-c7`（本機 commit `45c424a` 不 push）→ `/codex-receive` 獨立驗收。
+- State: 獨立驗收抓到兩個對方回報與實際重現不符的落差：(1) TSAN job 對方稱「218 全綠無資料競爭」，我重跑 3 次都重現斷言失敗（log 無 data race 警告，判斷是 TSAN 減速讓計時假設不成立），已修正記錄並開 follow-up `task_04ca9cd8`；(2) push 後在真實 GitHub Actions 驗證，`swift-tests` job 首次真實執行綠燈（run `35448235975`），但擴大 `push.branches` 讓既有 Python job 第一次跑在 `whisper-swift` 上，立刻暴露無關的既有問題——`bin/ffmpeg` 在 ubuntu-latest 上 `Exec format error`，開 follow-up `task_251995fe`。AC-4（零觸碰 Sources/Tests）獨立確認。
+- Next: 待你決定是否啟動兩張 follow-up 任務，以及優化評估報告裡 Task 2-5 的排序。
+
 ### 2026-09-19 00:50｜三項獨立 bug 修復（佇列卡死自救／批次進度回饋／按鈕排版，多 peer 分工）
 - Completed: 使用者回報即時錄音卡在 30 分鐘不動，追出 `OrderedChunkSubmissionQueue.isPausedAfterFailure` 卡住後只靠 worker 重發 ready 事件才會恢復、但 worker 本來就是 ready 狀態不會再發事件，永久卡死；補上 `schedulePauseRecovery`/`attemptPauseRecovery` 輪詢自救機制（`f4e5ade`）。順帶發現批次匯入長音檔（30分鐘切一段、CPU 重載大模型）轉錄中 UI 完全無回饋看似當機，實為使用者自己等到失去耐心手動取消；補上 chunk 進度 heartbeat 事件（`6bef8ed`）。裝新版時使用者發現按鈕列排版壞掉，追出 macOS 26 Tahoe 對無明確 `.buttonStyle` 的相鄰按鈕會自動分組成 Liquid Glass 膠囊+合成圖示，且同區另有一個功能重複的浮動 overlay 疊到內容——三輪來回才修對（`4f7e9f6`）。全程 sendmessage 分工給 3 個不同 peer session（whisper-57/whisper-3a/whisper-fb，本機不 push），規劃/驗收/打包留本 session。
 - State: 三個修復皆獨立重跑測試（Swift 218/218、Python 322/322）、獨立重建 app 用電腦操作工具截圖驗證（不只信任對方回報）——抓到兩次「測試過但視覺症狀沒消失」的假修復才逼出真正根因；push `origin/whisper-swift`；`scripts/build_swiftui_app.sh` → `ditto` 裝到 `~/Applications/Whisper Swift.app`，Finder 開啟、Gate B worker ready 握手正常，畫面截圖確認正常
