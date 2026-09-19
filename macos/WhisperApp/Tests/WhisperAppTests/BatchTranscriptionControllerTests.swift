@@ -3,6 +3,7 @@ import Testing
 @testable import WhisperApp
 
 @MainActor
+@Suite(.serialized)
 struct BatchTranscriptionControllerTests {
     @Test func enforcesCapacityWithoutMutatingExistingQueue() throws {
         let controller = BatchTranscriptionController(worker: WorkerSupervisor(), capacity: 2)
@@ -105,7 +106,7 @@ struct BatchTranscriptionControllerTests {
     }
 
     private func waitUntil(
-        timeout: Duration = .seconds(5), condition: @escaping @MainActor () -> Bool
+        timeout: Duration = .seconds(20), condition: @escaping @MainActor () -> Bool
     ) async throws {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: timeout)

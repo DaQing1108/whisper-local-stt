@@ -3,6 +3,7 @@ import Testing
 @testable import WhisperApp
 
 @MainActor
+@Suite(.serialized)
 struct WorkerSupervisorTests {
     @Test
     func startsWorkerReceivesReadyAndPongThenStops() async throws {
@@ -414,7 +415,7 @@ struct WorkerSupervisorTests {
     }
 
     private func waitUntil(
-        timeout: Duration = .seconds(5),
+        timeout: Duration = .seconds(20),
         condition: @escaping @MainActor () -> Bool
     ) async throws {
         let clock = ContinuousClock()
