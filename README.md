@@ -1,15 +1,22 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
+Last checkpoint: 2026-09-19 23:20
+Phase: 兩張 follow-up 任務（`task_04ca9cd8`、`task_251995fe`）皆已確認處理完畢。
+Working: `task_251995fe`（bin/ffmpeg 在 ubuntu-latest CI runner 上 Exec format error，已由另一 peer session 修復並 push 為 `da2c630`）經使用者確認可關閉。嘗試用 `dismiss_task` 撤回對應任務卡片，工具回報「非本 session 待處理任務」（卡片是另一 peer session 建立、非本 session 佇列裡的項目）——卡片本身的撤回動作留在原 session 端處理，但底層修復（commit `da2c630`）已確認存在於 `origin/whisper-swift`，功能性已完成，與任務追蹤卡片的顯示狀態無關。本次無程式碼異動，純狀態確認。
+Next action: 待你決定優化評估報告（`HANDOFF_CLAUDE_WHISPER_SWIFT_OPTIMIZATION_ASSESSMENT.md`）裡 Task 2-5（accuracy 語料、結構化診斷、soak 測試、批次匯入持久化）的優先順序。
+Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍，沿用舊記錄）
+
+### 舊記錄
 Last checkpoint: 2026-09-19 23:10
 Phase: 修復 `task_04ca9cd8`——`LiveRecordingControllerTests` 在 TSAN 下的計時斷言失敗（上一輪 checkpoint 開的 follow-up）。
 Working: 診斷根因是 `scheduleRecoveryWatchdog()` 的 500ms 真實 `Task.sleep` 被兩個測試用另一段真實時間（700ms/300ms×2）賭它先觸發，TSAN 插樁減速後賭輸——log 無 `ThreadSanitizer` race 警告，證實不是真正資料競爭。方案：抽成可注入的 `RecoveryWatchdogScheduling` 協定（production 用真實 `Task.sleep`、測試用手動 `.fire()` 的 fake），徹底消除真實時間 race，向後相容（新建構子參數有預設值）。流程：本 session PLAN + 鎖 AC（`/codex-handoff`）→ SendMessage 派工 `whisper-c7`（本機 commit `2eff2aa` 不 push）→ `/codex-receive` 獨立驗收。對方額外做了兩輪獨立 code-reviewer 審查，並依 HANDOFF 原始授權範圍（測試邊界第 4 點）把同根因的另外 3 個測試一併修掉（`deviceChangeFinalizesCurrentChunkAndResumesCapture`、`deviceChangeResumesWhenNoMatchingEndEventArrives`、`repeatedDeviceEventsDebounceBeforeRestartingCapture`），正確排除了不受影響的第 4 個候選（`sleepWaitsForWakeInsteadOfStartingTheDeviceRecoveryWatchdog`，因為只有 `.deviceChange` 原因才會排程 watchdog）。獨立驗收全部重跑：`swift build` 乾淨、`swift test --filter LiveRecordingControllerTests` 22/22、`--sanitize=thread` 連續 3 次全綠且 grep 無 race/warning 字樣、完整 `swift test` 220/220、`git diff --stat` 僅觸碰 2 個 Swift 檔案，皆與對方回報一致（這次沒有回報落差）。Push 前發現本地已落後 `origin/whisper-swift` 一個無關 commit（`da2c630`，另一 peer session 修的 CI ffmpeg 問題，檔案完全不重疊），rebase 乾淨無衝突後重新抽測一次仍綠燈，push 為 `c124362`。過程中重現本機已知的 `FinderInfo` xattr（iCloud sync race）卡 codesign 問題，改用 `--scratch-path` 指到 `/tmp` 繞開，非重新引入的 bug。
 Next action: `task_04ca9cd8` 已關閉。待你決定是否啟動剩餘的 `task_251995fe`（bin/ffmpeg CI 修復，已由另一 peer session 完成並 push，可能已可關閉，待確認），以及優化評估報告裡 Task 2-5 的排序。
+Last checkpoint: 2026-09-19 22:20
+Phase: Swift CI + 並發測試閘門上線——`whisper-swift` 分支第一次有真正跑 Swift 的 CI（先前 `.github/workflows/ci.yml` 只認 `main` 分支且三個 job 全是 Python），源自對 `HANDOFF_CLAUDE_WHISPER_SWIFT_OPTIMIZATION_ASSESSMENT.md` 優化評估的 Task 1。
 Working: 走 `/task-router`（判定 L1）→ `/codex-handoff`（`engineering-discipline-loop` 跑到 Step 2 Plan 核准）→ sendmessage 派工給 peer session `whisper-c7`（本機 commit 不 push）→ `/codex-receive` 獨立驗收。新增 `swift-tests` job（`swift build` + `swift test`，`--skip LiveRecordingControllerTests` 主測試 + `--filter LiveRecordingControllerTests` 隔離序列跑，避開該 suite 已知的並行執行下 flaky）與 advisory 的 `swift-tsan` job（`continue-on-error: true`，跑 `swift test --sanitize=thread`）。獨立驗收時**沒有照單全收對方回報**：自己重跑 `swift build`（12s）、主測試 198/198、隔離跑 flaky suite 連續 3 次全過（比對方多驗 2 次）；但 TSAN job 對方回報「218 全綠無資料競爭」，我獨立重跑 3 次（含完全隔離跑）都穩定重現約 2-10 個斷言失敗，log 裡沒有 `ThreadSanitizer: data race` 字樣，判斷是 TSAN 插樁減速讓測試對 recovery watchdog 計時的假設不成立，不是真的資料競爭——已修正記錄，不採用對方那句話，開一張獨立 follow-up 任務（`task_04ca9cd8`）排查。Push 後在真實 GitHub Actions 上驗證：`swift-tests` job 首次真實執行即綠燈（`45c424a` → run `35448235975`）；但同時發現把 `whisper-swift` 分支第一次接上 CI 也讓既有 `unit-tests`/`integration-tests` Python job 立刻曝露一個無關的既有問題——`bin/ffmpeg` 在 ubuntu-latest runner 上 `Exec format error`（8 個測試失敗），研判是提交進版控的 macOS 二進位檔在 Linux CI 跑不動，已開獨立 follow-up 任務（`task_251995fe`）處理，不在本次範圍內修。
 Next action: 待你決定要不要啟動兩張新開的 follow-up 任務（`task_251995fe` bin/ffmpeg CI 修復、`task_04ca9cd8` TSAN 計時斷言排查），以及先前評估報告裡 Task 2-5（accuracy 語料、結構化診斷、soak 測試、批次匯入持久化）的優先順序。
 Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍，沿用舊記錄）
-
-### 舊記錄
 Last checkpoint: 2026-09-19 00:50
 Phase: 三個獨立 bug 修復——(1) 即時錄音 chunk 送出佇列卡住後永久暫停不會自救、(2) 批次匯入長音檔（>30分鐘）轉錄過程中 UI 完全無進度回饋看似當機、(3) 按鈕排版在 macOS 26 Tahoe 被系統自動分組成融合膠囊+圖示疊字。
 Working: 全程用 sendmessage 分工——開發交給三個不同 peer Claude session（whisper-57/whisper-3a/whisper-fb，本機 commit 不 push），規劃/獨立驗證/push/打包留本 session。(3) 花了三輪才修對：第一輪 overlay 移位沒解決疊字症狀、第二輪 buttonStyle 修好膠囊融合但沒發現同一個浮動 overlay 疊到逐字稿內容上，每輪都親自重新打包 app、用電腦操作工具截圖比對，不只信任對方回報的「測試通過」，才抓出前兩輪「邏輯合理但實際沒修好」的假修復；最終根因是浮動複製/匯出 icon 與按鈕列裡本來就有的「複製」/「Export」功能完全重複，直接刪除解決。三個修復皆獨立重跑測試通過（Swift 218/218、Python 322/322，另確認 `LiveRecordingControllerTests` 在全套並行執行下的 flaky 為既有問題非本輪引入）、push 到 `origin/whisper-swift`（`f4e5ade`、`6bef8ed`、`4f7e9f6`）。打包 `scripts/build_swiftui_app.sh` → `dist/Whisper Swift.app`（含最新 worker runtime），`ditto` 安裝到 `~/Applications/Whisper Swift.app`，Finder 雙擊開啟（此次本機憑證已被信任，未再跳 Gatekeeper 警告），Gate B worker `ready` 握手正常，畫面截圖確認三個修復皆生效。
