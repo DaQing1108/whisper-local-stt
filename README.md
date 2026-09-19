@@ -1,13 +1,18 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
+Last checkpoint: 2026-09-20 00:20
+Phase: 修復 `task_1c1cecba`——`OrderedChunkSubmissionQueue.schedulePauseRecovery()` 的 TSAN 計時競態（上一輪複驗 `c124362` 時額外發現的第二個同類 follow-up，現已修復、驗證、push）。
+Working: 套用 `c124362` 完全相同的可注入排程器模式：新增 `PauseRecoveryScheduling` 協定 + `TaskPauseRecoveryScheduler`（production 用真實 `Task.sleep`，但保留原本「每次 poll 都重置 deadline」的 reset-and-schedule 語意——與 recovery watchdog 的「pending 中忽略」guard 語意不同，因為 `attemptPauseRecovery` 在 Worker 仍未 ready 時會自我重新排程，需要每次都拿到完整新的 interval），測試改用手動觸發的 `ManualPauseRecoveryScheduler`，讓 `pauseRecoversViaPollingWhenWorkerBecomesReadyWithoutEmittingReadyEvent` 不再依賴真實時間流逝（原本要睡 300ms，現在 0.006s 完成）。此為 Claude Code 一般 session（非 sendmessage 分工）在自己的 git worktree 裡直接執行，非本機 peer session。驗證：`swift test`（無 TSAN）220/220 通過；`swift test --sanitize=thread` 連續 5 次 220/220 全綠。過程中重現已知的 `FinderInfo`/`fileprovider` xattr（iCloud File Provider daemon 對 `~/Documents` 路徑即時重新附加，導致 codesign 失敗）卡 TSAN 建置的問題——這次連一般 `swift test`（無 TSAN）也一起被卡到，用 `--scratch-path` 指到 `/tmp` 繞開；已在**未改動的原始 whisper-swift worktree** 重現同樣阻擋以確認與本次改動無關。Diff 僅 2 個 Swift 檔案（`LiveRecordingController.swift` + 對應測試檔）。Push 前 `origin/whisper-swift` 已前進一次（另一 peer session 的 docs checkpoint commit `30d1214`，docs-only 不重疊），rebase 乾淨無衝突後重跑一次全套 + TSAN 仍綠燈才 push 為 `117e5a6`。
+Next action: `task_1c1cecba` 已關閉。待你決定優化評估報告（`HANDOFF_CLAUDE_WHISPER_SWIFT_OPTIMIZATION_ASSESSMENT.md`）裡 Task 2-5（accuracy 語料、結構化診斷、soak 測試、批次匯入持久化）的優先順序。
+Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍，沿用舊記錄）
+
+### 舊記錄
 Last checkpoint: 2026-09-19 23:55
 Phase: 修復 `swift-tests` job 中 `WorkerSupervisorTests`/`BatchTranscriptionControllerTests` 逾時失敗——上一輪 checkpoint 記錄裡「`.worktrees/ci-fix-tmp` 未 commit 殘留改動」現已釐清並非探索期廢棄嘗試，是本輪的正式修復，已完成、驗證、push。
 Working: 根因是兩檔案的 `waitUntil` helper 預設 5 秒逾時，等待 spawn 的真實 `/usr/bin/python3` subprocess 送出 ready/pong IPC 時在 CI macOS runner 上系統性超時（CI 實測失敗落在 5.09–6.77 秒，本機同測試僅需 0.05–0.5 秒）；先用 CI log 排除「`swift-tests`／`swift-tsan` 兩 job 搶同一台機器」假設（各自獨立 VM，時間戳不重疊），實際成因是 Swift Testing 預設同一 suite 內併發跑測試，十幾個測試同時 spawn subprocess 互搶 CPU。修法：兩檔案各加 `@Suite(.serialized)`（suite 內序列化）+ timeout 5s→20s（純安全邊際，通過測試不受影響）。本機 build + 全套 198 測試通過，獨立 code-reviewer agent 在乾淨 checkout 重跑一次結果一致（APPROVE，0 CRITICAL/HIGH，1 MEDIUM 已記錄：`.serialized` 只序列化單一 suite 內部，兩 suite 之間仍可各自並發 1 個 subprocess，非完全消除）。Push 後 CI 實測 `swift-tests`／`swift-tsan` 皆轉綠；`integration-tests` job 失敗但確認是推送前既有問題，與本次無關。Push 為 `5a5eb5e`。
 Next action: 待你決定是否啟動 `task_1c1cecba`（`schedulePauseRecovery()` 同類 TSAN 計時 flaky，上上輪 checkpoint 開的 follow-up，尚未處理）；以及優化評估報告裡 Task 2-5 的優先順序仍待排序。
 Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍，沿用舊記錄）
-
-### 舊記錄
 Last checkpoint: 2026-09-19 23:20
 Phase: 兩張 follow-up 任務（`task_04ca9cd8`、`task_251995fe`）皆已確認處理完畢。
 Working: `task_251995fe`（bin/ffmpeg 在 ubuntu-latest CI runner 上 Exec format error，已由另一 peer session 修復並 push 為 `da2c630`）經使用者確認可關閉。嘗試用 `dismiss_task` 撤回對應任務卡片，工具回報「非本 session 待處理任務」（卡片是另一 peer session 建立、非本 session 佇列裡的項目）——卡片本身的撤回動作留在原 session 端處理，但底層修復（commit `da2c630`）已確認存在於 `origin/whisper-swift`，功能性已完成，與任務追蹤卡片的顯示狀態無關。本次無程式碼異動，純狀態確認。
@@ -35,6 +40,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-09-20 00:20｜修復 schedulePauseRecovery() 第二個 TSAN 計時競態（task_1c1cecba）
+- Completed: 修掉上一輪複驗 `c124362` 時額外發現的 follow-up——`OrderedChunkSubmissionQueue.schedulePauseRecovery()`/`attemptPauseRecovery()` 靠真實 `Task.sleep`（5 秒）輪詢 Worker 是否恢復 ready，`pauseRecoversViaPollingWhenWorkerBecomesReadyWithoutEmittingReadyEvent` 在跑滿整個 220 測試 + TSAN 套件時 flaky。套用與 `c124362` 完全一致的可注入排程器模式：新增 `PauseRecoveryScheduling` 協定 + `TaskPauseRecoveryScheduler`（production 用，保留原本「每次 poll 重置 deadline」的語意，不同於 recovery watchdog 的「pending 中忽略」guard 語意），測試改用手動觸發的 `ManualPauseRecoveryScheduler`。
+- State: `swift test`（無 TSAN）220/220 通過；`swift test --sanitize=thread` 連續 5 次 220/220 全綠。過程中一般 `swift test` 也被本機已知的 `FinderInfo`/`fileprovider` xattr（iCloud File Provider daemon 對 `~/Documents` 路徑即時重新附加，導致 codesign 失敗）卡住，用 `--scratch-path` 指到 `/tmp` 繞開；已在未改動的原始 whisper-swift worktree 重現同樣阻擋以確認與本次改動無關，非重新引入的 bug。Diff 僅 2 個 Swift 檔案。Push 前 rebase 掉 `origin/whisper-swift` 上無關的 1 個 docs commit（`30d1214`），rebase 後重跑一次全套 + TSAN 仍綠燈才 push 為 `117e5a6`。
+- Next: `task_1c1cecba` 已關閉。待你決定優化評估報告裡 Task 2-5 的優先順序。
+
 ### 2026-09-19 23:55｜修復 swift-tests job 逾時失敗（waitUntil 5s timeout 太緊）
 - Completed: 修復 CI `swift-tests` job 中 `WorkerSupervisorTests`（15 個測試）與 `BatchTranscriptionControllerTests`（5 個測試）持續逾時失敗的問題（此為上一輪 checkpoint 記錄的「`.worktrees/ci-fix-tmp` 未 commit 殘留改動」，本輪確認並非探索期廢棄嘗試，是正式修復並完成）。根因：兩檔案的 `waitUntil` helper 等待真實 `/usr/bin/python3` subprocess 送出 ready/pong IPC 時，預設 5 秒逾時在 CI macOS runner 上系統性超時（CI 實測失敗落在 5.09–6.77 秒，本機同測試僅需 0.05–0.5 秒）；先用 CI log 排除「`swift-tests`／`swift-tsan` 兩 job 搶同一台機器」假設（各自獨立 VM，時間戳不重疊），確認實際成因是 Swift Testing 預設同一 suite 內併發跑測試，十幾個測試同時 spawn subprocess 互搶 CPU。
 - State: 兩檔案各加 `@Suite(.serialized)`（suite 內序列化執行）+ `waitUntil` timeout 5s→20s（純安全邊際，通過測試不受影響，因迴圈偵測到 condition 為真即跳出）。本機 `swift build` 乾淨、`WorkerSupervisorTests` 15/15、`BatchTranscriptionControllerTests` 5/5、全套（排除已知 flaky `LiveRecordingControllerTests`）198/198 皆通過。獨立 code-reviewer agent 在乾淨 checkout 重跑一次結果一致，APPROVE（0 CRITICAL/HIGH，1 MEDIUM 已記錄：`.serialized` 只序列化單一 suite 內部，`WorkerSupervisorTests` 與 `BatchTranscriptionControllerTests` 兩 suite 之間仍可各自並發 1 個 subprocess，最壞情況同時 spawn 數從 ~17 降到 ≤2、非完全消除，若日後仍偶發逾時應優先排查此處）。Push 前發現 `origin/whisper-swift` 已前進兩次（另兩個 peer session 的 docs checkpoint + TSAN 修復 commit `c124362`，皆確認檔案不重疊），rebase 兩次乾淨無衝突後 push 為 `5a5eb5e`。Push 後在真實 CI 驗證：`swift-tests`／`swift-tsan` 皆轉綠（含之前失敗的步驟）；`integration-tests` job 失敗但比對前一個 commit 的 CI run 同樣失敗，確認是推送前既有問題，與本次改動無關。
