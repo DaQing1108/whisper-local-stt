@@ -445,8 +445,9 @@ def _transcribe_fw_subprocess(
     return _json.loads(last_line[-1])
 
 
-WATCHDOG_BASE_SECONDS = 45
+WATCHDOG_BASE_SECONDS = 60
 WATCHDOG_RATIO = 1.5
+WATCHDOG_RETRY_RATIO = 3.0
 WATCHDOG_RETRY_BEAM_SIZE = 1
 
 
@@ -465,8 +466,8 @@ def _transcribe_frozen_worker_subprocess(
 ) -> dict:
     """Run inference through the same bundled Worker executable, never system Python.
 
-    A watchdog (45s + 1.5x audio seconds) terminates a stuck beam-5 decode and
-    retries once with beam_size=1. Cancellation is never retried.
+    A watchdog (60s + 1.5x audio seconds) terminates a stuck beam-5 decode and
+    retries once with beam_size=1 under a longer limit (60s + 3x audio seconds). Cancellation is never retried.
     """
     import json as _json
     lang_arg = language or "__auto__"
@@ -486,6 +487,7 @@ def _transcribe_frozen_worker_subprocess(
             )
             proc = run_cancellable(
                 command + [str(WATCHDOG_RETRY_BEAM_SIZE)], cancellation=cancellation,
+                timeout_seconds=WATCHDOG_BASE_SECONDS + WATCHDOG_RETRY_RATIO * duration,
             )
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() if proc.stderr else "inference child failed")

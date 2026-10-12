@@ -52,18 +52,18 @@ def test_within_limit_runs_once_with_four_args(tmp_path, monkeypatch):
     assert calls[0][0][-4:] == [str(tmp_path / "a.wav"), "large-v3", "zh", "p"]
 
 
-def test_timeout_limit_is_45_plus_1_5x_duration(tmp_path, monkeypatch):
+def test_timeout_limit_is_60_plus_1_5x_duration(tmp_path, monkeypatch):
     calls = _install(monkeypatch, [OK])
     _run(_wav(tmp_path / "a.wav", 20))
-    assert calls[0][1]["timeout_seconds"] == 45 + 1.5 * 20
+    assert calls[0][1]["timeout_seconds"] == 60 + 1.5 * 20
 
 
-def test_timeout_retries_once_with_beam_1_and_default_limit(tmp_path, monkeypatch, capsys):
+def test_timeout_retries_once_with_beam_1_and_longer_limit(tmp_path, monkeypatch, capsys):
     calls = _install(monkeypatch, [_timeout(), OK])
     assert _run(_wav(tmp_path / "a.wav", 10))["text"] == "ok"
     assert len(calls) == 2
     assert calls[1][0] == calls[0][0] + ["1"]
-    assert "timeout_seconds" not in calls[1][1]
+    assert calls[1][1]["timeout_seconds"] == 60 + 3.0 * 10
     captured = capsys.readouterr()
     assert "inference watchdog" in captured.err and "beam_size=1" in captured.err
     assert captured.out == ""
