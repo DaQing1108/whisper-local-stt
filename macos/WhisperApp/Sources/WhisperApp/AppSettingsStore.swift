@@ -87,7 +87,7 @@ final class AppSettingsStore {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let storedModel = defaults.string(forKey: Self.modelKey)
-        defaultModel = Self.supportedModels.contains(storedModel ?? "") ? storedModel! : "base"
+        defaultModel = Self.supportedModels.contains(storedModel ?? "") ? storedModel! : "large-v3-turbo"
         language = Self.normalizedLanguage(defaults.string(forKey: Self.languageKey) ?? "")
         let storedDomain = defaults.string(forKey: Self.domainKey)
         domain = Self.supportedDomains.contains(storedDomain ?? "") ? storedDomain! : "general"
