@@ -331,6 +331,8 @@ SLOW_INFERENCE_RATIO = 3
 SLOW_WAV_KEEP = 10
 SLOW_WAV_MAX_BYTES = 200 * 1024 * 1024
 SLOW_WAV_PREFIX = "slow-"
+DIAG_LOG_NAME = "inference.jsonl"
+DIAG_LOG_MAX_BYTES = 5 * 1024 * 1024
 
 
 def _cpu_seconds() -> float:
@@ -340,7 +342,7 @@ def _cpu_seconds() -> float:
 
 def _diagnostics_dir() -> Path:
     override = os.environ.get("WHISPER_DIAGNOSTICS_DIR")
-    if override:
+    if override and os.path.isabs(override):
         return Path(override)
     return Path.home() / "Library" / "Application Support" / "WhisperSwiftUI" / "Diagnostics"
 
@@ -360,41 +362,88 @@ def _prune_slow_wavs(directory: Path) -> None:
         stale.unlink(missing_ok=True)
 
 
-def _record_inference_diagnostics(
-    wav_path: str, model_name: str, segment_count: int, elapsed: float, cpu: float,
-) -> None:
-    """Append one JSON line to inference.jsonl; never raises, never touches stdout."""
+def _prepare_diagnostics_dir() -> Path:
+    directory = _diagnostics_dir()
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    return directory
+
+
+def _append_diagnostics_record(record: dict) -> None:
+    """Append one JSON line (rotating at DIAG_LOG_MAX_BYTES). May raise."""
+    directory = _prepare_diagnostics_dir()
+    log_path = directory / DIAG_LOG_NAME
     try:
-        directory = _diagnostics_dir()
-        directory.mkdir(parents=True, exist_ok=True)
-        now = datetime.now().astimezone()
-        audio_seconds = _wav_duration_seconds(wav_path)
-        record = {
-            "timestamp": now.isoformat(),
-            "audio_seconds": audio_seconds,
-            "model": model_name,
-            "elapsed_seconds": round(elapsed, 3),
-            "segments": segment_count,
-            "cpu_seconds": round(cpu, 3),
-        }
-        if audio_seconds is not None and elapsed > audio_seconds * SLOW_INFERENCE_RATIO:
-            record["slow"] = True
-            try:
-                if os.path.getsize(wav_path) > SLOW_WAV_MAX_BYTES:
-                    record["wav_saved"] = False
-                    record["wav_skipped"] = "too_large"
-                else:
-                    name = f"{SLOW_WAV_PREFIX}{now.strftime('%Y%m%dT%H%M%S%f')}.wav"
-                    shutil.copy2(wav_path, directory / name)
-                    record["wav_saved"] = name
-                    _prune_slow_wavs(directory)
-            except Exception as exc:
-                record["wav_saved"] = False
-                record["wav_skipped"] = f"copy_failed: {exc}"
-        with open(directory / "inference.jsonl", "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        if log_path.stat().st_size > DIAG_LOG_MAX_BYTES:
+            os.replace(log_path, directory / (DIAG_LOG_NAME + ".1"))
+    except FileNotFoundError:
+        pass
+    fd = os.open(log_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    os.chmod(log_path, 0o600)
+
+
+def _swallow_diagnostics_errors(action: Callable[[], None]) -> None:
+    """Run a diagnostics action; never raises, never touches stdout."""
+    try:
+        action()
     except Exception as exc:
-        print(f"inference diagnostics failed: {exc}", file=sys.stderr)
+        try:
+            print(f"inference diagnostics failed: {exc}", file=sys.stderr)
+        except Exception:
+            pass
+
+
+def _now_iso() -> str:
+    return datetime.now().astimezone().isoformat()
+
+
+def _save_slow_wav(wav_path: str, record: dict) -> None:
+    directory = _prepare_diagnostics_dir()
+    if os.path.getsize(wav_path) > SLOW_WAV_MAX_BYTES:
+        record["wav_saved"] = False
+        record["wav_skipped"] = "too_large"
+        return
+    name = f"{SLOW_WAV_PREFIX}{datetime.now().strftime('%Y%m%dT%H%M%S%f')}.wav"
+    target = directory / name
+    try:
+        shutil.copy2(wav_path, target)
+        os.chmod(target, 0o600)
+    except Exception as exc:
+        target.unlink(missing_ok=True)
+        record["wav_saved"] = False
+        record["wav_skipped"] = f"copy_failed: {exc}"
+        return
+    record["wav_saved"] = name
+    _prune_slow_wavs(directory)
+
+
+def _record_inference_finish(
+    pid: int, wav_path: str, model_name: str, segment_count: int,
+    load_seconds: float, infer_seconds: float, elapsed: float, cpu: float,
+) -> None:
+    audio_seconds = _wav_duration_seconds(wav_path)
+    record = {
+        "event": "finish",
+        "timestamp": _now_iso(),
+        "pid": pid,
+        "audio_seconds": audio_seconds,
+        "model": model_name,
+        "load_seconds": round(load_seconds, 3),
+        "infer_seconds": round(infer_seconds, 3),
+        "elapsed_seconds": round(elapsed, 3),
+        "segments": segment_count,
+        "cpu_seconds": round(cpu, 3),
+    }
+    if audio_seconds is not None and infer_seconds > audio_seconds * SLOW_INFERENCE_RATIO:
+        record["slow"] = True
+        try:
+            _save_slow_wav(wav_path, record)
+        except Exception as exc:
+            record["wav_saved"] = False
+            record["wav_skipped"] = f"copy_failed: {exc}"
+    _append_diagnostics_record(record)
 
 
 def run_inference_child(args: list[str]) -> int:
@@ -403,32 +452,54 @@ def run_inference_child(args: list[str]) -> int:
         print("usage: --inference-child WAV MODEL LANGUAGE INITIAL_PROMPT", file=sys.stderr)
         return 2
     wav_path, model_name, language_arg, initial_prompt = args
+    pid = os.getpid()
     started_at = time.monotonic()
     started_cpu = _cpu_seconds()
-    from faster_whisper import WhisperModel
+    _swallow_diagnostics_errors(lambda: _append_diagnostics_record({
+        "event": "start",
+        "timestamp": _now_iso(),
+        "pid": pid,
+        "audio_seconds": _wav_duration_seconds(wav_path),
+        "model": model_name,
+        "prompt_chars": len(initial_prompt),
+    }))
+    try:
+        from faster_whisper import WhisperModel
 
-    model = WhisperModel(model_name, device="cpu", compute_type="int8")
-    segments_raw, info = model.transcribe(
-        wav_path,
-        language=None if language_arg == "__auto__" else language_arg,
-        beam_size=5,
-        initial_prompt=initial_prompt or None,
-        vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 300},
-    )
-    segments = [
-        {"text": segment.text, "start": segment.start, "end": segment.end}
-        for segment in segments_raw
-    ]
-    _record_inference_diagnostics(
-        wav_path, model_name, len(segments),
-        time.monotonic() - started_at, _cpu_seconds() - started_cpu,
-    )
+        model = WhisperModel(model_name, device="cpu", compute_type="int8")
+        loaded_at = time.monotonic()
+        segments_raw, info = model.transcribe(
+            wav_path,
+            language=None if language_arg == "__auto__" else language_arg,
+            beam_size=5,
+            initial_prompt=initial_prompt or None,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 300},
+        )
+        segments = [
+            {"text": segment.text, "start": segment.start, "end": segment.end}
+            for segment in segments_raw
+        ]
+        inferred_at = time.monotonic()
+    except Exception as exc:
+        _swallow_diagnostics_errors(lambda: _append_diagnostics_record({
+            "event": "error",
+            "timestamp": _now_iso(),
+            "pid": pid,
+            "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+        }))
+        raise
     print(json.dumps({
         "text": " ".join(segment["text"] for segment in segments).strip(),
         "language": info.language,
         "segments": segments,
     }, ensure_ascii=False))
+    sys.stdout.flush()
+    _swallow_diagnostics_errors(lambda: _record_inference_finish(
+        pid, wav_path, model_name, len(segments),
+        loaded_at - started_at, inferred_at - loaded_at,
+        inferred_at - started_at, _cpu_seconds() - started_cpu,
+    ))
     return 0
 
 
