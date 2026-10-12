@@ -445,17 +445,48 @@ def _transcribe_fw_subprocess(
     return _json.loads(last_line[-1])
 
 
+WATCHDOG_BASE_SECONDS = 45
+WATCHDOG_RATIO = 1.5
+WATCHDOG_RETRY_BEAM_SIZE = 1
+
+
+def _wav_duration_or_none(wav_path: str) -> Optional[float]:
+    try:
+        with wave.open(wav_path, "rb") as wav_file:
+            rate = wav_file.getframerate()
+            return wav_file.getnframes() / rate if rate else None
+    except Exception:
+        return None
+
+
 def _transcribe_frozen_worker_subprocess(
     wav_path: str, model_name: str, language: Optional[str], initial_prompt: str = "",
     cancellation: Optional[CancellationToken] = None,
 ) -> dict:
-    """Run inference through the same bundled Worker executable, never system Python."""
+    """Run inference through the same bundled Worker executable, never system Python.
+
+    A watchdog (45s + 1.5x audio seconds) terminates a stuck beam-5 decode and
+    retries once with beam_size=1. Cancellation is never retried.
+    """
     import json as _json
     lang_arg = language or "__auto__"
-    proc = run_cancellable(
-        [sys.executable, "--inference-child", wav_path, model_name, lang_arg, initial_prompt],
-        cancellation=cancellation,
-    )
+    command = [sys.executable, "--inference-child", wav_path, model_name, lang_arg, initial_prompt]
+    duration = _wav_duration_or_none(wav_path)
+    if duration is None:
+        proc = run_cancellable(command, cancellation=cancellation)
+    else:
+        limit = WATCHDOG_BASE_SECONDS + WATCHDOG_RATIO * duration
+        try:
+            proc = run_cancellable(command, cancellation=cancellation, timeout_seconds=limit)
+        except subprocess.TimeoutExpired:
+            print(
+                f"inference watchdog: timeout after {limit:.0f}s, "
+                f"retrying with beam_size={WATCHDOG_RETRY_BEAM_SIZE}",
+                file=sys.stderr,
+            )
+            proc = run_cancellable(
+                command + [str(WATCHDOG_RETRY_BEAM_SIZE)], cancellation=cancellation,
+            )
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() if proc.stderr else "inference child failed")
     last_line = [line for line in proc.stdout.strip().splitlines() if line.startswith("{")]

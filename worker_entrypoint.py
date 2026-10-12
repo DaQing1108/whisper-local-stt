@@ -331,6 +331,7 @@ SLOW_INFERENCE_RATIO = 3
 SLOW_WAV_KEEP = 10
 SLOW_WAV_MAX_BYTES = 200 * 1024 * 1024
 SLOW_WAV_PREFIX = "slow-"
+DEFAULT_BEAM_SIZE = 5
 DIAG_LOG_NAME = "inference.jsonl"
 DIAG_LOG_MAX_BYTES = 5 * 1024 * 1024
 
@@ -422,6 +423,7 @@ def _save_slow_wav(wav_path: str, record: dict) -> None:
 def _record_inference_finish(
     pid: int, wav_path: str, model_name: str, segment_count: int,
     load_seconds: float, infer_seconds: float, elapsed: float, cpu: float,
+    beam_size: int = DEFAULT_BEAM_SIZE,
 ) -> None:
     audio_seconds = _wav_duration_seconds(wav_path)
     record = {
@@ -430,6 +432,7 @@ def _record_inference_finish(
         "pid": pid,
         "audio_seconds": audio_seconds,
         "model": model_name,
+        "beam_size": beam_size,
         "load_seconds": round(load_seconds, 3),
         "infer_seconds": round(infer_seconds, 3),
         "elapsed_seconds": round(elapsed, 3),
@@ -448,10 +451,18 @@ def _record_inference_finish(
 
 def run_inference_child(args: list[str]) -> int:
     """Run faster-whisper inside the bundled executable for hard cancellation."""
-    if len(args) != 4:
-        print("usage: --inference-child WAV MODEL LANGUAGE INITIAL_PROMPT", file=sys.stderr)
+    usage = "usage: --inference-child WAV MODEL LANGUAGE INITIAL_PROMPT [BEAM_SIZE]"
+    if len(args) not in (4, 5):
+        print(usage, file=sys.stderr)
         return 2
-    wav_path, model_name, language_arg, initial_prompt = args
+    wav_path, model_name, language_arg, initial_prompt = args[:4]
+    try:
+        beam_size = int(args[4]) if len(args) == 5 else DEFAULT_BEAM_SIZE
+    except ValueError:
+        beam_size = 0
+    if beam_size < 1:
+        print(usage, file=sys.stderr)
+        return 2
     pid = os.getpid()
     started_at = time.monotonic()
     started_cpu = _cpu_seconds()
@@ -462,6 +473,7 @@ def run_inference_child(args: list[str]) -> int:
         "audio_seconds": _wav_duration_seconds(wav_path),
         "model": model_name,
         "prompt_chars": len(initial_prompt),
+        "beam_size": beam_size,
     }))
     try:
         from faster_whisper import WhisperModel
@@ -471,7 +483,7 @@ def run_inference_child(args: list[str]) -> int:
         segments_raw, info = model.transcribe(
             wav_path,
             language=None if language_arg == "__auto__" else language_arg,
-            beam_size=5,
+            beam_size=beam_size,
             initial_prompt=initial_prompt or None,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 300},
@@ -486,6 +498,7 @@ def run_inference_child(args: list[str]) -> int:
             "event": "error",
             "timestamp": _now_iso(),
             "pid": pid,
+            "beam_size": beam_size,
             "error": f"{type(exc).__name__}: {str(exc)[:200]}",
         }))
         raise
@@ -498,7 +511,7 @@ def run_inference_child(args: list[str]) -> int:
     _swallow_diagnostics_errors(lambda: _record_inference_finish(
         pid, wav_path, model_name, len(segments),
         loaded_at - started_at, inferred_at - loaded_at,
-        inferred_at - started_at, _cpu_seconds() - started_cpu,
+        inferred_at - started_at, _cpu_seconds() - started_cpu, beam_size,
     ))
     return 0
 
