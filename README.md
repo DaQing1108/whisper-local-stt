@@ -1,6 +1,13 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
+Last checkpoint: 2026-10-12 20:40
+Phase: large-v3-turbo「快速模式」加入模型選單並設為預設（`1a766b2`、`ef42f57`），承接上一輪的診斷與看門狗；皆已 push 並安裝到 `~/Applications/Whisper Swift.app`。
+Working: `AppSettingsStore.supportedModels` 含 `large-v3-turbo`，選單顯示「large-v3-turbo（快速）」（`displayName(for:)`，儲存值仍是原名）；無儲存值/未知值退回 `large-v3-turbo`，已儲存的 base/small 等照舊保留；`model_runtime.py::repository_id` 把 turbo 對到 `mobiuslabsgmbh/faster-whisper-large-v3-turbo`（faster-whisper 1.2.1 原生認得該名稱，Worker 推論未改）。驗證：`tests/unit` 355 通過、`swift test` 223 通過；打包 Worker 回報 turbo 模型狀態為 cached，turbo 跑先前的慢速音檔推論 4.4s（large-v3 需看門狗降級後共 95s）；使用者實錄 245 秒，診斷 10 筆 turbo 推論每段 5~9s、無慢速/卡住/重試。已知取捨：turbo + 長詞彙 prompt 時部分 30 秒視窗只輸出 1 個 30 秒長段（時間碼粗糙、斷行失效，文字不缺；不帶 prompt 同視窗 12~18 段，large-v3 帶 prompt 正常；`word_timestamps` 無效），決定維持現況觀察。打包踩坑：`dist/` 位於 iCloud 同步目錄，曾被產生 280 個「檔名 2」重複副本，複製進 `~/Applications` 後簽章無效；處理方式是只刪除「有原始檔對應」的 ` 2` 副本後簽章驗證通過，之後打包前先清 `dist/WhisperWorker`，組裝後與複製後都檢查重複副本。
+Next action: 觀察診斷（`~/Library/Application Support/WhisperSwiftUI/Diagnostics/inference.jsonl`）：出現 beam_size=1 即看門狗在 app 內觸發並救回（AC-9）；若又出現連續約 187s 間隔的 start 無 finish，再補 Swift 端單段重試上限（`LiveRecordingController.jobStallTimeout=180`，建議第 2 次失敗改用 base 再試）。若需要細緻時間碼，turbo 可改為不帶 prompt，或單段 >12s 時重跑一次不帶 prompt 版本。
+Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍）
+
+### 舊記錄
 Last checkpoint: 2026-10-12 18:30
 Phase: Worker 推論診斷 + 看門狗上線——查「轉錄卡住 20 多分鐘」的根因，並用診斷與看門狗處理（`8af9690`、`59777c9`、`76e1d9a`、`b494aa4`，已 push 並安裝到 `~/Applications/Whisper Swift.app`）。
 Working: `run_inference_child` 每次推論寫 `~/Library/Application Support/WhisperSwiftUI/Diagnostics/inference.jsonl`（start/finish/error，pid 配對、load/infer 分開計時、beam_size；目錄 0700、檔案 0600、>5MB 輪替一代；推論時間 > 音訊×3 時保留 `slow-*.wav`，最多 10 個）。父行程看門狗：`whisper_core._transcribe_frozen_worker_subprocess` 時限 60+1.5×音訊秒，逾時終止並以 beam_size=1 重試一次（重試時限 60+3×音訊秒；取消不重試；讀不到長度不套看門狗）。已驗證：`tests/unit` 354 通過；打包 Worker 對真實慢速音檔（11.6s，large-v3+長 prompt+beam5 重複解碼 62~128s）走完整父行程路徑，77s 逾時、beam1 重跑 8.4s、共 95s 回傳正常文字；另 4 個真實慢速音檔全數在 103~128s 內完成（180s 的 Swift 卡住計時之前）。根因實測：large-v3 + 長詞彙 prompt + beam 5 對特定音檔陷入重複解碼；beam 1 約 9s、不帶 prompt 約 8s、large-v3-turbo 約 4.4s。診斷揭露 Swift 端 `LiveRecordingController.jobStallTimeout=180` 會取消卡住的工作並塞回佇列最前面重送（無單段重試上限），診斷顯示 16:39~17:20 連續約 15 次約 187s 間隔的 start 無 finish，推測為同一段毒藥音訊反覆重送（未逐檔驗證）。
@@ -54,6 +61,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-10-12 20:40｜large-v3-turbo 快速模式上線並設為預設
+- Completed: 模型選單加入 large-v3-turbo（`1a766b2`）、預設模型改為 large-v3-turbo（`ef42f57`），皆 push 並打包安裝；與 `whisper-d5` 分工（本 session 規劃/驗收/push/打包，對方開發）；查出 turbo 帶詞彙 prompt 時部分視窗單段時間碼粗糙的原因並記錄；處理 iCloud 在 `dist/` 產生重複副本導致簽章無效的問題
+- State: `tests/unit` 355、`swift test` 223 通過；已安裝版簽章驗證通過、與組裝產物逐位元組相同、turbo 模型狀態 cached；使用者實錄 245s 全程 turbo，每段推論 5~9s、無慢速或卡住
+- Next: 觀察診斷（看門狗在 app 內觸發、187s 週期重送）；turbo 時間碼粗糙是否需處理；視需要補 Swift 端單段重試上限
+
 ### 2026-10-12 18:30｜Worker 推論診斷 + 看門狗上線，查出轉錄卡住根因
 - Completed: 加入推論診斷 `inference.jsonl`（`8af9690`、`59777c9`）、看門狗逾時重試 beam=1（`76e1d9a`、`b494aa4`），皆 push 到 `origin/whisper-swift` 並打包安裝；與另一個 Claude session（`whisper-d5`）分工，本 session 規劃/驗收/push、對方開發，每輪經獨立 code-reviewer 審查（診斷 WARNING→修復後 APPROVE、看門狗 APPROVE）
 - State: `tests/unit` 354 通過；真實慢速音檔經看門狗 77s 逾時→beam1 8.4s 完成（共 95s）；4 個歷史慢速音檔 103~128s 內完成；根因為 large-v3+長 prompt+beam5 重複解碼，Swift 端 180s 卡住計時＋無單段重試上限會把毒藥音訊反覆重送
