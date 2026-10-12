@@ -39,6 +39,28 @@ struct AppSettingsStoreTests {
     }
 
     @Test
+    func acceptsAndPersistsTurboModelWhileDefaultStaysBase() {
+        let suite = "WhisperAppTests-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        #expect(AppSettingsStore.supportedModels.contains("large-v3-turbo"))
+        let first = AppSettingsStore(defaults: defaults)
+        #expect(first.defaultModel == "base")
+        first.defaultModel = "large-v3-turbo"
+        #expect(first.defaultModel == "large-v3-turbo")
+        #expect(AppSettingsStore(defaults: defaults).defaultModel == "large-v3-turbo")
+    }
+
+    @Test
+    func displayNameLabelsTurboAndKeepsOtherModelNames() {
+        #expect(AppSettingsStore.displayName(for: "large-v3-turbo") == "large-v3-turbo（快速）")
+        for model in ["tiny", "base", "small", "medium", "large-v3"] {
+            #expect(AppSettingsStore.displayName(for: model) == model)
+        }
+    }
+
+    @Test
     func rejectsUnknownPersistedModel() {
         let suite = "WhisperAppTests-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!

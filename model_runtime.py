@@ -3,6 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+_REPOSITORY_OVERRIDES = {
+    "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+}
+
 
 class ModelRuntimeManager:
     def __init__(self):
@@ -10,7 +14,7 @@ class ModelRuntimeManager:
 
     @staticmethod
     def repository_id(model_name: str) -> str:
-        return f"Systran/faster-whisper-{model_name}"
+        return _REPOSITORY_OVERRIDES.get(model_name, f"Systran/faster-whisper-{model_name}")
 
     def status(self, model_name: str) -> dict:
         repository = self.repository_id(model_name)

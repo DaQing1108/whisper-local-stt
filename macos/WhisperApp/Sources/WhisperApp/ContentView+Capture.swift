@@ -57,7 +57,7 @@ extension ContentView {
                     Picker("模型", selection: Binding(
                         get: { settings.defaultModel }, set: { settings.defaultModel = $0; checkModelStatus() }
                     )) {
-                        ForEach(AppSettingsStore.supportedModels, id: \.self) { Text($0) }
+                        ForEach(AppSettingsStore.supportedModels, id: \.self) { Text(AppSettingsStore.displayName(for: $0)) }
                     }
                     Menu("語言快速選擇") {
                         Button("Auto") { settings.language = ""; languageDraft = "" }

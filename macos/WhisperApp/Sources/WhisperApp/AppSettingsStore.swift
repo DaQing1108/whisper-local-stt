@@ -15,7 +15,12 @@ final class AppSettingsStore {
     static let summaryProviderKey = "whisper.summaryProvider"
     static let audioModeKey = "whisper.audioMode"
     static let includeMicrophoneInMixedModeKey = "whisper.includeMicrophoneInMixedMode"
-    static let supportedModels = ["tiny", "base", "small", "medium", "large-v3"]
+    static let supportedModels = ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"]
+
+    /// Picker label only; the stored/Worker value is always the raw model name.
+    static func displayName(for model: String) -> String {
+        model == "large-v3-turbo" ? "large-v3-turbo（快速）" : model
+    }
     // Must match whisper_core.py's DOMAIN_TERMS keys exactly, or a selection silently
     // resolves to an empty prompt server-side.
     static let supportedDomains = ["general", "media", "tech", "medical", "legal"]
