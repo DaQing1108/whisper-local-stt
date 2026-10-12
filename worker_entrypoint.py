@@ -3,9 +3,15 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
+import resource
+import shutil
 import sys
 import threading
+import time
 import traceback
+import wave
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, TextIO
 from uuid import uuid4
@@ -321,12 +327,84 @@ def main() -> int:
     return 0 if runtime.shutdown() else 1
 
 
+SLOW_INFERENCE_RATIO = 3
+SLOW_WAV_KEEP = 10
+SLOW_WAV_MAX_BYTES = 200 * 1024 * 1024
+SLOW_WAV_PREFIX = "slow-"
+
+
+def _cpu_seconds() -> float:
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    return usage.ru_utime + usage.ru_stime
+
+
+def _diagnostics_dir() -> Path:
+    override = os.environ.get("WHISPER_DIAGNOSTICS_DIR")
+    if override:
+        return Path(override)
+    return Path.home() / "Library" / "Application Support" / "WhisperSwiftUI" / "Diagnostics"
+
+
+def _wav_duration_seconds(wav_path: str) -> float | None:
+    try:
+        with wave.open(wav_path, "rb") as wav:
+            rate = wav.getframerate()
+            return wav.getnframes() / rate if rate else None
+    except Exception:
+        return None
+
+
+def _prune_slow_wavs(directory: Path) -> None:
+    kept = sorted(directory.glob(f"{SLOW_WAV_PREFIX}*.wav"), key=lambda p: p.name)
+    for stale in kept[:-SLOW_WAV_KEEP]:
+        stale.unlink(missing_ok=True)
+
+
+def _record_inference_diagnostics(
+    wav_path: str, model_name: str, segment_count: int, elapsed: float, cpu: float,
+) -> None:
+    """Append one JSON line to inference.jsonl; never raises, never touches stdout."""
+    try:
+        directory = _diagnostics_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        now = datetime.now().astimezone()
+        audio_seconds = _wav_duration_seconds(wav_path)
+        record = {
+            "timestamp": now.isoformat(),
+            "audio_seconds": audio_seconds,
+            "model": model_name,
+            "elapsed_seconds": round(elapsed, 3),
+            "segments": segment_count,
+            "cpu_seconds": round(cpu, 3),
+        }
+        if audio_seconds is not None and elapsed > audio_seconds * SLOW_INFERENCE_RATIO:
+            record["slow"] = True
+            try:
+                if os.path.getsize(wav_path) > SLOW_WAV_MAX_BYTES:
+                    record["wav_saved"] = False
+                    record["wav_skipped"] = "too_large"
+                else:
+                    name = f"{SLOW_WAV_PREFIX}{now.strftime('%Y%m%dT%H%M%S%f')}.wav"
+                    shutil.copy2(wav_path, directory / name)
+                    record["wav_saved"] = name
+                    _prune_slow_wavs(directory)
+            except Exception as exc:
+                record["wav_saved"] = False
+                record["wav_skipped"] = f"copy_failed: {exc}"
+        with open(directory / "inference.jsonl", "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        print(f"inference diagnostics failed: {exc}", file=sys.stderr)
+
+
 def run_inference_child(args: list[str]) -> int:
     """Run faster-whisper inside the bundled executable for hard cancellation."""
     if len(args) != 4:
         print("usage: --inference-child WAV MODEL LANGUAGE INITIAL_PROMPT", file=sys.stderr)
         return 2
     wav_path, model_name, language_arg, initial_prompt = args
+    started_at = time.monotonic()
+    started_cpu = _cpu_seconds()
     from faster_whisper import WhisperModel
 
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
@@ -342,6 +420,10 @@ def run_inference_child(args: list[str]) -> int:
         {"text": segment.text, "start": segment.start, "end": segment.end}
         for segment in segments_raw
     ]
+    _record_inference_diagnostics(
+        wav_path, model_name, len(segments),
+        time.monotonic() - started_at, _cpu_seconds() - started_cpu,
+    )
     print(json.dumps({
         "text": " ".join(segment["text"] for segment in segments).strip(),
         "language": info.language,
