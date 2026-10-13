@@ -177,7 +177,8 @@ final class WorkerSupervisor {
     ) {
         logSink.record(WorkerLogEntry(
             level: level, event: event, sessionID: sessionID,
-            requestID: requestID, jobID: jobID ?? activeJobID, detail: detail
+            requestID: requestID, jobID: jobID ?? activeJobID,
+            detail: detail.map { WorkerDiagnosticsRedactor.sanitizeDetail($0) }
         ))
     }
 
@@ -559,7 +560,7 @@ final class WorkerSupervisor {
             partialText = event.payload["text"]?.string ?? partialText
             jobStatus = "Transcribing"
             log("job_progress", level: .debug, requestID: event.requestID,
-                detail: "\(Int(done))/\(Int(total))")
+                detail: WorkerDiagnosticsFormatting.progress(done: done, total: total))
         case "completed":
             guard event.requestID == activeRequestID else { return }
             log("job_completed", requestID: event.requestID)

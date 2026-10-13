@@ -21,7 +21,7 @@ struct WorkerLogEntry: Equatable, Sendable {
         if let requestID { parts.append("request=\(requestID)") }
         if let jobID { parts.append("job=\(jobID)") }
         if let detail, !detail.isEmpty {
-            parts.append("detail=\(WorkerDiagnosticsRedactor.redact(detail))")
+            parts.append("detail=\(WorkerDiagnosticsRedactor.sanitizeDetail(detail))")
         }
         return parts.joined(separator: " ")
     }
@@ -32,11 +32,58 @@ protocol WorkerLogSink: Sendable {
 }
 
 enum WorkerDiagnosticsRedactor {
-    /// Hides the macOS account name in any `/Users/<name>` path fragment.
-    static func redact(_ text: String) -> String {
-        text.replacingOccurrences(
-            of: #"/Users/[^/\s"'\\]+"#, with: "/Users/<redacted>", options: .regularExpression
-        )
+    static let maximumDetailLength = 200
+    private static let minimumLiteralLength = 3
+
+    /// Ordered regex rules; secrets first so later path rules never see (or split) them.
+    private static let rules: [(pattern: String, template: String)] = [
+        (#"sk-[A-Za-z0-9_-]{8,}"#, "<redacted-secret>"),
+        (#"hf_[A-Za-z0-9]{8,}"#, "<redacted-secret>"),
+        (#"Bearer\s+[A-Za-z0-9._-]+"#, "<redacted-secret>"),
+        (#"(?i)(api[_-]?key|token|secret)\s*[:=]\s*\S+"#, "<redacted-secret>"),
+        (#"(/(?:private/)?var/folders/[^/\s]+/[^/\s]+/T/)[^\n\r"']+"#, "$1<tmp>"),
+        (#"(?i)%2FUsers%2F(?:(?!%2F)[^\s/])+"#, "%2FUsers%2F<redacted>"),
+        // Account names may contain spaces/apostrophes: redact up to the next "/".
+        (#"(?i)/Users/[^/\n\r"]+"#, "/Users/<redacted>"),
+    ]
+
+    /// Hides account names, home paths, temp file names and common secret shapes.
+    /// `userName`/`homeDirectory` are the runtime values (injectable for tests); literals
+    /// shorter than 3 characters are skipped so they cannot shred unrelated text.
+    static func redact(
+        _ text: String, userName: String = NSUserName(), homeDirectory: String = NSHomeDirectory()
+    ) -> String {
+        var result = text
+        for rule in rules {
+            result = result.replacingOccurrences(
+                of: rule.pattern, with: rule.template, options: .regularExpression
+            )
+        }
+        if homeDirectory.count >= minimumLiteralLength {
+            result = result.replacingOccurrences(of: homeDirectory, with: "<home>", options: .caseInsensitive)
+        }
+        if userName.count >= minimumLiteralLength {
+            result = result.replacingOccurrences(of: userName, with: "<user>", options: .caseInsensitive)
+        }
+        return result
+    }
+
+    /// Redact first, then truncate, so a cut can never expose part of an unredacted value.
+    static func sanitizeDetail(
+        _ detail: String, userName: String = NSUserName(), homeDirectory: String = NSHomeDirectory()
+    ) -> String {
+        let redacted = redact(detail, userName: userName, homeDirectory: homeDirectory)
+        guard redacted.count > maximumDetailLength else { return redacted }
+        return String(redacted.prefix(maximumDetailLength)) + "…"
+    }
+}
+
+enum WorkerDiagnosticsFormatting {
+    /// Never traps: non-finite or absurdly large counters render as "n/a".
+    static func progress(done: Double, total: Double) -> String {
+        let limit = 1e15
+        guard done.isFinite, total.isFinite, abs(done) < limit, abs(total) < limit else { return "n/a" }
+        return "\(Int(done))/\(Int(total))"
     }
 }
 
@@ -73,22 +120,42 @@ struct WorkerDiagnosticsExporter {
         }
     }
 
+    static let stderrTailLimit = 4000
+    static let exportFilePrefix = "WhisperWorkerDiagnostics-"
+    static let retainedExports = 5
+
     func render(stderrTail: String) -> String {
         let lines: [String]
         do { lines = try lineProvider() } catch { lines = ["(system log unavailable: \(error.localizedDescription))"] }
         var sections = ["# Whisper Worker diagnostics", "subsystem: \(WorkerDiagnosticsLogging.subsystem)", "", "## Structured log"]
         sections.append(contentsOf: lines)
-        if !stderrTail.isEmpty {
-            sections.append(contentsOf: ["", "## Worker stderr tail (fallback)", stderrTail])
+        let tail = String(WorkerDiagnosticsRedactor.redact(stderrTail).suffix(Self.stderrTailLimit))
+        if !tail.isEmpty {
+            sections.append(contentsOf: ["", "## Worker stderr tail (fallback)", tail])
         }
         return WorkerDiagnosticsRedactor.redact(sections.joined(separator: "\n")) + "\n"
     }
 
     func export(stderrTail: String, directory: URL = FileManager.default.temporaryDirectory) throws -> URL {
-        let stamp = Date().ISO8601Format().replacingOccurrences(of: ":", with: "-")
-        let url = directory.appendingPathComponent("WhisperWorkerDiagnostics-\(stamp).log")
-        try Data(render(stderrTail: stderrTail).utf8).write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let stamp = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+            .replacingOccurrences(of: ":", with: "-")
+        let suffix = UUID().uuidString.prefix(8)
+        let url = directory.appendingPathComponent("\(Self.exportFilePrefix)\(stamp)-\(suffix).log")
+        guard FileManager.default.createFile(
+            atPath: url.path, contents: Data(render(stderrTail: stderrTail).utf8),
+            attributes: [.posixPermissions: 0o600]
+        ) else { throw CocoaError(.fileWriteUnknown) }
+        pruneOldExports(in: directory, keeping: url)
         return url
+    }
+
+    private func pruneOldExports(in directory: URL, keeping current: URL) {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        let older = names
+            .filter { $0.hasPrefix(Self.exportFilePrefix) && $0.hasSuffix(".log") && $0 != current.lastPathComponent }
+            .sorted()
+        for stale in older.dropLast(Self.retainedExports - 1) {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(stale))
+        }
     }
 }
