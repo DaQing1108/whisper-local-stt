@@ -90,7 +90,12 @@ final class WorkerSupervisor {
     private(set) var partialText = ""
     private(set) var resultText = ""
     private(set) var jobStatus = "Idle"
+    /// Fallback only: raw Worker stderr tail (20KB). Structured lifecycle diagnostics go
+    /// through `logSink` (os.Logger) and `exportDiagnostics()`.
     private(set) var diagnostics = ""
+    private(set) var sessionID = UUID()
+    var logSink: any WorkerLogSink = OSLogWorkerSink()
+    var diagnosticsExporter = WorkerDiagnosticsExporter()
     private(set) var restartCount = 0
     private(set) var diarizationAvailable = false
     private(set) var diarizationCapabilityMessage = "Diarization capability not checked"
@@ -159,8 +164,26 @@ final class WorkerSupervisor {
         state = .starting
         restartCount = 0
         diagnostics = ""
+        sessionID = UUID()
+        log("worker_start")
         launchConfiguration = configuration
         try launch(configuration, isRestart: false)
+    }
+
+    /// Writes a redacted lifecycle log for the current session; never throws.
+    private func log(
+        _ event: String, level: WorkerLogLevel = .info,
+        requestID: String? = nil, jobID: String? = nil, detail: String? = nil
+    ) {
+        logSink.record(WorkerLogEntry(
+            level: level, event: event, sessionID: sessionID,
+            requestID: requestID, jobID: jobID ?? activeJobID, detail: detail
+        ))
+    }
+
+    /// Exports the app's recent structured Worker log (redacted) to a temporary file.
+    func exportDiagnostics() throws -> URL {
+        try diagnosticsExporter.export(stderrTail: diagnostics)
     }
 
     private func launch(_ configuration: WorkerLaunchConfiguration, isRestart: Bool) throws {
@@ -228,6 +251,7 @@ final class WorkerSupervisor {
             output.readabilityHandler = nil
             errorOutput.readabilityHandler = nil
             state = .failed(error.localizedDescription)
+            log("worker_failed", level: .error, detail: "launch: \(error.localizedDescription)")
             throw error
         }
     }
@@ -365,6 +389,7 @@ final class WorkerSupervisor {
         resultText = ""
         jobStatus = "Submitting"
         activeRequestID = requestID
+        log("job_submitted", requestID: requestID, detail: "model=\(modelName)")
         activeTranscriptionContext = ActiveTranscriptionContext(
             requestID: requestID,
             audioURL: audioURL,
@@ -486,6 +511,7 @@ final class WorkerSupervisor {
         switch event.event {
         case "ready":
             state = .ready
+            log("worker_ready")
             workerReadyHandler?()
             for observer in readyObservers.values { observer() }
         case "capabilities":
@@ -520,6 +546,7 @@ final class WorkerSupervisor {
             guard event.requestID == activeRequestID else { return }
             activeJobID = event.payload["job_id"]?.string
             jobStatus = "Queued"
+            log("job_accepted", requestID: event.requestID)
         case "status":
             guard event.requestID == activeRequestID else { return }
             jobStatus = event.payload["status"]?.string ?? event.payload["msg"]?.string ?? "Running"
@@ -531,8 +558,11 @@ final class WorkerSupervisor {
             progress = total > 0 ? min(done / total, 1) : 0
             partialText = event.payload["text"]?.string ?? partialText
             jobStatus = "Transcribing"
+            log("job_progress", level: .debug, requestID: event.requestID,
+                detail: "\(Int(done))/\(Int(total))")
         case "completed":
             guard event.requestID == activeRequestID else { return }
+            log("job_completed", requestID: event.requestID)
             resultText = event.payload["text"]?.string ?? ""
             progress = 1
             jobStatus = "Completed"
@@ -559,12 +589,15 @@ final class WorkerSupervisor {
             completeRequestIfMatching(event.requestID)
         case "cancelled":
             guard event.requestID == activeRequestID else { return }
+            log("job_cancelled", requestID: event.requestID)
             jobStatus = "Cancelled"
             activeJobID = nil
             activeTranscriptionContext = nil
             unsuccessfulTerminalRevision += 1
             completeRequestIfMatching(event.requestID)
         case "failed", "protocol_error":
+            log("\(event.event == "failed" ? "job_failed" : "protocol_error")", level: .error,
+                requestID: event.requestID, detail: event.payload["message"]?.string)
             if event.requestID == modelRequestID {
                 modelReadiness = "failed"
                 modelReadinessMessage = event.payload["message"]?.string ?? "Model operation failed"
@@ -628,6 +661,7 @@ final class WorkerSupervisor {
 
         restartCount += 1
         state = .restarting(restartCount)
+        log("worker_restart", level: .error, detail: "exit_status=\(status) attempt=\(restartCount)")
         loseActiveRequest()
         do {
             try launch(configuration, isRestart: true)
@@ -638,6 +672,11 @@ final class WorkerSupervisor {
 
     private func reset(state: WorkerState) {
         self.state = state
+        switch state {
+        case .failed(let message): log("worker_failed", level: .error, detail: message)
+        case .stopped: log("worker_stopped")
+        default: break
+        }
         loseActiveRequest()
         if case .failed = state { notifyUnavailable(state) }
         if state == .stopped { notifyUnavailable(state) }
@@ -677,6 +716,7 @@ final class WorkerSupervisor {
 
     private func loseActiveRequest() {
         let requestID = activeRequestID
+        if let requestID { log("job_lost", level: .error, requestID: requestID) }
         if requestID != nil { unsuccessfulTerminalRevision += 1 }
         activeRequestID = nil
         activeJobID = nil
