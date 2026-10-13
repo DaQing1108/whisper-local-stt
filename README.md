@@ -1,6 +1,13 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
+Last checkpoint: 2026-10-13 11:30
+Phase: 結構化診斷、混音設定修正、`clean_segments` 幻覺過濾上線，版號 0.2.5 → 0.2.6（`237e15c`、`b4034f1`、`5fc1a43`、`2376c60`、`55172bd`、`7294e76`；皆 push 並安裝到 `~/Applications/Whisper Swift.app`）。
+Working: (1) Swift 端 `WorkerSupervisor` 用 `os.Logger`（subsystem `com.via.whisper-swiftui`，category `WorkerLifecycle`）記錄 worker/job 生命週期，帶 sessionID/requestID/jobID；`exportDiagnostics()` 用 `OSLogStore` 匯出並脫敏（`/Users/<name>`、`file://`、`%2F`、`/var/folders` 檔名、sk-/hf_/Bearer 等密鑰、NSUserName/NSHomeDirectory；detail 先遮後截 200 字，stderr tail 取最後 4000 字）；已用 `log show` 在簽章版實測看到帶 sessionID 的事件；`exportDiagnostics()` 尚未接到 UI 按鈕。(2) 混音模式修正：`startMixedAudioRecording()` 開始前呼叫新增的 `MixedAudioRecordingController.applySettings(model:language:domain:extraTerms:)`，修好 7/20 起「錄音中各段用寫死的 base 且不套詞彙提示、僅按停止時最後一段套用」的缺陷；實機 33 分鐘正式會議驗證：65 段全部 large-v3-turbo、詞彙 392 字，無慢速/失敗，歷史紀錄 model 正確。附暫時性診斷日誌（category `MixedSettings`：mixed_init/mixed_settings_applied/mixed_start/queue_init/queue_model_set/queue_submit），待確認穩定後移除。(3) `transcribe_common.clean_segments` 新增：連續 ≥3 段（去標點後相同且 ≥4 字）只留第一段；≤40 字固定假字幕（字幕志願者、字幕由…提供/Amara.org、請不吝點贊…、明鏡與點點欄目）丟棄；通用結尾語（謝謝觀看/下次見）刻意不處理（錄影片時是真內容）。用 142 份歷史逐字稿（48,998 段）重放：移除 31 段假字幕與 121 段連續重複（32 處），無意外移除；僅對之後的轉錄有效，不回溯已存逐字稿。測試：`tests/unit` 371、`swift test` 236 通過。
+Next action: 觀察新會議逐字稿是否仍有連發重複/假字幕（AC-6）；看門狗在 app 內真的觸發（AC-9，診斷出現 beam_size=1）；`MixedSettings` 暫時診斷日誌穩定後請 `whisper-d5` 移除；是否把 `exportDiagnostics()` 接到 UI；Swift 端單段重試上限（`jobStallTimeout=180` 取消後無上限重送）視診斷再決定；turbo 帶詞彙 prompt 時部分 30 秒視窗時間碼粗糙，維持觀察。
+Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍）
+
+### 舊記錄
 Last checkpoint: 2026-10-12 20:40
 Phase: large-v3-turbo「快速模式」加入模型選單並設為預設（`1a766b2`、`ef42f57`），承接上一輪的診斷與看門狗；皆已 push 並安裝到 `~/Applications/Whisper Swift.app`。
 Working: `AppSettingsStore.supportedModels` 含 `large-v3-turbo`，選單顯示「large-v3-turbo（快速）」（`displayName(for:)`，儲存值仍是原名）；無儲存值/未知值退回 `large-v3-turbo`，已儲存的 base/small 等照舊保留；`model_runtime.py::repository_id` 把 turbo 對到 `mobiuslabsgmbh/faster-whisper-large-v3-turbo`（faster-whisper 1.2.1 原生認得該名稱，Worker 推論未改）。驗證：`tests/unit` 355 通過、`swift test` 223 通過；打包 Worker 回報 turbo 模型狀態為 cached，turbo 跑先前的慢速音檔推論 4.4s（large-v3 需看門狗降級後共 95s）；使用者實錄 245 秒，診斷 10 筆 turbo 推論每段 5~9s、無慢速/卡住/重試。已知取捨：turbo + 長詞彙 prompt 時部分 30 秒視窗只輸出 1 個 30 秒長段（時間碼粗糙、斷行失效，文字不缺；不帶 prompt 同視窗 12~18 段，large-v3 帶 prompt 正常；`word_timestamps` 無效），決定維持現況觀察。打包踩坑：`dist/` 位於 iCloud 同步目錄，曾被產生 280 個「檔名 2」重複副本，複製進 `~/Applications` 後簽章無效；處理方式是只刪除「有原始檔對應」的 ` 2` 副本後簽章驗證通過，之後打包前先清 `dist/WhisperWorker`，組裝後與複製後都檢查重複副本。
@@ -61,6 +68,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-10-13 11:30｜結構化診斷、混音設定修正、幻覺過濾上線，版號 0.2.6
+- Completed: Swift 端結構化診斷（os.Logger + 脫敏匯出，經獨立審查兩輪 APPROVE）；找出並修復混音模式開始錄音時不套用模型/語言/領域/詞彙的缺陷（第一次修正在實機無效，加診斷日誌後改以正式會議驗證）；`clean_segments` 新增連續重複與固定假字幕過濾（歷史重放驗證）；版號 0.2.5→0.2.6；清理 /tmp 暫存、deepdml 測試模型、4426 個未被引用的錄音中間片段、過時 worktree/分支；皆與 `whisper-d5` 分工（本 session 規劃/驗收/push/打包）
+- State: `tests/unit` 371、`swift test` 236 通過；已安裝版（0.2.6）簽章驗證通過且與組裝產物一致；真實 33 分鐘會議 65 段全為 large-v3-turbo；`dist/` 在 iCloud 目錄，打包前後都要檢查並清除「檔名 2」重複副本，且 `FinderInfo` 需清到簽章驗證通過
+- Next: 觀察新逐字稿與診斷；移除 `MixedSettings` 暫時日誌；視需要接 `exportDiagnostics()` UI、Swift 端單段重試上限
+
 ### 2026-10-12 20:40｜large-v3-turbo 快速模式上線並設為預設
 - Completed: 模型選單加入 large-v3-turbo（`1a766b2`）、預設模型改為 large-v3-turbo（`ef42f57`），皆 push 並打包安裝；與 `whisper-d5` 分工（本 session 規劃/驗收/push/打包，對方開發）；查出 turbo 帶詞彙 prompt 時部分視窗單段時間碼粗糙的原因並記錄；處理 iCloud 在 `dist/` 產生重複副本導致簽章無效的問題
 - State: `tests/unit` 355、`swift test` 223 通過；已安裝版簽章驗證通過、與組裝產物逐位元組相同、turbo 模型狀態 cached；使用者實錄 245s 全程 turbo，每段推論 5~9s、無慢速或卡住
