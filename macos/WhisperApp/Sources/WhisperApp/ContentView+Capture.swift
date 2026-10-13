@@ -2,6 +2,22 @@ import SwiftUI
 
 extension ContentView {
     var compactControlBar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            controlBarRow
+            if let notice = CaptureUIRules.transcriptionDeferralNotice(
+                mode: audioMode,
+                isRecordingOrStarting: anyCaptureActive,
+                diarizationInProgress: worker.diarizationOperationInProgress,
+                modelOperationInProgress: worker.modelOperationInProgress
+            ) {
+                Label(notice, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var controlBarRow: some View {
         HStack(spacing: 14) {
             Button(action: primaryCaptureAction) {
                 Label(primaryButtonLabel, systemImage: isPrimaryRecording ? "stop.fill" : audioMode.symbol)

@@ -63,6 +63,22 @@ enum CaptureUIRules {
     static func shouldSyncFinalizedMixedAudioResult(isDraftDirty: Bool) -> Bool {
         !isDraftDirty
     }
+
+    /// Warning shown while recording (or about to) if the Worker is busy with speaker
+    /// diarization or a model operation: `WorkerSupervisor.transcribe` rejects new jobs
+    /// until it finishes, so transcription is deferred (the audio file is still saved).
+    static func transcriptionDeferralNotice(
+        mode: AudioInputMode,
+        isRecordingOrStarting: Bool,
+        diarizationInProgress: Bool,
+        modelOperationInProgress: Bool
+    ) -> String? {
+        guard isRecordingOrStarting, diarizationInProgress || modelOperationInProgress else { return nil }
+        let subject = mode == .standard ? "停止後的轉錄" : "這次錄音的轉錄"
+        let cause = diarizationInProgress ? "講者辨識進行中" : "模型下載或檢查進行中"
+        let waitsFor = diarizationInProgress ? "辨識結束後" : "它結束後"
+        return "\(cause)，\(subject)會等\(waitsFor)才開始（錄音檔會正常儲存）"
+    }
 }
 
 struct PendingSummaryDraft {
