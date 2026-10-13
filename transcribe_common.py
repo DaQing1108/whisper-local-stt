@@ -29,6 +29,24 @@ _FOREIGN_SCRIPT_RE = re.compile(
     r']'
 )
 
+# Fixed fake-subtitle credits Whisper emits from training-data artifacts. Deliberately
+# excludes generic sign-offs (謝謝觀看／下次見／歡迎訂閱…): a presenter in a recorded video
+# really says those, and dropping them would delete genuine content.
+_FAKE_SUBTITLE_MAX_LEN = 40
+_FAKE_SUBTITLE_RES = [re.compile(p) for p in (
+    r'字幕志[願愿]者',
+    r'字幕由.{0,12}提供',
+    r'Amara\.org',
+    r'請不吝點贊',
+    r'请不吝点赞',
+    r'明鏡與點點欄目',
+)]
+
+# Consecutive identical segments (after normalisation) kicking in at this run length / size.
+_REPEAT_RUN_MIN = 3
+_REPEAT_MIN_NORMALIZED_LEN = 4
+_NORMALIZE_RE = re.compile(r'[\W_]+')
+
 DOMAIN_LABELS: dict[str, str] = {
     "media":   "媒體",
     "medical": "醫療",
@@ -119,8 +137,37 @@ def is_hallucination(text: str) -> bool:
     return False
 
 
+def _is_fake_subtitle(text: str) -> bool:
+    return len(text) <= _FAKE_SUBTITLE_MAX_LEN and any(r.search(text) for r in _FAKE_SUBTITLE_RES)
+
+
+def _collapse_consecutive_repeats(segments: list[dict]) -> tuple[list[dict], int]:
+    """Keep only the first of ≥3 consecutive segments whose normalised text is identical
+    (and ≥4 chars once punctuation/whitespace/underscores are stripped). Returns (kept, dropped)."""
+    kept: list[dict] = []
+    dropped = 0
+    index = 0
+    while index < len(segments):
+        key = _NORMALIZE_RE.sub('', segments[index].get("text", ""))
+        end = index + 1
+        while end < len(segments) and _NORMALIZE_RE.sub('', segments[end].get("text", "")) == key:
+            end += 1
+        run = end - index
+        if run >= _REPEAT_RUN_MIN and len(key) >= _REPEAT_MIN_NORMALIZED_LEN:
+            kept.append(segments[index])
+            dropped += run - 1
+            logging.warning(
+                "[CleanSegments] consecutive-repeat rule dropped %d segment(s) repeating '%s'",
+                run - 1, key[:10],
+            )
+        else:
+            kept.extend(segments[index:end])
+        index = end
+    return kept, dropped
+
+
 def clean_segments(segments: list[dict]) -> list[dict]:
-    """移除空白、hallucination、重複 timestamp 的 phantom segments。
+    """移除空白、hallucination、重複 timestamp、連續重複與固定假字幕的 phantom segments。
 
     在 segment list 層級做後處理，補上 is_hallucination() 對單一 chunk
     全文偵測的盲點（個別 segment 可能太短不觸發全文偵測，但大量空白
@@ -128,6 +175,7 @@ def clean_segments(segments: list[dict]) -> list[dict]:
     """
     cleaned: list[dict] = []
     seen_keys: set[tuple] = set()
+    fake_subtitles = 0
 
     for seg in segments:
         text = seg.get("text", "").strip()
@@ -140,6 +188,11 @@ def clean_segments(segments: list[dict]) -> list[dict]:
         if len(text) >= 20 and is_hallucination(text):
             continue
 
+        # 固定假字幕（如「字幕志願者 …」），只丟短段落
+        if _is_fake_subtitle(text):
+            fake_subtitles += 1
+            continue
+
         # 重複 timestamp 去重：相同 start 時間 + 相同 text → 只保留第一個
         key = (round(seg.get("start", 0), 1), text)
         if key in seen_keys:
@@ -147,6 +200,10 @@ def clean_segments(segments: list[dict]) -> list[dict]:
         seen_keys.add(key)
 
         cleaned.append(seg)
+
+    if fake_subtitles:
+        logging.warning("[CleanSegments] fake-subtitle rule dropped %d segment(s)", fake_subtitles)
+    cleaned, _ = _collapse_consecutive_repeats(cleaned)
 
     if len(cleaned) < len(segments):
         logging.info(

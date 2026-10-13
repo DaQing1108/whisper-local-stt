@@ -218,3 +218,58 @@ class TestCleanSegments:
         assert len(result) == 2
         assert result[0]["text"] == "正常內容"
         assert result[1]["text"] == "如果有段序的話，就跟我講一下。"
+
+
+def _segs(*texts):
+    return [{"text": t, "start": float(i * 3), "end": float(i * 3 + 2)} for i, t in enumerate(texts)]
+
+
+class TestConsecutiveRepeatAndFakeSubtitles:
+    def test_22_identical_segments_collapse_to_first(self):
+        segments = _segs("前面正常內容", *["我們來看著我們"] * 22, "後面正常內容")
+        result = clean_segments(segments)
+        assert [s["text"] for s in result] == ["前面正常內容", "我們來看著我們", "後面正常內容"]
+        assert result[1]["start"] == 3.0
+
+    def test_four_consecutive_real_sentence_keeps_one(self):
+        result = clean_segments(_segs(*["國家之間不相信"] * 4))
+        assert len(result) == 1
+
+    def test_exactly_two_consecutive_are_kept(self):
+        assert len(clean_segments(_segs("國家之間不相信", "國家之間不相信"))) == 2
+
+    def test_short_normalized_repeat_is_kept(self):
+        # 「對對對」normalises to 3 chars (<4): must not be treated as a hallucination
+        assert len(clean_segments(_segs(*["對對對"] * 4))) == 4
+
+    def test_non_consecutive_repeats_are_kept(self):
+        texts = ["國家之間不相信", "中間插入別的內容", "國家之間不相信", "又一段別的內容", "國家之間不相信"]
+        assert len(clean_segments(_segs(*texts))) == 5
+
+    def test_punctuation_differences_count_as_identical(self):
+        result = clean_segments(_segs("我可以幫你", "我可以幫你。", "我可以幫你！"))
+        assert len(result) == 1
+
+    @pytest.mark.parametrize("text", [
+        "字幕志願者 李宗盛",
+        "字幕志愿者 杨茜茜",
+        "字幕由 Amara 社群提供",
+        "Subtitles by the Amara.org community",
+        "請不吝點贊 訂閱 轉發 打賞支持明鏡與點點欄目",
+        "请不吝点赞 订阅 转发",
+    ])
+    def test_fixed_fake_subtitles_are_dropped(self, text):
+        result = clean_segments(_segs("正常內容在這裡", text))
+        assert [s["text"] for s in result] == ["正常內容在這裡"]
+
+    def test_long_segment_mentioning_subtitle_phrase_is_kept(self):
+        long_text = "我們今天要討論的是字幕志願者這個現象，它在許多開源社群專案裡都非常常見，值得深入研究。"
+        assert len(clean_segments(_segs(long_text))) == 1
+
+    @pytest.mark.parametrize("text", [
+        "本期影片就分享到這裡,謝謝觀看,下次見。",
+        "謝謝收看，下期再見",
+        "歡迎訂閱我的頻道",
+    ])
+    def test_generic_sign_offs_are_kept(self, text):
+        assert len(clean_segments(_segs(text))) == 1
