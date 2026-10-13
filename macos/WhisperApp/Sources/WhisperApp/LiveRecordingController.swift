@@ -170,6 +170,9 @@ final class OrderedChunkSubmissionQueue {
 
     private let transcriber: any LiveAudioTranscribing
     private var isPausedAfterFailure = false
+    /// Logs `queue_paused` once per failure episode; reset by a successful submission so the
+    /// 5s recovery poll (which flips isPausedAfterFailure off and on) does not spam the log.
+    private var hasLoggedPause = false
     var isWorkerReady: Bool { transcriber.state == .ready }
     /// Guards against a Worker job that accepts a chunk but never emits a terminal event
     /// (process alive, job hung) — without this, activeURL never clears and the queue stalls forever.
@@ -250,14 +253,28 @@ final class OrderedChunkSubmissionQueue {
             )
             activeURL = next
             errorMessage = nil
+            hasLoggedPause = false
             scheduleJobStallWatchdog(for: activeRequestID)
         } catch {
             pendingURLs.insert(next, at: 0)
-            isPausedAfterFailure = true
+            MixedSettingsDiagnostics.log(
+                "queue_submit_failed queue=\(MixedSettingsDiagnostics.identity(self)) error="
+                + WorkerDiagnosticsRedactor.sanitizeDetail("\(type(of: error)): \(error.localizedDescription)")
+            )
+            markPausedAfterFailure()
             schedulePauseRecovery()
             errorMessage = error.localizedDescription
             submissionFailureHandler?(error)
         }
+    }
+
+    private func markPausedAfterFailure() {
+        isPausedAfterFailure = true
+        guard !hasLoggedPause else { return }
+        hasLoggedPause = true
+        MixedSettingsDiagnostics.log(
+            "queue_paused queue=\(MixedSettingsDiagnostics.identity(self)) pending=\(pendingURLs.count)"
+        )
     }
 
     private func scheduleJobStallWatchdog(for requestID: String?) {
@@ -286,7 +303,7 @@ final class OrderedChunkSubmissionQueue {
             if let activeURL { pendingURLs.insert(activeURL, at: 0) }
             activeURL = nil
             activeRequestID = nil
-            isPausedAfterFailure = true
+            markPausedAfterFailure()
             schedulePauseRecovery()
             let error = ChunkSubmissionTerminalError(status: status)
             errorMessage = error.localizedDescription

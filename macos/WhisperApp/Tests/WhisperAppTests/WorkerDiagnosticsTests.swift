@@ -9,9 +9,158 @@ private final class RecordingSink: WorkerLogSink, @unchecked Sendable {
     func record(_ entry: WorkerLogEntry) { lock.withLock { storage.append(entry) } }
 }
 
+private final class MessageCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+    func add(_ message: String) { lock.withLock { storage.append(message) } }
+    func messages(containing needle: String) -> [String] {
+        lock.withLock { storage.filter { $0.contains(needle) } }
+    }
+}
+
+private struct SubmitFailure: LocalizedError {
+    var errorDescription: String? { "cannot open /Users/Da Qing/x.wav" }
+}
+
+@MainActor
+private final class ThrowingTranscriber: LiveAudioTranscribing {
+    var state: WorkerState = .ready
+    private(set) var attempts = 0
+    var failing = true
+    func transcribe(audioURL: URL, modelName: String, language: String?) throws -> String {
+        attempts += 1
+        if failing { throw SubmitFailure() }
+        return UUID().uuidString
+    }
+    func addTerminalObserver(_ observer: @escaping @MainActor @Sendable (String?, String) -> Void) -> UUID { UUID() }
+    func addLostObserver(_ observer: @escaping @MainActor @Sendable (String) -> Void) -> UUID { UUID() }
+    func addReadyObserver(_ observer: @escaping @MainActor @Sendable () -> Void) -> UUID { UUID() }
+    func addUnavailableObserver(_ observer: @escaping @MainActor @Sendable (WorkerState) -> Void) -> UUID { UUID() }
+    func removeObserver(_ id: UUID) {}
+    func cancel() throws {}
+}
+
+@MainActor
+private final class CapturingPauseScheduler: PauseRecoveryScheduling {
+    private var action: (@MainActor @Sendable () -> Void)?
+    func scheduleRecovery(after interval: TimeInterval, action: @escaping @MainActor @Sendable () -> Void) { self.action = action }
+    func cancelRecovery() { action = nil }
+    func fire() { action?() }
+}
+
 @MainActor
 @Suite(.serialized)
 struct WorkerDiagnosticsTests {
+    @Test
+    func guardRejectionsLogSubmitRejectedAndKeepThrowingSameErrors() async throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let script = temporary.appendingPathComponent("silent_worker.py")
+        try Self.silentWorkerScript.write(to: script, atomically: true, encoding: .utf8)
+        let audio = temporary.appendingPathComponent("a.wav")
+
+        func makeSupervisor() async throws -> (WorkerSupervisor, RecordingSink) {
+            let sink = RecordingSink()
+            let supervisor = WorkerSupervisor()
+            supervisor.logSink = sink
+            try supervisor.start(pythonURL: URL(fileURLWithPath: "/usr/bin/python3"), workerURL: script, workingDirectory: temporary)
+            try await waitUntil { supervisor.state == .ready }
+            return (supervisor, sink)
+        }
+
+        // transcriptionAlreadyActive
+        var (supervisor, sink) = try await makeSupervisor()
+        let first = try supervisor.transcribe(audioURL: audio, modelName: "base")
+        #expect(throws: WorkerSupervisorError.transcriptionAlreadyActive) {
+            try supervisor.transcribe(audioURL: audio, modelName: "base")
+        }
+        var rejected = try #require(sink.entries.first { $0.event == "submit_rejected" })
+        #expect(rejected.level == .error)
+        #expect(rejected.detail?.contains("reason=transcriptionAlreadyActive") == true)
+        #expect(rejected.detail?.contains("active_request=\(first.prefix(8))") == true)
+        #expect(rejected.detail?.contains("state=ready") == true)
+        supervisor.stop()
+
+        // modelOperationActive
+        (supervisor, sink) = try await makeSupervisor()
+        _ = try supervisor.requestModelStatus(modelName: "base")
+        #expect(throws: WorkerSupervisorError.modelOperationActive) {
+            try supervisor.transcribe(audioURL: audio, modelName: "base")
+        }
+        rejected = try #require(sink.entries.first { $0.event == "submit_rejected" })
+        #expect(rejected.detail?.contains("reason=modelOperationActive") == true)
+        #expect(rejected.detail?.contains("active_request=none") == true)
+        supervisor.stop()
+
+        // diarizationOperationActive
+        (supervisor, sink) = try await makeSupervisor()
+        _ = try supervisor.diarizationWarmup()
+        #expect(throws: WorkerSupervisorError.diarizationOperationActive) {
+            try supervisor.transcribe(audioURL: audio, modelName: "base")
+        }
+        rejected = try #require(sink.entries.first { $0.event == "submit_rejected" })
+        #expect(rejected.detail?.contains("reason=diarizationOperationActive") == true)
+        supervisor.stop()
+    }
+
+    @Test
+    func lifecycleEventsUseNoticeLevelSoTheyPersist() async throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let script = temporary.appendingPathComponent("fake_worker.py")
+        try Self.workerScript.write(to: script, atomically: true, encoding: .utf8)
+        let sink = RecordingSink()
+        let supervisor = WorkerSupervisor()
+        supervisor.logSink = sink
+        try supervisor.start(pythonURL: URL(fileURLWithPath: "/usr/bin/python3"), workerURL: script, workingDirectory: temporary)
+        try await waitUntil { supervisor.state == .ready }
+        _ = try supervisor.transcribe(audioURL: temporary.appendingPathComponent("a.wav"), modelName: "base")
+        try await waitUntil { supervisor.jobStatus == "Completed" }
+        supervisor.stop()
+
+        for event in ["worker_start", "worker_ready", "job_submitted", "job_accepted", "job_completed", "worker_stopped"] {
+            #expect(sink.entries.first { $0.event == event }?.level == .notice, "\(event)")
+        }
+        #expect(sink.entries.first { $0.event == "job_progress" }?.level == .debug)
+    }
+
+    @Test
+    func queueSubmitFailureIsLoggedRedactedAndPausedOnlyOnce() {
+        let collector = MessageCollector()
+        MixedSettingsDiagnostics.observer = { collector.add($0) }
+        defer { MixedSettingsDiagnostics.observer = nil }
+        let transcriber = ThrowingTranscriber()
+        let scheduler = CapturingPauseScheduler()
+        let queue = OrderedChunkSubmissionQueue(
+            transcriber: transcriber, modelName: "base", pauseRecoveryScheduler: scheduler
+        )
+        let id = MixedSettingsDiagnostics.identity(queue)
+
+        queue.enqueue(URL(fileURLWithPath: "/tmp/chunk.wav"))
+        for _ in 0..<4 { scheduler.fire() }
+
+        #expect(transcriber.attempts == 5)
+        let failures = collector.messages(containing: "queue_submit_failed queue=\(id)")
+        #expect(failures.count == 5)
+        for line in failures {
+            #expect(line.contains("SubmitFailure"))
+            #expect(!line.contains("Da Qing"))
+            #expect(line.contains("/Users/<redacted>/x.wav"))
+        }
+        #expect(collector.messages(containing: "queue_paused queue=\(id)").count == 1)
+        #expect(collector.messages(containing: "queue_paused queue=\(id) pending=1").count == 1)
+
+        // A successful submission ends the episode: the next failure logs a fresh pause.
+        transcriber.failing = false
+        scheduler.fire()
+        #expect(queue.activeURL != nil)
+    }
+
+
     @Test
     func lifecycleEventsReachLoggerWithSessionAndRequestIDs() async throws {
         let temporary = FileManager.default.temporaryDirectory
@@ -295,6 +444,13 @@ struct WorkerDiagnosticsTests {
         marker.write_text("1")
         sys.stderr.write("simulated crash\\n")
         sys.exit(3)
+    print(json.dumps({"protocol":"whisper.worker","version":1,"type":"event","request_id":"worker","event":"ready","payload":{"status":"ready"}}), flush=True)
+    for line in sys.stdin:
+        pass
+    """
+
+    private static let silentWorkerScript = """
+    import json, sys
     print(json.dumps({"protocol":"whisper.worker","version":1,"type":"event","request_id":"worker","event":"ready","payload":{"status":"ready"}}), flush=True)
     for line in sys.stdin:
         pass

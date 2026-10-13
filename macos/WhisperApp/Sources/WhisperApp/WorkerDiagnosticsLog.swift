@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 
 enum WorkerLogLevel: String, Sendable {
-    case debug, info, error
+    case debug, info, notice, error
 }
 
 /// One structured Worker lifecycle record. `sessionID` is minted per `WorkerSupervisor.start`
@@ -100,6 +100,7 @@ struct OSLogWorkerSink: WorkerLogSink {
         switch entry.level {
         case .debug: logger.debug("\(message, privacy: .public)")
         case .info: logger.info("\(message, privacy: .public)")
+        case .notice: logger.notice("\(message, privacy: .public)")
         case .error: logger.error("\(message, privacy: .public)")
         }
     }
@@ -174,8 +175,12 @@ enum MixedSettingsDiagnostics {
         "model=\(model) language=\(language ?? "auto") domain=\(domain) extra_chars=\(extraTerms.count)"
     }
 
+    /// Test hook: observes every message (production leaves it nil).
+    nonisolated(unsafe) static var observer: (@Sendable (String) -> Void)?
+
     /// `.notice` (default level) so entries persist for `log show` without `--info`.
     static func log(_ message: String) {
+        observer?(message)
         logger.notice("\(message, privacy: .public)")
     }
 }

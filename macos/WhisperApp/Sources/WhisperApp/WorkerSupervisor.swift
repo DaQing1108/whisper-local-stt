@@ -172,7 +172,7 @@ final class WorkerSupervisor {
 
     /// Writes a redacted lifecycle log for the current session; never throws.
     private func log(
-        _ event: String, level: WorkerLogLevel = .info,
+        _ event: String, level: WorkerLogLevel = .notice,
         requestID: String? = nil, jobID: String? = nil, detail: String? = nil
     ) {
         logSink.record(WorkerLogEntry(
@@ -180,6 +180,22 @@ final class WorkerSupervisor {
             requestID: requestID, jobID: jobID ?? activeJobID,
             detail: detail.map { WorkerDiagnosticsRedactor.sanitizeDetail($0) }
         ))
+    }
+
+    private func logSubmitRejected(_ reason: String) {
+        let active = activeRequestID.map { String($0.prefix(8)) } ?? "none"
+        log("submit_rejected", level: .error,
+            detail: "reason=\(reason) active_request=\(active) state=\(Self.shortDescription(of: state))")
+    }
+
+    private static func shortDescription(of state: WorkerState) -> String {
+        switch state {
+        case .stopped: "stopped"
+        case .starting: "starting"
+        case .restarting(let attempt): "restarting(\(attempt))"
+        case .ready: "ready"
+        case .failed: "failed"
+        }
     }
 
     /// Exports the app's recent structured Worker log (redacted) to a temporary file.
@@ -373,9 +389,18 @@ final class WorkerSupervisor {
         domain: String,
         extraTerms: String
     ) throws -> String {
-        guard activeRequestID == nil else { throw WorkerSupervisorError.transcriptionAlreadyActive }
-        guard !modelOperationInProgress else { throw WorkerSupervisorError.modelOperationActive }
-        guard !diarizationOperationInProgress else { throw WorkerSupervisorError.diarizationOperationActive }
+        guard activeRequestID == nil else {
+            logSubmitRejected("transcriptionAlreadyActive")
+            throw WorkerSupervisorError.transcriptionAlreadyActive
+        }
+        guard !modelOperationInProgress else {
+            logSubmitRejected("modelOperationActive")
+            throw WorkerSupervisorError.modelOperationActive
+        }
+        guard !diarizationOperationInProgress else {
+            logSubmitRejected("diarizationOperationActive")
+            throw WorkerSupervisorError.diarizationOperationActive
+        }
         let requestID = UUID().uuidString
         var payload: [String: JSONValue] = [
             "audio_path": .string(audioURL.path),
