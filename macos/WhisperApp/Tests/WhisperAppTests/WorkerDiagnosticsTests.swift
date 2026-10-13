@@ -236,6 +236,19 @@ struct WorkerDiagnosticsTests {
         #expect(section.count <= WorkerDiagnosticsExporter.stderrTailLimit + 2)
     }
 
+    @Test
+    func mixedSettingsDiagnosticsNeverIncludeExtraTermContentAndIdentityIsStable() {
+        let object = NSObject()
+        #expect(MixedSettingsDiagnostics.identity(object) == MixedSettingsDiagnostics.identity(object))
+        #expect(MixedSettingsDiagnostics.identity(object).count <= 8)
+        #expect(MixedSettingsDiagnostics.identity(object) != MixedSettingsDiagnostics.identity(NSObject()))
+        let line = MixedSettingsDiagnostics.describe(
+            model: "large-v3-turbo", language: nil, domain: "media", extraTerms: "SecretVocab"
+        )
+        #expect(line == "model=large-v3-turbo language=auto domain=media extra_chars=11")
+        #expect(!line.contains("SecretVocab"))
+    }
+
     private func waitUntil(
         timeout: Duration = .seconds(20), condition: @escaping @MainActor () -> Bool
     ) async throws {

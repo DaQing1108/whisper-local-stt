@@ -157,7 +157,11 @@ final class OrderedChunkSubmissionQueue {
     private(set) var activeRequestID: String?
     private(set) var completedURLs: [URL] = []
     private(set) var errorMessage: String?
-    var modelName: String
+    var modelName: String {
+        didSet {
+            MixedSettingsDiagnostics.log("queue_model_set queue=\(MixedSettingsDiagnostics.identity(self)) model=\(modelName)")
+        }
+    }
     var language: String?
     var domain: String
     var extraTerms: String
@@ -191,6 +195,10 @@ final class OrderedChunkSubmissionQueue {
         self.jobStallTimeout = jobStallTimeout
         self.pauseRecoveryPollInterval = pauseRecoveryPollInterval
         self.pauseRecoveryScheduler = pauseRecoveryScheduler
+        MixedSettingsDiagnostics.log(
+            "queue_init queue=\(MixedSettingsDiagnostics.identity(self)) "
+            + "transcriber=\(MixedSettingsDiagnostics.identity(transcriber)) model=\(modelName)"
+        )
         _ = transcriber.addTerminalObserver { [weak self] requestID, status in
             self?.jobDidReachTerminal(requestID: requestID, status: status)
         }
@@ -231,6 +239,10 @@ final class OrderedChunkSubmissionQueue {
         guard !isPausedAfterFailure, activeURL == nil, !pendingURLs.isEmpty,
               transcriber.state == .ready else { return }
         let next = pendingURLs.removeFirst()
+        MixedSettingsDiagnostics.log(
+            "queue_submit \(MixedSettingsDiagnostics.describe(model: modelName, language: language, domain: domain, extraTerms: extraTerms)) "
+            + "queue=\(MixedSettingsDiagnostics.identity(self))"
+        )
         do {
             activeRequestID = try transcriber.transcribe(
                 audioURL: next, modelName: modelName, language: language,

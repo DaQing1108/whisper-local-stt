@@ -159,3 +159,23 @@ struct WorkerDiagnosticsExporter {
         }
     }
 }
+
+/// Temporary instrumentation for "mixed-mode settings not applied" (category MixedSettings).
+/// Logs only model/language/domain and the *length* of extra terms, never their content.
+enum MixedSettingsDiagnostics {
+    private static let logger = Logger(subsystem: WorkerDiagnosticsLogging.subsystem, category: "MixedSettings")
+
+    /// Last 8 hex digits of the object's identity, to tell instances apart in the log.
+    static func identity(_ object: AnyObject) -> String {
+        String(String(UInt(bitPattern: ObjectIdentifier(object).hashValue), radix: 16).suffix(8))
+    }
+
+    static func describe(model: String, language: String?, domain: String, extraTerms: String) -> String {
+        "model=\(model) language=\(language ?? "auto") domain=\(domain) extra_chars=\(extraTerms.count)"
+    }
+
+    /// `.notice` (default level) so entries persist for `log show` without `--info`.
+    static func log(_ message: String) {
+        logger.notice("\(message, privacy: .public)")
+    }
+}

@@ -231,6 +231,10 @@ final class MixedAudioRecordingController {
         self.language = language
         self.domain = domain
         self.extraTerms = extraTerms
+        MixedSettingsDiagnostics.log(
+            "mixed_settings_applied \(MixedSettingsDiagnostics.describe(model: model, language: language, domain: domain, extraTerms: extraTerms)) "
+            + "queue=\(MixedSettingsDiagnostics.identity(submissionQueue)) ctrl=\(MixedSettingsDiagnostics.identity(self))"
+        )
     }
 
     init(
@@ -262,10 +266,17 @@ final class MixedAudioRecordingController {
         submissionQueue.queueDrainedHandler = { [weak self] in
             self?.removeCompletedChunkFiles()
         }
+        MixedSettingsDiagnostics.log(
+            "mixed_init ctrl=\(MixedSettingsDiagnostics.identity(self)) queue=\(MixedSettingsDiagnostics.identity(submissionQueue))"
+        )
         systemBackend.setErrorHandler { [weak self] error in self?.errorBox?.record(error) }
     }
 
     func start(outputURL: URL, includeMicrophone: Bool = true) async throws {
+        MixedSettingsDiagnostics.log(
+            "mixed_start queue=\(MixedSettingsDiagnostics.identity(submissionQueue)) ctrl=\(MixedSettingsDiagnostics.identity(self)) "
+            + "model=\(modelName) extra_chars=\(extraTerms.count)"
+        )
         guard !isStarting, stopTask == nil, canStart else {
             throw MixedAudioRecordingError.recordingAlreadyActive
         }
