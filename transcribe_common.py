@@ -40,6 +40,8 @@ _FAKE_SUBTITLE_RES = [re.compile(p) for p in (
     r'請不吝點贊',
     r'请不吝点赞',
     r'明鏡與點點欄目',
+    # Credit-only line: 字幕作成者／制作者／製作者／志願者 + optional short name (whole segment).
+    r'^\s*字幕[^\s，。,.:：]{1,4}者[\s:：]*[^\s，。,.]{0,6}\s*$',
 )]
 
 # Consecutive identical segments (after normalisation) kicking in at this run length / size.

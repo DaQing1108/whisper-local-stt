@@ -273,3 +273,24 @@ class TestConsecutiveRepeatAndFakeSubtitles:
     ])
     def test_generic_sign_offs_are_kept(self, text):
         assert len(clean_segments(_segs(text))) == 1
+
+
+class TestGeneralizedCreditLines:
+    @pytest.mark.parametrize("text", [
+        "字幕作成者 李宗盛",
+        "字幕制作者 王小明",
+        "字幕製作者",
+        "字幕志願者 楊棟樑",
+    ])
+    def test_credit_only_lines_are_dropped(self, text):
+        result = clean_segments(_segs("正常內容在這裡", text))
+        assert [s["text"] for s in result] == ["正常內容在這裡"]
+
+    @pytest.mark.parametrize("text", [
+        "這個字幕組的人很用心",
+        "幫我把字幕對時間",
+        "字幕製作者就是他本人，我昨天跟他聊過",
+        "字幕製作者名單請看下方說明欄",
+    ])
+    def test_normal_sentences_mentioning_subtitles_are_kept(self, text):
+        assert len(clean_segments(_segs(text))) == 1
