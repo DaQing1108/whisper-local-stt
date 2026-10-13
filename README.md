@@ -1,6 +1,14 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
+Last checkpoint: 2026-10-13 15:00
+Phase: 送出失敗原因記錄、假字幕規則泛化、講者辨識進行中錄音提示上線，版號 0.2.6 → 0.2.7（`9aea5e3`、`b594b17`、`9f79c22`、`39a43bf`；皆 push 並安裝到 `~/Applications/Whisper Swift.app`）。
+Working: (1) 診斷：`WorkerSupervisor.transcribe` 的三個 guard 拒絕時以 error 等級記 `submit_rejected`（reason=transcriptionAlreadyActive/modelOperationActive/diarizationOperationActive、active_request 前 8 碼、state）；`OrderedChunkSubmissionQueue` 送出失敗記 `queue_submit_failed`（脫敏）並於每個失敗 episode 首次記一次 `queue_paused`；Worker/job 生命週期事件由 info 改 notice 等級，會持久化到 unified log（`/usr/bin/log show --predicate 'subsystem == "com.via.whisper-swiftui"'` 不加 --info 也看得到）。(2) `clean_segments` 假字幕規則新增 `^\s*字幕[^\s，。,.:：]{1,4}者[\s:：]*[^\s，。,.]{0,6}\s*$`，涵蓋 字幕作成者／制作者／製作者／志願者＋人名；用 142 份歷史重放只多抓到 2 行（字幕作成者 李宗盛），字幕機／中文字幕等真實內容保留。(3) 錄音區新增提示（`CaptureUIRules.transcriptionDeferralNotice`）：講者辨識或模型操作進行中且正在錄音時顯示橘色小字「…這次錄音的轉錄會等…才開始（錄音檔會正常儲存）」，不阻擋開始錄音。測試：`tests/unit` 379、`swift test` 243 通過。
+根因（已由使用者確認）：講者辨識尚未結束就開始新會議錄音；Worker 同一時間只做一件事，辨識進行中拒絕新轉錄，錄音中各段送出失敗（63 次、每 5 秒重試），停止後才補轉；逐字稿與錄音檔完整，只是失去即時預覽。程式缺口：`canStartMixedAudioRecording`/`canStartLiveRecording` 只檢查 `worker.activeRequestID == nil`。
+Next action: 觀察下次講者辨識進行中錄音時提示是否出現且清楚（AC-5）；看門狗在 app 內真的觸發（診斷出現 beam_size=1）；`MixedSettings` 暫時診斷日誌穩定後請 `whisper-d5` 移除；是否把講者辨識獨立成另一個 Worker 行程（根本解法）；`exportDiagnostics()` 接 UI；Swift 端單段重試上限視診斷決定。
+Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍）
+
+### 舊記錄
 Last checkpoint: 2026-10-13 11:30
 Phase: 結構化診斷、混音設定修正、`clean_segments` 幻覺過濾上線，版號 0.2.5 → 0.2.6（`237e15c`、`b4034f1`、`5fc1a43`、`2376c60`、`55172bd`、`7294e76`；皆 push 並安裝到 `~/Applications/Whisper Swift.app`）。
 Working: (1) Swift 端 `WorkerSupervisor` 用 `os.Logger`（subsystem `com.via.whisper-swiftui`，category `WorkerLifecycle`）記錄 worker/job 生命週期，帶 sessionID/requestID/jobID；`exportDiagnostics()` 用 `OSLogStore` 匯出並脫敏（`/Users/<name>`、`file://`、`%2F`、`/var/folders` 檔名、sk-/hf_/Bearer 等密鑰、NSUserName/NSHomeDirectory；detail 先遮後截 200 字，stderr tail 取最後 4000 字）；已用 `log show` 在簽章版實測看到帶 sessionID 的事件；`exportDiagnostics()` 尚未接到 UI 按鈕。(2) 混音模式修正：`startMixedAudioRecording()` 開始前呼叫新增的 `MixedAudioRecordingController.applySettings(model:language:domain:extraTerms:)`，修好 7/20 起「錄音中各段用寫死的 base 且不套詞彙提示、僅按停止時最後一段套用」的缺陷；實機 33 分鐘正式會議驗證：65 段全部 large-v3-turbo、詞彙 392 字，無慢速/失敗，歷史紀錄 model 正確。附暫時性診斷日誌（category `MixedSettings`：mixed_init/mixed_settings_applied/mixed_start/queue_init/queue_model_set/queue_submit），待確認穩定後移除。(3) `transcribe_common.clean_segments` 新增：連續 ≥3 段（去標點後相同且 ≥4 字）只留第一段；≤40 字固定假字幕（字幕志願者、字幕由…提供/Amara.org、請不吝點贊…、明鏡與點點欄目）丟棄；通用結尾語（謝謝觀看/下次見）刻意不處理（錄影片時是真內容）。用 142 份歷史逐字稿（48,998 段）重放：移除 31 段假字幕與 121 段連續重複（32 處），無意外移除；僅對之後的轉錄有效，不回溯已存逐字稿。測試：`tests/unit` 371、`swift test` 236 通過。
@@ -68,6 +76,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-10-13 15:00｜送出失敗記錄、假字幕泛化、辨識進行中錄音提示上線，版號 0.2.7
+- Completed: 為「錄音中途沒有即時轉錄」加診斷並由使用者確認根因（講者辨識進行中又開始錄音）；上線 submit_rejected／queue_submit_failed／queue_paused 日誌與 notice 持久化（獨立審查 APPROVE）；假字幕規則泛化（歷史重放驗證）；錄音區「轉錄會延後」提示；版號 0.2.6→0.2.7；與 `whisper-d5` 分工（本 session 規劃/驗收/push/打包）
+- State: `tests/unit` 379、`swift test` 243 通過；0.2.7 已安裝，簽章驗證通過；打包踩坑：`dist/` 在 iCloud 目錄，隔離屬性（quarantine）與 FinderInfo 會被加回，導致簽章失效、複製後 app 被系統移走一次（已從 .bak 還原）；之後流程改為：清 dist/WhisperWorker 的 ` 2` 副本與 quarantine → 組裝 → 立刻 `ditto --noqtn` 到 /tmp 暫存 → 清屬性、`codesign --verify`、Gate B → 才安裝到 ~/Applications 並再驗
+- Next: 觀察提示與日誌；視需要把講者辨識獨立成另一個 Worker 行程、移除 MixedSettings 暫時日誌、`exportDiagnostics()` 接 UI
+
 ### 2026-10-13 11:30｜結構化診斷、混音設定修正、幻覺過濾上線，版號 0.2.6
 - Completed: Swift 端結構化診斷（os.Logger + 脫敏匯出，經獨立審查兩輪 APPROVE）；找出並修復混音模式開始錄音時不套用模型/語言/領域/詞彙的缺陷（第一次修正在實機無效，加診斷日誌後改以正式會議驗證）；`clean_segments` 新增連續重複與固定假字幕過濾（歷史重放驗證）；版號 0.2.5→0.2.6；清理 /tmp 暫存、deepdml 測試模型、4426 個未被引用的錄音中間片段、過時 worktree/分支；皆與 `whisper-d5` 分工（本 session 規劃/驗收/push/打包）
 - State: `tests/unit` 371、`swift test` 236 通過；已安裝版（0.2.6）簽章驗證通過且與組裝產物一致；真實 33 分鐘會議 65 段全為 large-v3-turbo；`dist/` 在 iCloud 目錄，打包前後都要檢查並清除「檔名 2」重複副本，且 `FinderInfo` 需清到簽章驗證通過
