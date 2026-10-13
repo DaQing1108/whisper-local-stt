@@ -73,12 +73,16 @@ private final class MixedTranscriber: LiveAudioTranscribing {
     private var readyObservers: [UUID: @MainActor @Sendable () -> Void] = [:]
     private var unavailableObservers: [UUID: @MainActor @Sendable (WorkerState) -> Void] = [:]
     private(set) var submittedURLs: [URL] = []
+    private(set) var submittedModels: [String] = []
+    private(set) var submittedLanguages: [String?] = []
     private(set) var requestIDs: [String] = []
     var transcribeError: Error?
     func cancel() throws {}
     func transcribe(audioURL: URL, modelName: String, language: String?) throws -> String {
         if let transcribeError { throw transcribeError }
         submittedURLs.append(audioURL)
+        submittedModels.append(modelName)
+        submittedLanguages.append(language)
         let requestID = UUID().uuidString
         requestIDs.append(requestID)
         return requestID
@@ -202,6 +206,43 @@ struct MixedAudioRecordingControllerTests {
         #expect(controller.finalizedChunkURLs.count == 3)
         #expect(mic.stopCount == 1)
         #expect(system.stopCount == 1)
+        try? FileManager.default.removeItem(at: url)
+        for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+    }
+
+    @Test
+    func appliedSettingsReachMidSessionChunksInsteadOfQueueDefaults() async throws {
+        let mic = MixedMicrophoneBackend()
+        let system = MixedSystemBackend()
+        let scheduler = MixedScheduler()
+        let transcriber = MixedTranscriber()
+        let controller = MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: true),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic,
+            systemBackend: system,
+            scheduler: scheduler,
+            transcriber: transcriber,
+            chunkRotationDecider: testChunkRotationDecider()
+        )
+        #expect(controller.modelName == "base")
+
+        controller.applySettings(model: "large-v3-turbo", language: "zh", domain: "media", extraTerms: "VIA")
+        #expect(controller.modelName == "large-v3-turbo")
+        #expect(controller.language == "zh")
+        #expect(controller.domain == "media")
+        #expect(controller.extraTerms == "VIA")
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-\(UUID()).wav")
+        try await controller.start(outputURL: url)
+        mic.emit(loudSamples())
+        system.emit(loudSamples())
+        scheduler.fire()
+
+        #expect(transcriber.submittedModels == ["large-v3-turbo"])
+        #expect(transcriber.submittedLanguages == ["zh"])
+        #expect(controller.modelName == "large-v3-turbo")
+        _ = try? await controller.stopAndTranscribe(modelName: "large-v3-turbo")
         try? FileManager.default.removeItem(at: url)
         for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
     }

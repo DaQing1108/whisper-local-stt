@@ -170,6 +170,10 @@ extension ContentView {
 
     func startMixedAudioRecording() {
         mixedAudioHistoryEntryID = nil
+        mixedAudioRecording.applySettings(
+            model: settings.defaultModel, language: settings.language,
+            domain: settings.domain, extraTerms: effectiveExtraTerms
+        )
         Task {
             do {
                 let url = try MixedAudioRecordingController.makeSessionOutputURL()

@@ -224,6 +224,15 @@ final class MixedAudioRecordingController {
         set { submissionQueue.extraTerms = newValue }
     }
 
+    /// Applies the user's current settings to the chunk queue before recording starts, so
+    /// chunks submitted mid-session use them instead of the queue's built-in defaults.
+    func applySettings(model: String, language: String?, domain: String, extraTerms: String) {
+        modelName = model
+        self.language = language
+        self.domain = domain
+        self.extraTerms = extraTerms
+    }
+
     init(
         microphonePermission: any MicrophonePermissionProviding,
         screenPermission: SystemAudioPermissionController,
