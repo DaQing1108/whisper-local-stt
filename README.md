@@ -4,7 +4,7 @@
 Last checkpoint: 2026-10-14 11:30
 Phase: 會後「詞彙建議」功能上線（AI Summary 分頁「建議詞彙」按鈕；`0c0741c`，已 push 並安裝到 `~/Applications/Whisper Swift.app`）。
 Working: 使用者按鈕觸發才把畫面上的逐字稿送 LLM（沿用摘要供應商與金鑰），回傳 JSON 候選詞；app 端過濾（不分大小寫去重既有詞彙、長度 1–40 且無換行、回應內去重、最多 20 筆）；使用者逐個或「全部加入」寫入 `VocabularyStore`，不自動觸發、不自動寫入。新增 `VocabularySuggestionClient/Controller`、`ContentView+VocabularySuggestions`，`VocabularyStore` 僅新增 `addAll`；零觸碰 Python／Package.swift／scripts／`MeetingSummaryClient`。驗收：`swift test` 與 `--sanitize=thread` 各 264 通過（規劃端獨立重跑）；新舊 `vocabulary.json` 互讀。分工：本 session 規劃／spec／驗收／push／打包，開發由 `whisper-d3` 完成（規格 `HANDOFF_CLAUDE_VOCAB_SUGGESTIONS.md`）。
-Next action: 使用者用真實會議逐字稿按「建議詞彙」，驗證真實 OpenAI／Anthropic 是否穩定回純 JSON、建議品質與畫面排版；確認後刪除 `~/Applications/Whisper Swift.app.bak`。
+Next action: 使用者已於 2026-10-14 真機驗證「建議詞彙」正常（按鈕、候選詞、加入詞庫）；舊版備份 `.bak` 已刪除。後續觀察多場會議的建議品質；是否做 Obsidian／Notion 批次抽詞（另案）。
 Blockers: none（Gate E 仍待憑證，非本輪範圍）
 
 ### 舊記錄
