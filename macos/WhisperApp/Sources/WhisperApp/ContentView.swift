@@ -37,6 +37,8 @@ struct ContentView: View {
     @State var transientEntry: TranscriptionHistoryEntry?
     @State var transcriptDraft = ""
     @State var isDraftDirty = false
+    @State var isEditingTranscript = false
+    @State var isTranscriptListAtBottom = true
     @State var diarizationTargetEntryID: UUID?
 @State var retranscribeTargetEntryID: UUID?
     @State var knownSpeakerCount = ""

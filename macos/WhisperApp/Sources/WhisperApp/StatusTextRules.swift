@@ -106,3 +106,35 @@ enum StatusTextRules {
         }
     }
 }
+
+/// What the transcript area shows. Reading mode (default) is the clickable timecode list;
+/// editing mode is the text editor — never both at once.
+enum TranscriptViewRules {
+    enum Body: Equatable {
+        case segmentList
+        case readOnlyText
+        case editor
+    }
+
+    static func body(isEditing: Bool, hasSegments: Bool) -> Body {
+        if isEditing { return .editor }
+        return hasSegments ? .segmentList : .readOnlyText
+    }
+
+    /// Reading mode shows saved segments; flag that the draft has edits not reflected there.
+    static func showsUnsavedNotice(isEditing: Bool, isDraftDirty: Bool) -> Bool {
+        !isEditing && isDraftDirty
+    }
+
+    static func showsClearButton(isEditing: Bool) -> Bool { isEditing }
+
+    static func editToggleLabel(isEditing: Bool) -> String { isEditing ? "完成" : "編輯" }
+
+    /// Job status, progress bar and cancel only while a transcription request is in flight.
+    static func showsJobControls(hasActiveRequest: Bool) -> Bool { hasActiveRequest }
+
+    /// Follow new segments only when the user is already looking at the end of the list.
+    static func shouldAutoScroll(isAtBottom: Bool, segmentCountIncreased: Bool) -> Bool {
+        isAtBottom && segmentCountIncreased
+    }
+}
