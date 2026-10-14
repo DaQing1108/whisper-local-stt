@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import logging
 import os
+import unicodedata
+from collections import Counter
 
 _LLM_PUNCT_PROMPT = """\
 你是繁體中文（台灣）會議記錄的標點符號與用字專家。
@@ -129,6 +131,83 @@ def _llm_call_chunk(chunk: str, provider: str, api_key: str, extra_terms: str = 
 
 _LLM_TOTAL_TIMEOUT = 30  # 整體 LLM 後處理上限（秒）
 
+# ── LLM 輸出驗證：輸出不像「原文加標點」時該段退回原文 ─────────────────
+# 後設回覆（拒答、要求補資料、自我說明）常見樣式；原文本身含有時不算。
+_META_REPLY_MARKERS = (
+    "無法處理", "請提供", "我會按照", "作為AI", "作為一個", "ASR", "語音辨識原始輸出",
+    "I cannot", "I can't", "As an AI", "Please provide",
+)
+PUNCT_LENGTH_RATIO_MIN = 0.7   # 去標點與空白後，輸出字數 ÷ 原文字數 的下限
+PUNCT_LENGTH_RATIO_MAX = 1.3   # 上限
+PUNCT_LINE_CHECK_MIN_LINES = 3  # 原文至少幾行才檢查行數
+PUNCT_LINE_DIFF_MAX = 0.2       # 非空行數差異上限（相對原文）
+
+
+def _content_length(text: str) -> int:
+    """去除空白與標點後的字數。"""
+    return sum(
+        1 for ch in text
+        if not ch.isspace() and not unicodedata.category(ch).startswith("P")
+    )
+
+
+def _non_empty_lines(text: str) -> int:
+    return sum(1 for line in text.split("\n") if line.strip())
+
+
+def is_plausible_punctuation(
+    original: str, output: str, check_structure: bool = True,
+) -> tuple[bool, str]:
+    """判斷 LLM 輸出是否像「原文加標點」；回傳 (是否通過, reason 代碼)。
+
+    reason：ok / meta_reply / length_ratio / line_count。
+    check_structure=False 時只檢查後設回覆：使用者自訂 prompt（LLM_CUSTOM_PROMPT）可能
+    刻意刪贅字或改寫，長度與行數本來就會變。
+    """
+    original_folded, output_folded = original.casefold(), output.casefold()
+    for marker in _META_REPLY_MARKERS:
+        folded = marker.casefold()
+        if folded in output_folded and folded not in original_folded:
+            return False, "meta_reply"
+    if not check_structure:
+        return True, "ok"
+
+    original_len, output_len = _content_length(original), _content_length(output)
+    if original_len == 0:
+        if output_len:
+            return False, "length_ratio"
+    else:
+        ratio = output_len / original_len
+        if not PUNCT_LENGTH_RATIO_MIN <= ratio <= PUNCT_LENGTH_RATIO_MAX:
+            return False, "length_ratio"
+
+    original_lines = _non_empty_lines(original)
+    if original_lines >= PUNCT_LINE_CHECK_MIN_LINES:
+        if abs(_non_empty_lines(output) - original_lines) / original_lines > PUNCT_LINE_DIFF_MAX:
+            return False, "line_count"
+    return True, "ok"
+
+
+def _validated_chunks(chunks: list[str], outputs: list[str], provider: str) -> list[str]:
+    """逐段驗證 LLM 輸出；不通過的段落改用原文。log 只記 reason 代碼與數量。"""
+    check_structure = not os.environ.get("LLM_CUSTOM_PROMPT", "").strip()
+    rejected: Counter = Counter()
+    results = []
+    for chunk, output in zip(chunks, outputs):
+        ok, reason = is_plausible_punctuation(chunk, output, check_structure)
+        if ok:
+            results.append(output)
+        else:
+            rejected[reason] += 1
+            results.append(chunk)
+    if rejected:
+        logging.warning(
+            "[LLM:%s] %d/%d 段輸出未通過驗證，改用原文：%s",
+            provider, sum(rejected.values()), len(chunks),
+            ", ".join(f"{reason}={count}" for reason, count in sorted(rejected.items())),
+        )
+    return results
+
 
 def _llm_punctuate_inner(text: str, extra_terms: str, provider: str, api_key: str) -> str:
     MAX_CHARS = 1500
@@ -145,8 +224,8 @@ def _llm_punctuate_inner(text: str, extra_terms: str, provider: str, api_key: st
     if buf:
         chunks.append("\n".join(buf))
 
-    results = [_llm_call_chunk(c, provider, api_key, extra_terms) for c in chunks]
-    refined = "\n".join(results)
+    outputs = [_llm_call_chunk(c, provider, api_key, extra_terms) for c in chunks]
+    refined = "\n".join(_validated_chunks(chunks, outputs, provider))
 
     if len(refined) > len(text) * 3:
         logging.warning("[LLM:%s] 回傳疑似 meta-response（%d → %d 字），改用原始輸出",
