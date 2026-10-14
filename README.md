@@ -1,10 +1,10 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-10-14 13:30
-Phase: 詞彙 Prompt Token 上限上線（`c1deda5`，Worker 重建並安裝，使用者真機確認詞庫頁顯示正確）。
-Working: faster-whisper 的 initial_prompt 只保留最後 223 token（`448//2-1`），先前詞庫超過時會從開頭默默切掉、甚至留殘字。現在 `fit_prompt_to_budget` 以整個詞為單位從開頭捨棄（未超過時與 `build_prompt` 逐字相同），計法與 faster-whisper 一致（`add_special_tokens=False`）；Worker 新指令 `prompt_budget`（加法，不佔 job）；詞庫頁顯示「X / 223 tokens」、超過時警示並標「不會套用」，建議詞彙加入後超過也會警示；只警示不自動刪詞。使用者詞庫實測 228/223，捨棄 Dream Ku、Michael Chien（bundle 內驗證一致）。測試：pytest 397、swift test 275（含 TSAN）。同日實測否決「錄音後整段重轉」與「前段文字帶入 prompt」（時間碼偏移／副作用多）。
-Next action: 下一輪——依使用頻率決定保留順序；誤聽修正表（建議詞彙的 heard_as 做精確替換，不佔 prompt）。使用者確認後刪 `~/Applications/Whisper Swift.app.bak`。
+Last checkpoint: 2026-10-14 15:00
+Phase: 詞彙智慧保留＋誤聽修正表上線（Part A `091cab7`、Part B `5628110`，Worker 重建並安裝；使用者已開啟，回填在真實資料驗證通過）。
+Working: (A) 送進 prompt 的順序改依「最近活動時間」max(addedAt, lastSeenAt) 由舊到新，最重要的在尾端不被截斷；usage 存 `vocabulary-usage.json`（vocabulary.json 格式不變），首次以歷史回填；實測 228/223 時改為捨棄從未出現的 Steve Liu、Tom Liu（不再是 Dream Ku、Michael Chien）。(B) 誤聽修正規則存 `correction-rules.json`，`transcribe` 新增選填 `corrections`，在 Worker 出口精確替換（ASCII 邊界、長規則優先、區分大小寫）；建議詞彙可勾選一併建立 heard_as→term 規則；bundle 實測 `free 上傳`→`FTP 上傳`、`Briant`→`Brand`。測試：pytest 410、swift test 292（含 TSAN）。
+Next action: 觀察真實會議的修正效果；已知盲點：「從未出現」可能是每次都被聽錯，會被優先捨棄——視情況加「釘選」或請使用者建立修正規則；修正規則區分大小寫，若語意校對改變大小寫導致常失效，評估改不分大小寫。使用者確認後刪 `.bak`。
 Blockers: none（Gate E 仍待憑證，非本輪範圍）
 
 ### 舊記錄
@@ -75,6 +75,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-10-14 15:00｜詞彙智慧保留＋誤聽修正表上線
+- Completed: spec-writer 規格交 whisper-d3 → 規劃端獨立驗收（重跑測試、diff 範圍、bundle 內 corrections 往返）→ ff push → 重建 Worker、打包（再次清除 iCloud 混入副本並重簽）→ 安裝 → 真實資料驗證回填與排序
+- State: 回填 36/50 詞有出現紀錄；捨棄改為從未出現的詞
+- Next: 觀察修正效果；評估釘選與不分大小寫
+
 ### 2026-10-14 13:30｜詞彙 Prompt Token 上限上線
 - Completed: 實測 prompt 截斷問題 → spec-writer 規格交 whisper-d3 → 規劃端獨立驗收（重跑測試、實際詞庫重現 228/223）→ ff push `c1deda5` → 重建 Worker、打包（清除 iCloud 混入的 184 個「 2」副本後重簽）→ 安裝
 - State: 使用者真機確認詞庫頁顯示 228/223 與「不會套用」標示
