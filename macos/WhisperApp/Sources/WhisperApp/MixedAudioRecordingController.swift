@@ -167,7 +167,9 @@ final class MixedAudioRecordingController {
     private(set) var finalizedChunkURLs: [URL] = []
     private(set) var transcriptText = ""
     private(set) var transcriptSegments: [TranscriptionSegment] = []
-    private(set) var transcriptDurationSeconds: Double = 0
+    /// Session timeline: chunks applied in finalize order, advanced by real audio length.
+    private var timeline = ChunkTimeline()
+    var transcriptDurationSeconds: Double { timeline.durationSeconds }
     private(set) var sessionFinalizedURL: URL?
     let submissionQueue: OrderedChunkSubmissionQueue
 
@@ -308,7 +310,7 @@ final class MixedAudioRecordingController {
         completedChunkURLs = []
         transcriptText = ""
         transcriptSegments = []
-        transcriptDurationSeconds = 0
+        timeline = ChunkTimeline()
         sessionFinalizedURL = nil
         didFinalFlush = false
         isHandlingCaptureFailure = false
@@ -586,6 +588,9 @@ final class MixedAudioRecordingController {
     private func acceptFinalizedChunk(_ url: URL) {
         lastFinalizedURL = url
         finalizedChunkURLs.append(url)
+        timeline.register(url)
+        // A silent chunk is judged instantly but still waits in `timeline` for any earlier
+        // chunk that is being transcribed, so it can't jump ahead on the timeline.
         guard !AudioChunkSilenceDetector.isSilent(contentsOf: url) else {
             let duration = AudioChunkSilenceDetector.durationSeconds(contentsOf: url)
             try? FileManager.default.removeItem(at: url)
@@ -614,28 +619,22 @@ final class MixedAudioRecordingController {
         durationSeconds: Double? = nil
     ) -> Bool {
         guard ownsChunk(url), completedChunkURLs.insert(url).inserted else { return false }
-        let chunkText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let offset = transcriptDurationSeconds
-        let maximumSegmentEnd = segments.map(\.end).max() ?? 0
-        let chunkDuration = max(maximumSegmentEnd, durationSeconds ?? flushInterval)
-        var offsetSegments = segments.map {
-            TranscriptionSegment(start: offset + $0.start, end: offset + $0.end, text: $0.text)
-        }
-        if offsetSegments.isEmpty, !chunkText.isEmpty {
-            offsetSegments = [TranscriptionSegment(
-                start: offset, end: offset + chunkDuration, text: chunkText
-            )]
-        }
-        transcriptSegments.append(contentsOf: offsetSegments)
-        let renderedChunk = TranscriptTimecodeFormatter.render(
-            segments: offsetSegments,
-            fallbackText: chunkText,
-            fallbackStart: offset
+        let applied = timeline.complete(
+            url,
+            result: ChunkTimeline.Result(text: text, segments: segments, durationSeconds: durationSeconds),
+            fallbackDuration: flushInterval
         )
-        if !renderedChunk.isEmpty {
-            transcriptText = transcriptText.isEmpty ? renderedChunk : "\(transcriptText)\n\(renderedChunk)"
+        for chunk in applied {
+            transcriptSegments.append(contentsOf: chunk.segments)
+            let renderedChunk = TranscriptTimecodeFormatter.render(
+                segments: chunk.segments,
+                fallbackText: chunk.text,
+                fallbackStart: chunk.offset
+            )
+            if !renderedChunk.isEmpty {
+                transcriptText = transcriptText.isEmpty ? renderedChunk : "\(transcriptText)\n\(renderedChunk)"
+            }
         }
-        transcriptDurationSeconds += max(0, chunkDuration)
         return true
     }
 

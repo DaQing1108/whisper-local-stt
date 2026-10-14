@@ -771,6 +771,74 @@ struct LiveRecordingControllerTests {
     }
 
     @Test
+    func liveTimelineEqualsRealAudioLengthOver200Chunks() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("live-timeline-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let chunks = SimulatedChunk.make(count: 200, seed: 11)
+        let urls = (0..<chunks.count).map { directory.appendingPathComponent("chunk-\($0).wav") }
+        let sequence = ChunkURLSequence(urls)
+        let backend = LiveCaptureBackend()
+        let scheduler = ManualRotationScheduler()
+        let controller = LiveRecordingController(
+            permissionProvider: LivePermissionProvider(), backend: backend, scheduler: scheduler,
+            transcriber: LiveTranscriber(), rotationInterval: 15, outputURLFactory: { try sequence.next() }
+        )
+        await controller.start()
+        for index in chunks.indices {
+            backend.emit(Data([0x01, 0x02]))
+            if index < chunks.count - 1 { scheduler.fire() }
+        }
+        controller.stop()
+        #expect(controller.finalizedChunkURLs == urls)
+
+        for (url, chunk) in zip(urls, chunks) {
+            let offset = controller.transcriptDurationSeconds
+            let before = controller.transcriptSegments.count
+            #expect(controller.acceptCompletedChunk(url, text: "合成", segments: chunk.segments, durationSeconds: chunk.duration))
+            #expect(controller.transcriptSegments[before...].allSatisfy {
+                $0.start >= offset && $0.end <= offset + chunk.duration + 1e-9
+            })
+        }
+
+        #expect(abs(controller.transcriptDurationSeconds - chunks.map(\.duration).reduce(0, +)) < 0.01)
+        let segments = controller.transcriptSegments
+        #expect(zip(segments, segments.dropFirst()).allSatisfy { $0.start <= $1.start })
+    }
+
+    @Test
+    func chunkPreservedWhenWorkerFailsKeepsItsPlaceOnTimeline() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("live-preserved-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let urls = (1...2).map { directory.appendingPathComponent("chunk-\($0).wav") }
+        let sequence = ChunkURLSequence(urls)
+        let backend = LiveCaptureBackend()
+        let scheduler = ManualRotationScheduler()
+        let transcriber = LiveTranscriber()
+        let controller = LiveRecordingController(
+            permissionProvider: LivePermissionProvider(), backend: backend, scheduler: scheduler,
+            transcriber: transcriber, rotationInterval: 15, outputURLFactory: { try sequence.next() }
+        )
+        await controller.start()
+        backend.emit(Data([0x01, 0x02]))
+        scheduler.fire()                              // chunk1：送出
+        backend.emit(Data([0x03, 0x04]))
+        transcriber.becomePermanentlyUnavailable()    // chunk2：保留、未送出
+        #expect(controller.finalizedChunkURLs == urls)
+
+        #expect(controller.acceptCompletedChunk(urls[1], text: "第二段", durationSeconds: 6))
+        #expect(controller.transcriptDurationSeconds == 0)   // 等 chunk1，不插隊
+        #expect(controller.acceptCompletedChunk(urls[0], text: "第一段", durationSeconds: 10))
+        #expect(controller.transcriptSegments == [
+            TranscriptionSegment(start: 0, end: 10, text: "第一段"),
+            TranscriptionSegment(start: 10, end: 16, text: "第二段"),
+        ])
+    }
+
+    @Test
     func acceptCompletedChunkIgnoresDuplicateSubmissionForSameURL() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("live-dedup-\(UUID())", isDirectory: true)

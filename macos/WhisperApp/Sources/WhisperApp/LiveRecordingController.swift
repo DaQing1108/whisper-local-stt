@@ -341,7 +341,9 @@ final class LiveRecordingController {
     private(set) var errorMessage: String?
     private(set) var transcriptText = ""
     private(set) var transcriptSegments: [TranscriptionSegment] = []
-    private(set) var transcriptDurationSeconds: Double = 0
+    /// Session timeline: chunks applied in finalize order, advanced by real audio length.
+    private var timeline = ChunkTimeline()
+    var transcriptDurationSeconds: Double { timeline.durationSeconds }
     private var completedChunkURLs: Set<URL> = []
 
     let submissionQueue: OrderedChunkSubmissionQueue
@@ -419,7 +421,7 @@ final class LiveRecordingController {
         finalizedChunkURLs = []
         transcriptText = ""
         transcriptSegments = []
-        transcriptDurationSeconds = 0
+        timeline = ChunkTimeline()
         completedChunkURLs = []
         guard submissionQueue.isWorkerReady else {
             fail("Python Worker must be ready before live mode starts")
@@ -491,6 +493,7 @@ final class LiveRecordingController {
 
     private func acceptFinalizedChunk(_ url: URL) {
         finalizedChunkURLs.append(url)
+        timeline.register(url)
         submissionQueue.enqueue(url)
     }
 
@@ -506,28 +509,22 @@ final class LiveRecordingController {
         durationSeconds: Double? = nil
     ) -> Bool {
         guard ownsChunk(url), completedChunkURLs.insert(url).inserted else { return false }
-        let chunkText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let offset = transcriptDurationSeconds
-        let maximumSegmentEnd = segments.map(\.end).max() ?? 0
-        let chunkDuration = max(maximumSegmentEnd, durationSeconds ?? rotationInterval)
-        var offsetSegments = segments.map {
-            TranscriptionSegment(start: offset + $0.start, end: offset + $0.end, text: $0.text)
-        }
-        if offsetSegments.isEmpty, !chunkText.isEmpty {
-            offsetSegments = [TranscriptionSegment(
-                start: offset, end: offset + chunkDuration, text: chunkText
-            )]
-        }
-        transcriptSegments.append(contentsOf: offsetSegments)
-        let renderedChunk = TranscriptTimecodeFormatter.render(
-            segments: offsetSegments,
-            fallbackText: chunkText,
-            fallbackStart: offset
+        let applied = timeline.complete(
+            url,
+            result: ChunkTimeline.Result(text: text, segments: segments, durationSeconds: durationSeconds),
+            fallbackDuration: rotationInterval
         )
-        if !renderedChunk.isEmpty {
-            transcriptText = transcriptText.isEmpty ? renderedChunk : "\(transcriptText)\n\(renderedChunk)"
+        for chunk in applied {
+            transcriptSegments.append(contentsOf: chunk.segments)
+            let renderedChunk = TranscriptTimecodeFormatter.render(
+                segments: chunk.segments,
+                fallbackText: chunk.text,
+                fallbackStart: chunk.offset
+            )
+            if !renderedChunk.isEmpty {
+                transcriptText = transcriptText.isEmpty ? renderedChunk : "\(transcriptText)\n\(renderedChunk)"
+            }
         }
-        transcriptDurationSeconds += max(0, chunkDuration)
         return true
     }
 
@@ -552,6 +549,7 @@ final class LiveRecordingController {
         try? backend.stop()
         if let url = try? session.finish() {
             finalizedChunkURLs.append(url)
+            timeline.register(url)
             submissionQueue.preserveWithoutSubmitting(url)
         }
         self.session = nil
@@ -566,6 +564,7 @@ final class LiveRecordingController {
             try? backend.stop()
             if let url = try? session?.finish() {
                 finalizedChunkURLs.append(url)
+                timeline.register(url)
                 submissionQueue.preserveWithoutSubmitting(url)
             }
             session = nil

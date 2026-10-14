@@ -496,6 +496,93 @@ struct MixedAudioRecordingControllerTests {
         for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
     }
 
+    private func makeTimelineController(_ mic: MixedMicrophoneBackend, _ system: MixedSystemBackend,
+                                        _ scheduler: MixedScheduler, _ transcriber: MixedTranscriber) -> MixedAudioRecordingController {
+        MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: true),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic, systemBackend: system, scheduler: scheduler, transcriber: transcriber,
+            flushInterval: 15, chunkRotationDecider: testChunkRotationDecider()
+        )
+    }
+
+    @Test
+    func mixedTimelineEqualsRealAudioLengthOver200Chunks() async throws {
+        let mic = MixedMicrophoneBackend(), system = MixedSystemBackend()
+        let scheduler = MixedScheduler(), transcriber = MixedTranscriber()
+        let controller = makeTimelineController(mic, system, scheduler, transcriber)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-timeline-\(UUID()).wav")
+        try await controller.start(outputURL: url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+        }
+        let chunks = SimulatedChunk.make(count: 200, seed: 7)
+        for _ in chunks {
+            mic.emit(loudSamples())
+            system.emit(loudSamples())
+            scheduler.fire()
+        }
+        #expect(controller.finalizedChunkURLs.count == 200)
+
+        var bounds: [(offset: Double, end: Double)] = []
+        for (chunkURL, chunk) in zip(controller.finalizedChunkURLs, chunks) {
+            let offset = controller.transcriptDurationSeconds
+            let before = controller.transcriptSegments.count
+            #expect(controller.acceptCompletedChunk(chunkURL, text: "合成", segments: chunk.segments, durationSeconds: chunk.duration))
+            for _ in before..<controller.transcriptSegments.count { bounds.append((offset, offset + chunk.duration)) }
+        }
+
+        #expect(abs(controller.transcriptDurationSeconds - chunks.map(\.duration).reduce(0, +)) < 0.01)
+        let segments = controller.transcriptSegments
+        #expect(zip(segments, bounds).allSatisfy { $0.start >= $1.offset && $0.end <= $1.end + 1e-9 })
+        #expect(zip(segments, segments.dropFirst()).allSatisfy { $0.start <= $1.start })
+        _ = try? await controller.stop()
+    }
+
+    @Test
+    func silentChunkWaitsForEarlierChunkStillBeingTranscribed() async throws {
+        let mic = MixedMicrophoneBackend(), system = MixedSystemBackend()
+        let scheduler = MixedScheduler(), transcriber = MixedTranscriber()
+        let controller = makeTimelineController(mic, system, scheduler, transcriber)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-order-\(UUID()).wav")
+        try await controller.start(outputURL: url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+        }
+
+        mic.emit(loudSamples())                       // chunk1：非靜音，送 Worker、尚未完成
+        system.emit(loudSamples())
+        scheduler.fire()
+        mic.emit(Array(repeating: Int16(5), count: 2)) // chunk2：靜音，立即判定
+        system.emit(Array(repeating: Int16(5), count: 2))
+        scheduler.fire()
+        let chunk1 = controller.finalizedChunkURLs[0]
+        #expect(transcriber.submittedURLs == [chunk1])
+        #expect(controller.finalizedChunkURLs.count == 2)
+        #expect(controller.transcriptDurationSeconds == 0)   // 靜音 chunk 不可插隊推進時間軸
+
+        let chunk1Duration = 9.5
+        #expect(controller.acceptCompletedChunk(
+            chunk1, text: "第一段",
+            segments: [TranscriptionSegment(start: 1, end: 11, text: "第一段")],
+            durationSeconds: chunk1Duration
+        ))
+        #expect(controller.transcriptSegments == [TranscriptionSegment(start: 1, end: chunk1Duration, text: "第一段")])
+        #expect(controller.transcriptDurationSeconds == chunk1Duration + Double(2) / 16_000)
+
+        mic.emit(loudSamples())                       // chunk3 從 chunk1＋chunk2 之後開始
+        system.emit(loudSamples())
+        scheduler.fire()
+        #expect(controller.acceptCompletedChunk(
+            controller.finalizedChunkURLs[2], text: "第三段",
+            segments: [TranscriptionSegment(start: 0, end: 2, text: "第三段")], durationSeconds: 2
+        ))
+        #expect(controller.transcriptSegments.last?.start == chunk1Duration + Double(2) / 16_000)
+        _ = try? await controller.stop()
+    }
+
     @Test
     func microphoneStartFailureRollsBackSystemCapture() async {
         let mic = MixedMicrophoneBackend()
