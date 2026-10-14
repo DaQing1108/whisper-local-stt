@@ -5,6 +5,7 @@ import logging
 import re
 import unicodedata
 from collections import Counter
+from typing import Optional
 
 # Whisper phantom output during near-silence: only timestamps, no speech words.
 _TIMESTAMP_ONLY_RE = re.compile(r'^[\s\[\]\d:.–\-]+$')
@@ -48,6 +49,37 @@ _FAKE_SUBTITLE_RES = [re.compile(p) for p in (
 _REPEAT_RUN_MIN = 3
 _REPEAT_MIN_NORMALIZED_LEN = 4
 _NORMALIZE_RE = re.compile(r'[\W_]+')
+# Short segments (1–3 chars normalised, e.g. 謝謝／OK) need a longer run before collapsing,
+# since a few genuine back-to-back「對」「好」are common in conversation.
+_SHORT_REPEAT_RUN_MIN = 5
+_SHORT_REPEAT_MAX_NORMALIZED_LEN = 3
+
+# In-segment loop: the same 1–8 char phrase separated by , ， 、 . 。 or whitespace, repeated
+# back-to-back ≥4 times (「對呀,對呀,對呀,對呀」) → collapsed to one occurrence.
+_LOOP_SEPARATORS = r',，、.。\s'
+_IN_SEGMENT_LOOP_RE = re.compile(
+    rf'(?P<phrase>[^{_LOOP_SEPARATORS}]{{1,8}})(?:[{_LOOP_SEPARATORS}]+(?P=phrase)){{3,}}'
+)
+
+# Chinese numeral list hallucination: ≥10 single numerals (一～十) separated by 、 or comma.
+_NUMERAL_LIST_RE = re.compile(r'[一二三四五六七八九十](?:\s*[、,，]\s*[一二三四五六七八九十]){9,}')
+
+# Foreign-script pollution for zh transcripts: kana, Hangul, Cyrillic, Arabic, accented Latin
+# and U+FFFD. Plain ASCII English (technical terms) is never touched.
+_FOREIGN_CHAR_RE = re.compile(
+    r'[\u3040-\u309F'   # Hiragana
+    r'\u30A0-\u30FA\u30FD-\u30FF'  # Katakana, except ・(U+30FB) and ー(U+30FC) used in Chinese text
+    r'\u31F0-\u31FF'    # Katakana phonetic extensions
+    r'\uFF66-\uFF9F'    # Halfwidth katakana
+    r'\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF'  # Hangul
+    r'\u0400-\u04FF'    # Cyrillic
+    r'\u0600-\u06FF'    # Arabic
+    r'\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F'  # Latin-1 letters + Latin Extended-A/B
+    r'\uFFFD]'          # replacement character
+)
+_FOREIGN_DROP_RATIO = 0.10        # foreign share of content chars at/above which the segment goes
+_FOREIGN_SHORT_SEGMENT_LEN = 6    # segments this short (content chars) go if any foreign char
+_EXTRA_SPACES_RE = re.compile(r'[ \t]{2,}')
 
 DOMAIN_LABELS: dict[str, str] = {
     "media":   "媒體",
@@ -162,13 +194,48 @@ def _collapse_consecutive_repeats(segments: list[dict]) -> tuple[list[dict], int
                 "[CleanSegments] consecutive-repeat rule dropped %d segment(s) repeating '%s'",
                 run - 1, key[:10],
             )
+        elif run >= _SHORT_REPEAT_RUN_MIN and 1 <= len(key) <= _SHORT_REPEAT_MAX_NORMALIZED_LEN:
+            kept.append(segments[index])
+            dropped += run - 1
+            logging.warning("[CleanSegments] short-repeat rule dropped %d segment(s)", run - 1)
         else:
             kept.extend(segments[index:end])
         index = end
     return kept, dropped
 
 
-def clean_segments(segments: list[dict]) -> list[dict]:
+def _content_chars(text: str) -> list[str]:
+    """非空白、非標點的字元。"""
+    return [ch for ch in text if not ch.isspace() and not unicodedata.category(ch).startswith('P')]
+
+
+def _compress_in_segment_loops(text: str) -> str:
+    """把同一 segment 內連續重複 ≥4 次的 1–8 字片語壓成一次，前後其他文字保留。
+
+    純數字片語不壓縮：IP、版本號（1.1.1.1、0.0.0.0）與「1,1,1,1」是真實數字。
+    """
+    def collapse(match: re.Match) -> str:
+        phrase = match.group('phrase')
+        return match.group(0) if phrase.isdigit() else phrase
+    return _IN_SEGMENT_LOOP_RE.sub(collapse, text)
+
+
+def _clean_foreign_chars(text: str) -> Optional[str]:
+    """zh 逐字稿的外文污染：回傳 None 表示整段丟棄，否則回傳移除外文字元後的文字。"""
+    foreign = len(_FOREIGN_CHAR_RE.findall(text))
+    if not foreign:
+        return text
+    content = _content_chars(text)
+    if not content or foreign / len(content) >= _FOREIGN_DROP_RATIO or len(content) <= _FOREIGN_SHORT_SEGMENT_LEN:
+        return None
+    return _EXTRA_SPACES_RE.sub(' ', _FOREIGN_CHAR_RE.sub('', text)).strip()
+
+
+def _applies_foreign_rule(language: Optional[str]) -> bool:
+    return bool(language) and language.lower().replace('_', '-').split('-')[0] == 'zh'
+
+
+def clean_segments(segments: list[dict], language: Optional[str] = None) -> list[dict]:
     """移除空白、hallucination、重複 timestamp、連續重複與固定假字幕的 phantom segments。
 
     在 segment list 層級做後處理，補上 is_hallucination() 對單一 chunk
@@ -178,9 +245,36 @@ def clean_segments(segments: list[dict]) -> list[dict]:
     cleaned: list[dict] = []
     seen_keys: set[tuple] = set()
     fake_subtitles = 0
+    rule_counts: Counter = Counter()
+    check_foreign = _applies_foreign_rule(language)
 
     for seg in segments:
         text = seg.get("text", "").strip()
+        original_text = text
+
+        # 中文數字清單幻聽（「一、四、二、五、…」≥10 個）→ 整段丟棄
+        if _NUMERAL_LIST_RE.search(text):
+            rule_counts["numeral-list dropped"] += 1
+            continue
+
+        # 外文字元污染（僅 zh）：佔比高或短句 → 丟棄；否則只移除外文字元
+        if check_foreign:
+            foreign_cleaned = _clean_foreign_chars(text)
+            if foreign_cleaned is None:
+                rule_counts["foreign-script dropped"] += 1
+                continue
+            if foreign_cleaned != text:
+                rule_counts["foreign-script stripped"] += 1
+                text = foreign_cleaned
+
+        # 句內循環（「對呀,對呀,對呀,對呀」）→ 壓成一次
+        compressed = _compress_in_segment_loops(text)
+        if compressed != text:
+            rule_counts["in-segment-loop compressed"] += 1
+            text = compressed
+
+        if text != original_text:
+            seg = {**seg, "text": text}
 
         # 空白 / 近空 segment（≤ 1 字元）直接丟棄
         if len(text) <= 1:
@@ -205,6 +299,8 @@ def clean_segments(segments: list[dict]) -> list[dict]:
 
     if fake_subtitles:
         logging.warning("[CleanSegments] fake-subtitle rule dropped %d segment(s)", fake_subtitles)
+    for rule, count in sorted(rule_counts.items()):
+        logging.warning("[CleanSegments] %s rule: %d segment(s)", rule, count)
     cleaned, _ = _collapse_consecutive_repeats(cleaned)
 
     if len(cleaned) < len(segments):

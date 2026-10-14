@@ -645,7 +645,7 @@ def _transcribe_file(
         data = _transcribe_frozen_worker_subprocess(
             wav_path, model_name, language, initial_prompt, cancellation,
         )
-        segs = clean_segments(data.get("segments", []))
+        segs = clean_segments(data.get("segments", []), language or data.get("language"))
         text = _punctuate_segments(segs) if segs else data.get("text", "").strip()
         return {"text": text, "language": data.get("language", "?"), "segments": segs}
 
@@ -655,7 +655,7 @@ def _transcribe_file(
             data = _transcribe_mlx_subprocess(
                 wav_path, model_name, language, initial_prompt, cancellation,
             )
-            segs = clean_segments(data.get("segments", []))
+            segs = clean_segments(data.get("segments", []), language or data.get("language"))
             text = _punctuate_segments(segs) if segs else data.get("text", "").strip()
             return {"text": text, "language": data.get("language", "?"), "segments": segs}
         except TranscriptionCancelled:
@@ -678,7 +678,9 @@ def _transcribe_file(
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 300},
     )
-    segs = clean_segments([{"text": s.text, "start": s.start, "end": s.end} for s in raw_segs])
+    segs = clean_segments(
+        [{"text": s.text, "start": s.start, "end": s.end} for s in raw_segs], language or info.language,
+    )
     text = _punctuate_segments(segs) if segs else ""
     return {"text": text, "language": info.language, "segments": segs}
 
