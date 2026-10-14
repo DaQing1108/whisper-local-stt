@@ -38,6 +38,10 @@ struct ContentView: View {
     @State var transcriptDraft = ""
     @State var isDraftDirty = false
     @State var isEditingTranscript = false
+    @State var mixedMicrophoneLevel = 0.0
+    @State var mixedSystemLevel = 0.0
+    @State var inputSilence = InputSilenceMonitor()
+    @State var inputSilenceWarnings: [String] = []
     @State var isTranscriptListAtBottom = true
     /// Segments of each entry when an edited draft was saved (see TranscriptViewRules.draftDiverged).
     /// Recorded only on save, so edits discarded by switching records leave no trace.

@@ -14,6 +14,47 @@ extension ContentView {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
+            ForEach(inputSilenceWarnings, id: \.self) { warning in
+                Label(warning, systemImage: "speaker.slash")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .task(id: audioMode == .mixed && mixedAudioRecording.state == .recording) {
+            await monitorMixedInputLevels()
+        }
+    }
+
+    /// Samples the mixed recorder's two read-only input levels while recording, for the meters
+    /// and the「持續沒有聲音」hint. Restarted (and so reset to zero) whenever recording starts/stops.
+    private func monitorMixedInputLevels() async {
+        inputSilence.reset()
+        inputSilenceWarnings = []
+        mixedMicrophoneLevel = 0
+        mixedSystemLevel = 0
+        while !Task.isCancelled, audioMode == .mixed, mixedAudioRecording.state == .recording {
+            let microphone = settings.includeMicrophoneInMixedMode ? mixedAudioRecording.microphoneLevel : nil
+            let system = mixedAudioRecording.systemLevel
+            mixedMicrophoneLevel = microphone ?? 0
+            mixedSystemLevel = system
+            let now = Date()
+            inputSilence.record(microphone: microphone, system: system, at: now)
+            let warnings = inputSilence.warnings(at: now)
+            if warnings != inputSilenceWarnings { inputSilenceWarnings = warnings }
+            try? await Task.sleep(for: Self.inputLevelSampleInterval)
+        }
+    }
+
+    private static let inputLevelSampleInterval: Duration = .milliseconds(200)
+
+    @ViewBuilder private var mixedInputMeters: some View {
+        HStack(spacing: 8) {
+            if settings.includeMicrophoneInMixedMode {
+                Text("麥克風").font(.caption).foregroundStyle(.secondary)
+                AudioWaveformView(level: mixedMicrophoneLevel, isRecording: true).frame(width: 90)
+            }
+            Text("系統").font(.caption).foregroundStyle(.secondary)
+            AudioWaveformView(level: mixedSystemLevel, isRecording: true).frame(width: 90)
         }
     }
 
@@ -27,6 +68,9 @@ extension ContentView {
             .controlSize(.large)
             .disabled(!primaryActionEnabled)
             .help(modeHelpText)
+            // Never truncate the primary action; the meters and status text give way first.
+            .fixedSize()
+            .layoutPriority(1)
 
             if isPrimaryRecording, let captureStartedAt {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -36,11 +80,15 @@ extension ContentView {
                 }
             }
 
-            AudioWaveformView(
-                level: audioMode == .standard ? recording.microphone.audioLevel : 0,
-                isRecording: isPrimaryRecording
-            )
-            .frame(maxWidth: 180)
+            if audioMode == .mixed && isPrimaryRecording {
+                mixedInputMeters
+            } else {
+                AudioWaveformView(
+                    level: audioMode == .standard ? recording.microphone.audioLevel : 0,
+                    isRecording: isPrimaryRecording
+                )
+                .frame(maxWidth: 180)
+            }
 
             if let primaryStatusText {
                 Text(primaryStatusText).font(.caption).foregroundStyle(.secondary).lineLimit(1)

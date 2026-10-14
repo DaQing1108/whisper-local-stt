@@ -584,6 +584,34 @@ struct MixedAudioRecordingControllerTests {
     }
 
     @Test
+    func inputLevelsFollowReceivedPCMAndResetAfterStop() async throws {
+        let mic = MixedMicrophoneBackend(), system = MixedSystemBackend()
+        let controller = MixedAudioRecordingController(
+            microphonePermission: MixedMicrophonePermission(granted: true),
+            screenPermission: SystemAudioPermissionController(provider: MixedScreenPermission(granted: true)),
+            microphoneBackend: mic, systemBackend: system, scheduler: MixedScheduler(),
+            transcriber: MixedTranscriber(), flushInterval: 15
+        )
+        #expect(controller.microphoneLevel == 0 && controller.systemLevel == 0)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mixed-levels-\(UUID()).wav")
+        try await controller.start(outputURL: url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            for chunkURL in controller.finalizedChunkURLs { try? FileManager.default.removeItem(at: chunkURL) }
+        }
+
+        mic.emit(Array(repeating: Int16(16_000), count: 160))
+        system.emit(Array(repeating: Int16(100), count: 160))
+        #expect(abs(controller.microphoneLevel - 16_000.0 / Double(Int16.max)) < 0.001)
+        #expect(abs(controller.systemLevel - 100.0 / Double(Int16.max)) < 0.001)
+        #expect(controller.systemLevel < InputSilenceMonitor.silenceLevel)
+
+        _ = try await controller.stop()
+        #expect(controller.microphoneLevel == 0)
+        #expect(controller.systemLevel == 0)
+    }
+
+    @Test
     func microphoneStartFailureRollsBackSystemCapture() async {
         let mic = MixedMicrophoneBackend()
         mic.startError = MixedTestError.failed

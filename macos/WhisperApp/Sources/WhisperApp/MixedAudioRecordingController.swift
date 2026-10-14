@@ -37,9 +37,29 @@ private final class MixedAudioAccumulator: @unchecked Sendable {
     private let lock = NSLock()
     private var microphone = Data()
     private var system = Data()
+    /// Latest per-source input level (read-only meter data; never affects mixing).
+    private var microphoneLevel: (value: Double, at: Date)?
+    private var systemLevel: (value: Double, at: Date)?
 
-    func appendMicrophone(_ data: Data) { lock.withLock { microphone.append(data) } }
-    func appendSystem(_ data: Data) { lock.withLock { system.append(data) } }
+    func appendMicrophone(_ data: Data) {
+        let level = MicrophoneCaptureService.normalizedLevel(forPCM16: data)
+        lock.withLock { microphone.append(data); microphoneLevel = (level, Date()) }
+    }
+    func appendSystem(_ data: Data) {
+        let level = MicrophoneCaptureService.normalizedLevel(forPCM16: data)
+        lock.withLock { system.append(data); systemLevel = (level, Date()) }
+    }
+
+    /// A source that stopped delivering buffers reads as 0 rather than its last level.
+    func levels(now: Date, staleAfter: TimeInterval) -> (microphone: Double, system: Double) {
+        lock.withLock {
+            func fresh(_ sample: (value: Double, at: Date)?) -> Double {
+                guard let sample, now.timeIntervalSince(sample.at) <= staleAfter else { return 0 }
+                return sample.value
+            }
+            return (fresh(microphoneLevel), fresh(systemLevel))
+        }
+    }
 
     func drain() -> Data {
         lock.withLock {
@@ -199,6 +219,16 @@ final class MixedAudioRecordingController {
     private var recoveryAttempts = 0
     private let maximumRecoveryAttempts = 2
     private var resumeTask: Task<Void, Never>?
+
+    /// Read-only input meters (0–1) while recording; 0 when idle, stopped or stale.
+    /// Computed from the PCM already received for mixing — capture and mixing are untouched.
+    var microphoneLevel: Double { currentInputLevels.microphone }
+    var systemLevel: Double { currentInputLevels.system }
+    private static let inputLevelStaleSeconds: TimeInterval = 0.5
+    private var currentInputLevels: (microphone: Double, system: Double) {
+        guard state == .recording, let accumulator else { return (0, 0) }
+        return accumulator.levels(now: Date(), staleAfter: Self.inputLevelStaleSeconds)
+    }
 
     var hasActiveOperation: Bool {
         isStarting || stopTask != nil || fullSession != nil || microphoneActive || systemActive
