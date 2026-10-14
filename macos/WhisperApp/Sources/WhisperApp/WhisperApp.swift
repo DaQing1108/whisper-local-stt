@@ -15,6 +15,7 @@ struct WhisperDesktopApp: App {
     @State private var summaries: MeetingSummaryStore
     @State private var summaryController: MeetingSummaryController
     @State private var vocabulary: VocabularyStore
+    @State private var vocabularySuggestions = VocabularySuggestionController()
     @State private var historyDeletion: HistoryDeletionCoordinator
 
     init() {
@@ -102,6 +103,7 @@ struct WhisperDesktopApp: App {
                 .environment(summaries)
                 .environment(summaryController)
                 .environment(vocabulary)
+                .environment(vocabularySuggestions)
                 .environment(historyDeletion)
         }
         .commands {

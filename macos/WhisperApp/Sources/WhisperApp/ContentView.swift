@@ -18,6 +18,7 @@ struct ContentView: View {
     @Environment(MeetingSummaryStore.self) var summaries
     @Environment(MeetingSummaryController.self) var summaryController
     @Environment(VocabularyStore.self) var vocabulary
+    @Environment(VocabularySuggestionController.self) var vocabularySuggestions
     @Environment(HistoryDeletionCoordinator.self) var historyDeletion
     @State var isChoosingFile = false
     @State var isChoosingBatchFiles = false

@@ -38,6 +38,23 @@ final class VocabularyStore {
         try mutate { $0.append(VocabularyTerm(value: value)) }
     }
 
+    /// Adds several terms in one atomic write; duplicates (case-insensitive) are skipped
+    /// with the same rules as `add`. Either every new term is persisted or none is.
+    func addAll(_ rawValues: [String]) throws {
+        var additions: [String] = []
+        for rawValue in rawValues {
+            let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty,
+                  !(terms.map(\.value) + additions).contains(where: {
+                      $0.compare(value, options: .caseInsensitive) == .orderedSame
+                  })
+            else { continue }
+            additions.append(value)
+        }
+        guard !additions.isEmpty else { return }
+        try mutate { $0.append(contentsOf: additions.map { VocabularyTerm(value: $0) }) }
+    }
+
     func toggle(_ term: VocabularyTerm) throws {
         try mutate { terms in
             guard let index = terms.firstIndex(where: { $0.id == term.id }) else { return }

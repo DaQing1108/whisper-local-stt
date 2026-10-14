@@ -399,10 +399,13 @@ extension ContentView {
                         .disabled(currentEntryID == nil || summaryController.activeTranscriptionID != nil)
                     Button("儲存摘要修改") { saveSummaryEdit() }
                         .disabled(currentEntryID == nil || currentSummary == nil || !isSummaryDirty)
+                    Button(vocabularySuggestions.isLoading ? "建議中…" : "建議詞彙") { requestVocabularySuggestions() }
+                        .disabled(!canRequestVocabularySuggestions)
                     if let error = currentSummary?.errorMessage {
                         Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
                     }
                 }
+                vocabularySuggestionList
         }
     }
 
