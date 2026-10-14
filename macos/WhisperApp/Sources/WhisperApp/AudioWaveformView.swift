@@ -34,7 +34,7 @@ struct AudioWaveformView: View {
         }
         .frame(height: 28)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Audio input level")
-        .accessibilityValue(isRecording ? "\(Int(max(0, min(1, level)) * 100)) percent" : "Not recording")
+        .accessibilityLabel("音量")
+        .accessibilityValue(isRecording ? "\(Int(max(0, min(1, level)) * 100))%" : "未錄音")
     }
 }

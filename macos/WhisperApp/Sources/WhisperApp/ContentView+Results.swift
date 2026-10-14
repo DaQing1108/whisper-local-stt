@@ -43,8 +43,8 @@ enum WorkspaceTab: Hashable, Identifiable, CaseIterable {
 
     var title: String {
         switch self {
-        case .transcript: "Transcript"
-        case .summary: "AI Summary"
+        case .transcript: "逐字稿"
+        case .summary: "AI 摘要"
         }
     }
 }
@@ -159,7 +159,7 @@ extension ContentView {
     private var transcriptContent: some View {
         VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(worker.jobStatus).font(.caption).foregroundStyle(.secondary)
+                    Text(StatusTextRules.jobStatus(worker.jobStatus)).font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("取消", role: .destructive) { try? worker.cancel() }
                         .disabled(worker.activeJobID == nil)
@@ -215,7 +215,7 @@ extension ContentView {
                             Button("重新命名講者") { openSpeakerRenameSheet() }
                                 .buttonStyle(.bordered)
                         }
-                        Menu("Export") {
+                        Menu("匯出") {
                             ForEach(TranscriptionExportFormat.allCases) { format in
                                 Button(format.rawValue) { export(entry, as: format) }
                                     .disabled(format == .srt && entry.segments.isEmpty)
@@ -367,7 +367,7 @@ extension ContentView {
                         get: { meetingTitle },
                         set: { meetingTitle = $0; isSummaryDirty = true }
                     ))
-                    Picker("Provider", selection: Binding(
+                    Picker("供應商", selection: Binding(
                         get: { settings.summaryProvider },
                         set: { settings.summaryProvider = $0 }
                     )) {

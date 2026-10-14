@@ -194,7 +194,7 @@ struct ContentView: View {
                 Text("本地語音 AI").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            StatusBadge(text: statusText, color: statusColor)
+            if let statusText { StatusBadge(text: statusText, color: statusColor) }
         }
     }
 
@@ -214,15 +214,7 @@ struct ContentView: View {
         if let recordingError = recording.errorMessage { Text(recordingError).foregroundStyle(.red) }
     }
 
-    var statusText: String {
-        switch worker.state {
-        case .stopped: "Worker stopped"
-        case .starting: "Starting Python Worker…"
-        case .restarting(let attempt): "Restarting Python Worker (attempt \(attempt))…"
-        case .ready: "Python Worker ready"
-        case .failed(let message): "Worker error: \(message)"
-        }
-    }
+    var statusText: String? { StatusTextRules.workerStatus(worker.state) }
 
     var statusColor: Color {
         if worker.state == .ready { return DaylightPalette.accentActive }

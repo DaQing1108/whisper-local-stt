@@ -26,12 +26,13 @@ extension ContentView {
             .tint(isPrimaryRecording ? DaylightPalette.accentRecord : DaylightPalette.accentActive)
             .controlSize(.large)
             .disabled(!primaryActionEnabled)
+            .help(modeHelpText)
 
             if isPrimaryRecording, let captureStartedAt {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(Self.elapsedString(from: captureStartedAt, to: context.date))
                         .font(.system(.body, design: .monospaced).monospacedDigit())
-                        .accessibilityLabel("Recording elapsed time")
+                        .accessibilityLabel("錄音時間")
                 }
             }
 
@@ -41,11 +42,13 @@ extension ContentView {
             )
             .frame(maxWidth: 180)
 
-            Text(primaryStatusText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            if let primaryStatusText {
+                Text(primaryStatusText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
 
             Spacer()
 
-            StatusBadge(text: statusText, color: statusColor)
+            if let statusText { StatusBadge(text: statusText, color: statusColor) }
 
             Button { isSettingsPopoverPresented = true } label: {
                 Image(systemName: "gearshape")
@@ -76,12 +79,12 @@ extension ContentView {
                         ForEach(AppSettingsStore.supportedModels, id: \.self) { Text(AppSettingsStore.displayName(for: $0)) }
                     }
                     Menu("語言快速選擇") {
-                        Button("Auto") { settings.language = ""; languageDraft = "" }
+                        Button("自動偵測") { settings.language = ""; languageDraft = "" }
                         Button("中文 / 繁中") { settings.language = "zh"; languageDraft = "zh" }
-                        Button("English") { settings.language = "en"; languageDraft = "en" }
-                        Button("Japanese") { settings.language = "ja"; languageDraft = "ja" }
+                        Button("英文") { settings.language = "en"; languageDraft = "en" }
+                        Button("日文") { settings.language = "ja"; languageDraft = "ja" }
                     }
-                    TextField("Auto 或 ISO code（zh / en / ja）", text: $languageDraft)
+                    TextField("留空為自動偵測，或輸入語言代碼（zh / en / ja）", text: $languageDraft)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { settings.language = languageDraft }
                         .onChange(of: settings.language, initial: true) { _, newValue in
@@ -89,7 +92,7 @@ extension ContentView {
                         }
                 }
                 HStack {
-                    Label(worker.modelReadinessMessage, systemImage: modelReadinessSymbol)
+                    Label(StatusTextRules.modelReadiness(worker.modelReadiness), systemImage: modelReadinessSymbol)
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("檢查模型") { checkModelStatus() }
@@ -101,7 +104,7 @@ extension ContentView {
                     Picker("領域", selection: Binding(
                         get: { settings.domain }, set: { settings.domain = $0 }
                     )) {
-                        ForEach(AppSettingsStore.supportedDomains, id: \.self) { Text($0.capitalized) }
+                        ForEach(AppSettingsStore.supportedDomains, id: \.self) { Text(StatusTextRules.domainName($0)) }
                     }
                     TextField("本次專有詞（逗號分隔）", text: Binding(
                         get: { settings.extraTerms }, set: { settings.extraTerms = $0 }
@@ -164,7 +167,7 @@ extension ContentView {
                         Image(systemName: batchSymbol(item.status))
                         Text(item.url.lastPathComponent).lineLimit(1)
                         Spacer()
-                        Text(item.status.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
+                        Text(StatusTextRules.batchStatus(item.status)).font(.caption).foregroundStyle(.secondary)
                     }
                     if let message = item.message {
                         Text(message).font(.caption)

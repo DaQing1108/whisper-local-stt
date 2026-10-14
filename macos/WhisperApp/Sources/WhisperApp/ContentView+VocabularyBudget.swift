@@ -27,7 +27,7 @@ extension ContentView {
         case .modelNotDownloaded:
             Text("尚未下載模型，無法計算用量").font(.caption).foregroundStyle(.secondary)
         case .workerUnavailable:
-            Text("Worker 未就緒，暫時無法計算用量").font(.caption).foregroundStyle(.secondary)
+            Text("轉錄引擎未就緒，暫時無法計算用量").font(.caption).foregroundStyle(.secondary)
         case .unknown:
             EmptyView()
         }

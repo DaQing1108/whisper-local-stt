@@ -65,23 +65,19 @@ extension ContentView {
     }
 
     var primaryButtonLabel: String {
-        if isPrimaryRecording {
-            return audioMode == .live ? "停止即時模式" : "停止並轉錄"
-        }
-        return switch audioMode {
-        case .standard: "開始錄音"
-        case .live: "開始即時轉錄"
-        case .mixed: settings.includeMicrophoneInMixedMode
-            ? "開始錄製麥克風與系統音訊"
-            : "開始錄製系統音訊"
-        }
+        StatusTextRules.primaryButtonLabel(mode: audioMode, isRecording: isPrimaryRecording)
     }
 
-    var primaryStatusText: String {
+    var primaryStatusText: String? {
         switch audioMode {
-        case .standard: recordingStatusText
-        case .live: liveRecordingStatusText
-        case .mixed: mixedAudioRecordingStatusText
+        case .standard: StatusTextRules.standardStatus(recording.state)
+        case .live: StatusTextRules.liveStatus(liveRecording.state)
+        case .mixed: StatusTextRules.mixedStatus(
+            mixedAudioRecording.state,
+            isDraining: mixedAudioRecording.isDraining,
+            submissionError: mixedAudioRecording.submissionQueue.errorMessage,
+            includesMicrophone: settings.includeMicrophoneInMixedMode
+        )
         }
     }
 
@@ -263,47 +259,6 @@ extension ContentView {
         switch liveRecording.state {
         case .recording, .recovering, .stopping, .draining: true
         case .idle, .requestingPermission, .failed: false
-        }
-    }
-
-    var liveRecordingStatusText: String {
-        switch liveRecording.state {
-        case .idle: "Live mode idle"
-        case .requestingPermission: "Requesting microphone permission…"
-        case .recording: "Live recording — \(liveRecording.finalizedChunkURLs.count) chunks finalized"
-        case .recovering: "Recovering microphone capture…"
-        case .stopping: "Stopping live recording…"
-        case .draining: "Transcribing remaining live chunks…"
-        case .failed(let message): "Live mode error: \(message)"
-        }
-    }
-
-    var recordingStatusText: String {
-        switch recording.state {
-        case .idle: "Microphone idle"
-        case .requestingPermission: "Requesting microphone permission…"
-        case .ready: "Microphone ready"
-        case .recording: "Recording…"
-        case .finalizing: "Finalizing recording…"
-        case .recorded(let url): "Saved: \(url.lastPathComponent)"
-        case .failed(let message): "Microphone error: \(message)"
-        }
-    }
-
-    var mixedAudioRecordingStatusText: String {
-        if let queueError = mixedAudioRecording.submissionQueue.errorMessage {
-            return "Mixed audio transcription paused: \(queueError). Restart Worker to retry."
-        }
-        if mixedAudioRecording.isDraining {
-            return "Transcribing remaining mixed audio chunks…"
-        }
-        return switch mixedAudioRecording.state {
-        case .idle: "Mixed audio idle"
-        case .starting: "Starting mic + system audio…"
-        case .recording: "Recording mic + system audio — \(mixedAudioRecording.finalizedChunkURLs.count) chunks finalized"
-        case .recovering: "Recovering mixed audio capture…"
-        case .stopping: "Stopping mixed audio…"
-        case .failed(let message): "Mixed audio error: \(message)"
         }
     }
 }

@@ -31,8 +31,8 @@ extension ContentView {
             VStack(alignment: .leading, spacing: 14) {
                 GroupBox("Worker") {
                     HStack {
-                        Button("啟動 Worker") { startWorker() }.disabled(worker.state != .stopped)
-                        Button("停止 Worker") { worker.stop() }.disabled(worker.state == .stopped || liveOwnsWorker)
+                        Button("啟動轉錄引擎") { startWorker() }.disabled(worker.state != .stopped)
+                        Button("停止轉錄引擎") { worker.stop() }.disabled(worker.state == .stopped || liveOwnsWorker)
                         Spacer()
                         Button("檢查說話者分離能力") {
                             do { try worker.requestCapabilities(); errorMessage = nil }
