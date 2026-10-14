@@ -76,7 +76,13 @@ struct WhisperDesktopApp: App {
         let summaries = MeetingSummaryStore()
         _summaries = State(initialValue: summaries)
         _summaryController = State(initialValue: MeetingSummaryController(store: summaries))
-        _vocabulary = State(initialValue: VocabularyStore())
+        let vocabulary = VocabularyStore()
+        // An unreadable history would make the one-time backfill find nothing; wait for a good load.
+        if history.loadError == nil { vocabulary.backfillUsageIfNeeded(from: history.entries) }
+        history.resultRecordedHandler = { [weak vocabulary] text, date in
+            vocabulary?.recordSeen(in: text, at: date)
+        }
+        _vocabulary = State(initialValue: vocabulary)
         _vocabularyBudget = State(initialValue: VocabularyBudgetController(provider: worker))
         _historyDeletion = State(initialValue: HistoryDeletionCoordinator(
             history: history, summaries: summaries, settings: settings

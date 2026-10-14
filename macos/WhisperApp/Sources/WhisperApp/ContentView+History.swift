@@ -70,7 +70,7 @@ extension ContentView {
                         .disabled(newVocabularyTerm.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 vocabularyBudgetRow
-                let droppedIDs = vocabularyBudget.droppedTermIDs(in: vocabulary.terms.filter(\.isEnabled))
+                let droppedIDs = vocabularyBudget.droppedTermIDs(in: vocabulary.promptOrderedActiveTerms)
                 ForEach(vocabulary.terms) { term in
                     HStack {
                         Toggle(term.value, isOn: Binding(
@@ -80,6 +80,7 @@ extension ContentView {
                         if droppedIDs.contains(term.id) {
                             Text("不會套用").font(.caption).foregroundStyle(DaylightPalette.accentRecord)
                         }
+                        Text(vocabularyLastSeenText(term)).font(.caption2).foregroundStyle(.secondary)
                         Spacer()
                         Button("刪除", role: .destructive) { removeVocabularyTerm(term) }
                     }

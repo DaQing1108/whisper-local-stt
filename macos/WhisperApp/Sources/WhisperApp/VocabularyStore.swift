@@ -20,14 +20,58 @@ final class VocabularyStore {
     private(set) var loadError: String?
     private(set) var writeError: String?
     private let fileURL: URL
+    let usage: VocabularyUsageStore
+    private let now: @MainActor () -> Date
 
+    /// Prompt text in priority order. faster-whisper truncates the prompt from the front,
+    /// so the most important terms go last.
     var activeTermsText: String {
-        terms.filter(\.isEnabled).map(\.value).joined(separator: ", ")
+        promptOrderedActiveTerms.map(\.value).joined(separator: ", ")
     }
 
-    init(fileURL: URL = VocabularyStore.defaultFileURL()) {
+    /// Enabled terms ordered by most recent activity, `max(addedAt, lastSeenAt)`, oldest
+    /// first. A term with no recorded activity (added before usage tracking existed) gets a
+    /// virtual time from its list position — earlier than any real date and increasing down
+    /// the list — so legacy order is kept and the result is stable. Ties keep list order.
+    var promptOrderedActiveTerms: [VocabularyTerm] {
+        terms.enumerated()
+            .filter { $0.element.isEnabled }
+            .map { (index: $0.offset, term: $0.element, activity: activity(of: $0.element, index: $0.offset)) }
+            .sorted { ($0.activity, $0.index) < ($1.activity, $1.index) }
+            .map(\.term)
+    }
+
+    /// Most recent activity of a term, or nil when only the virtual list-position time applies.
+    func lastActivity(of term: VocabularyTerm) -> Date? {
+        let record = usage.usage[term.id]
+        return [record?.addedAt, record?.lastSeenAt].compactMap { $0 }.max()
+    }
+
+    init(
+        fileURL: URL = VocabularyStore.defaultFileURL(),
+        usage: VocabularyUsageStore? = nil,
+        now: @escaping @MainActor () -> Date = { Date() }
+    ) {
         self.fileURL = fileURL
+        self.usage = usage ?? VocabularyUsageStore(
+            fileURL: fileURL.deletingLastPathComponent().appendingPathComponent("vocabulary-usage.json")
+        )
+        self.now = now
         load()
+    }
+
+    /// Called when a finished transcript is written to history.
+    func recordSeen(in text: String, at date: Date) {
+        usage.recordSeen(in: text, terms: terms.filter(\.isEnabled), at: date)
+    }
+
+    /// One-time `lastSeenAt` backfill from existing history (no-op once done).
+    func backfillUsageIfNeeded(from history: [TranscriptionHistoryEntry]) {
+        usage.backfillIfNeeded(terms: terms, history: history)
+    }
+
+    private func activity(of term: VocabularyTerm, index: Int) -> Date {
+        lastActivity(of: term) ?? Date(timeIntervalSince1970: TimeInterval(index))
     }
 
     func add(_ rawValue: String) throws {
@@ -35,7 +79,9 @@ final class VocabularyStore {
         guard !value.isEmpty,
               !terms.contains(where: { $0.value.compare(value, options: .caseInsensitive) == .orderedSame })
         else { return }
-        try mutate { $0.append(VocabularyTerm(value: value)) }
+        let term = VocabularyTerm(value: value)
+        try mutate { $0.append(term) }
+        usage.recordAdded([term.id], at: now())
     }
 
     /// Adds several terms in one atomic write; duplicates (case-insensitive) are skipped
@@ -52,7 +98,9 @@ final class VocabularyStore {
             additions.append(value)
         }
         guard !additions.isEmpty else { return }
-        try mutate { $0.append(contentsOf: additions.map { VocabularyTerm(value: $0) }) }
+        let added = additions.map { VocabularyTerm(value: $0) }
+        try mutate { $0.append(contentsOf: added) }
+        usage.recordAdded(added.map(\.id), at: now())
     }
 
     func toggle(_ term: VocabularyTerm) throws {
@@ -64,6 +112,7 @@ final class VocabularyStore {
 
     func remove(_ term: VocabularyTerm) throws {
         try mutate { $0.removeAll { $0.id == term.id } }
+        usage.forget(term.id)
     }
 
     private func mutate(_ body: (inout [VocabularyTerm]) -> Void) throws {

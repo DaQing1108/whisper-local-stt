@@ -41,6 +41,12 @@ extension ContentView {
         }
     }
 
+    func vocabularyLastSeenText(_ term: VocabularyTerm, now: Date = Date()) -> String {
+        guard let lastSeen = vocabulary.usage.usage[term.id]?.lastSeenAt else { return "從未出現" }
+        let days = Calendar.current.dateComponents([.day], from: lastSeen, to: now).day ?? 0
+        return days <= 0 ? "最近出現：今天" : "最近出現：\(days) 天前"
+    }
+
     func vocabularyBudgetWarning(_ budget: PromptBudget) -> String {
         "詞彙超過 \(budget.limit) tokens 上限，開頭 \(budget.droppedTerms.count) 個詞不會套用；請到詞庫停用或刪除較不重要的詞"
     }

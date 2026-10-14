@@ -76,13 +76,14 @@ final class VocabularyBudgetController {
     }
 
     /// IDs of enabled vocabulary terms the Worker will drop. The Worker drops whole terms
-    /// from the front of the prompt (domain terms first, then vocabulary in order), so the
-    /// dropped vocabulary is always a leading run of `activeTerms`.
-    func droppedTermIDs(in activeTerms: [VocabularyTerm]) -> Set<UUID> {
+    /// from the front of the prompt (domain terms first, then vocabulary in prompt order),
+    /// so pass `VocabularyStore.promptOrderedActiveTerms` — the order actually sent, not the
+    /// list order — and the dropped vocabulary is a leading run of it.
+    func droppedTermIDs(in promptOrderedTerms: [VocabularyTerm]) -> Set<UUID> {
         guard let budget, !budget.droppedTerms.isEmpty else { return [] }
         let dropped = Set(budget.droppedTerms)
         var ids: Set<UUID> = []
-        for term in activeTerms {
+        for term in promptOrderedTerms {
             let pieces = Self.promptPieces(term.value)
             guard !pieces.isEmpty, pieces.allSatisfy(dropped.contains) else { break }
             ids.insert(term.id)

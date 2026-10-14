@@ -88,6 +88,9 @@ final class TranscriptionHistoryStore {
     private let fileURL: URL
     private var maximumEntries: Int
     private let maxBackupsPerEntry = 5
+    /// Called after a transcription result is persisted (new entry or re-transcribed /
+    /// appended result), not for manual text edits. Used to track vocabulary usage.
+    var resultRecordedHandler: (@MainActor (_ text: String, _ date: Date) -> Void)?
 
     init(fileURL: URL = TranscriptionHistoryStore.defaultFileURL(), maximumEntries: Int = 200) {
         self.fileURL = fileURL
@@ -129,6 +132,7 @@ final class TranscriptionHistoryStore {
             writeError = error.localizedDescription
             throw error
         }
+        resultRecordedHandler?(text, entry.completedAt)
         return entry
     }
 
@@ -176,6 +180,7 @@ final class TranscriptionHistoryStore {
         do {
             try persist()
             writeError = nil
+            resultRecordedHandler?(text, Date())
             return entries[index]
         } catch {
             entries = previous
