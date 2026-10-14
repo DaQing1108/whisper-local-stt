@@ -44,6 +44,54 @@ def _segments_to_traditional(segments: list[dict]) -> list[dict]:
     return [{**seg, "text": _to_traditional(seg.get("text", ""))} for seg in segments]
 
 
+# ── 誤聽修正表 ────────────────────────────────────────────────
+CORRECTION_MIN_WRONG_LENGTH = 2
+
+
+def _correction_pattern(corrections: list[dict]):
+    """把有效規則編成單一 regex：長規則在前、單趟替換（避免規則之間連鎖替換）。
+
+    純 ASCII 的 wrong 要求左右不是英數字（Free 不命中 Freedom），含 CJK 直接子字串比對。
+    無效規則（wrong 太短、等於 right、型別不對）直接略過。
+    """
+    mapping: dict[str, str] = {}
+    for rule in corrections or []:
+        wrong, right = rule.get("wrong"), rule.get("right")
+        if not isinstance(wrong, str) or not isinstance(right, str):
+            continue
+        if len(wrong.strip()) < CORRECTION_MIN_WRONG_LENGTH or wrong == right or wrong in mapping:
+            continue
+        mapping[wrong] = right
+    if not mapping:
+        return None, mapping
+    alternatives = []
+    for wrong in sorted(mapping, key=len, reverse=True):
+        escaped = re.escape(wrong)
+        if wrong.isascii():
+            escaped = rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])"
+        alternatives.append(escaped)
+    return re.compile("|".join(alternatives)), mapping
+
+
+def apply_corrections_to_text(text: str, corrections: list[dict]) -> str:
+    """精確字串替換（區分大小寫）；corrections 為空時原樣回傳。"""
+    pattern, mapping = _correction_pattern(corrections)
+    if pattern is None or not text:
+        return text
+    return pattern.sub(lambda match: mapping[match.group(0)], text)
+
+
+def apply_corrections(segments: list[dict], corrections: list[dict]) -> list[dict]:
+    """對每個 segment 的 text 套用修正；應在 clean_segments／繁體轉換之後呼叫。"""
+    pattern, mapping = _correction_pattern(corrections)
+    if pattern is None:
+        return segments
+    return [
+        {**seg, "text": pattern.sub(lambda match: mapping[match.group(0)], seg.get("text", ""))}
+        for seg in segments
+    ]
+
+
 class TranscriptionError(Exception):
     """帶有 error_code 的轉錄錯誤，routes.py 可直接取用 code 推送結構化 SSE。"""
     def __init__(self, code: str, message: str):

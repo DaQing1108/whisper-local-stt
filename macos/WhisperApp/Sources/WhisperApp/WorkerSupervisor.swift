@@ -115,6 +115,9 @@ final class WorkerSupervisor {
     var llmCredentialLoader: (MeetingSummaryProvider) -> String? = {
         try? LLMCredentialStore(provider: $0).load()
     }
+    /// Enabled「誤聽修正」rules, attached to every transcribe request. All entry points
+    /// (recording, live, mixed, file, batch, re-transcribe) go through `transcribe(...)`.
+    var correctionsProvider: (@MainActor () -> [CorrectionPair])?
     var jobTerminalHandler: (@MainActor @Sendable (String?) -> Void)?
     var jobLostHandler: (@MainActor @Sendable (String) -> Void)?
     var workerReadyHandler: (@MainActor @Sendable () -> Void)?
@@ -443,6 +446,12 @@ final class WorkerSupervisor {
         if let language, !language.isEmpty { payload["language"] = .string(language) }
         if !domain.isEmpty { payload["domain"] = .string(domain) }
         if !extraTerms.isEmpty { payload["extra_terms"] = .string(extraTerms) }
+        let corrections = correctionsProvider?() ?? []
+        if !corrections.isEmpty {
+            payload["corrections"] = .array(corrections.map {
+                .object(["wrong": .string($0.wrong), "right": .string($0.right)])
+            })
+        }
         progress = 0
         partialText = ""
         resultText = ""

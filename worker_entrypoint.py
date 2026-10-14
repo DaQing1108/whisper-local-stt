@@ -265,11 +265,14 @@ class WorkerRuntime:
                 final_job = self._registry.finish(job_id)
                 if final_job and final_job.is_cancelled:
                     raise TranscriptionCancelled(job_id)
+                text, info = _apply_corrections_to_result(
+                    result.text, result.info, payload.get("corrections"),
+                )
                 self.emit(request_id, "completed", {
                     "job_id": job_id,
-                    "text": result.text,
+                    "text": text,
                     "language": result.language,
-                    "info": result.info,
+                    "info": info,
                 })
             except TranscriptionCancelled:
                 self.emit(request_id, "cancelled", {"job_id": job_id})
@@ -309,6 +312,20 @@ class WorkerRuntime:
     def shutdown(self, timeout: float = 5) -> bool:
         self._registry.cancel_all()
         return self.wait_for_idle(timeout)
+
+
+def _apply_corrections_to_result(text: str, info: dict, corrections) -> tuple[str, dict]:
+    """誤聽修正表：在 Worker 出口（clean_segments、繁體轉換、LLM 標點之後）套用一次，
+    即時／混音／檔案等所有模式都從 completed 事件取文字，顯示與存檔一致。
+    未帶 corrections 時原樣回傳，輸出與既有行為逐字相同。"""
+    if not corrections:
+        return text, info
+    from whisper_core import apply_corrections, apply_corrections_to_text
+
+    corrected_info = dict(info)
+    if isinstance(info.get("segments"), list):
+        corrected_info["segments"] = apply_corrections(info["segments"], corrections)
+    return apply_corrections_to_text(text, corrections), corrected_info
 
 
 def prompt_budget(model_name: str, domain: str, extra_terms: str) -> dict:

@@ -20,6 +20,7 @@ struct ContentView: View {
     @Environment(VocabularyStore.self) var vocabulary
     @Environment(VocabularySuggestionController.self) var vocabularySuggestions
     @Environment(VocabularyBudgetController.self) var vocabularyBudget
+    @Environment(CorrectionRuleStore.self) var corrections
     @Environment(HistoryDeletionCoordinator.self) var historyDeletion
     @State var isChoosingFile = false
     @State var isChoosingBatchFiles = false
@@ -89,6 +90,7 @@ struct ContentView: View {
                             historySection
                         case .vocabulary:
                             vocabularySection
+                            CorrectionRulesSection()
                         case .integrations:
                             obsidianNotionSettings
                         case .settings:

@@ -50,6 +50,18 @@ def _require_identifier(value: object, field: str) -> str:
     return value
 
 
+def _validate_corrections(corrections: object) -> None:
+    """transcribe 的選填欄位 corrections：缺少或 null 視為空；否則必須是 [{wrong, right}] 字串物件陣列。"""
+    if corrections is None:
+        return
+    if not isinstance(corrections, list):
+        raise ProtocolError("INVALID_PAYLOAD", "corrections must be an array")
+    for rule in corrections:
+        if not isinstance(rule, dict) or not isinstance(rule.get("wrong"), str) \
+                or not isinstance(rule.get("right"), str):
+            raise ProtocolError("INVALID_PAYLOAD", "each correction must be {wrong: string, right: string}")
+
+
 def decode_command(line: str) -> CommandEnvelope:
     try:
         raw = json.loads(line)
@@ -88,6 +100,7 @@ def decode_command(line: str) -> CommandEnvelope:
                 raise ProtocolError("INVALID_PAYLOAD", f"{field} must be a string")
         if "skip_llm" in payload and not isinstance(payload["skip_llm"], bool):
             raise ProtocolError("INVALID_PAYLOAD", "skip_llm must be a boolean")
+        _validate_corrections(payload.get("corrections"))
     elif command == "cancel":
         _require_identifier(payload.get("job_id"), "job_id")
     elif command in {"model_status", "warmup_model"}:

@@ -24,7 +24,7 @@ extension ContentView {
                 HStack {
                     Text("建議詞彙（\(vocabularySuggestions.suggestions.count)）").font(.subheadline.weight(.semibold))
                     Spacer()
-                    Button("全部加入") { vocabularySuggestions.addAll(to: vocabulary) }
+                    Button("全部加入") { vocabularySuggestions.addAll(to: vocabulary, corrections: corrections) }
                 }
                 ForEach(vocabularySuggestions.suggestions) { suggestion in
                     HStack(alignment: .firstTextBaseline) {
@@ -39,7 +39,14 @@ extension ContentView {
                             }
                         }
                         Spacer()
-                        Button("加入") { vocabularySuggestions.add(suggestion, to: vocabulary) }
+                        if !suggestion.heardAs.isEmpty {
+                            Toggle("一併加入誤聽修正", isOn: Binding(
+                                get: { vocabularySuggestions.correctionOptIns.contains(suggestion.id) },
+                                set: { vocabularySuggestions.setIncludesCorrections($0, for: suggestion) }
+                            ))
+                            .toggleStyle(.checkbox).font(.caption)
+                        }
+                        Button("加入") { vocabularySuggestions.add(suggestion, to: vocabulary, corrections: corrections) }
                     }
                 }
             }

@@ -17,6 +17,7 @@ struct WhisperDesktopApp: App {
     @State private var vocabulary: VocabularyStore
     @State private var vocabularySuggestions = VocabularySuggestionController()
     @State private var vocabularyBudget: VocabularyBudgetController
+    @State private var corrections: CorrectionRuleStore
     @State private var historyDeletion: HistoryDeletionCoordinator
 
     init() {
@@ -83,6 +84,9 @@ struct WhisperDesktopApp: App {
             vocabulary?.recordSeen(in: text, at: date)
         }
         _vocabulary = State(initialValue: vocabulary)
+        let corrections = CorrectionRuleStore()
+        worker.correctionsProvider = { [weak corrections] in corrections?.activeCorrections ?? [] }
+        _corrections = State(initialValue: corrections)
         _vocabularyBudget = State(initialValue: VocabularyBudgetController(provider: worker))
         _historyDeletion = State(initialValue: HistoryDeletionCoordinator(
             history: history, summaries: summaries, settings: settings
@@ -113,6 +117,7 @@ struct WhisperDesktopApp: App {
                 .environment(vocabulary)
                 .environment(vocabularySuggestions)
                 .environment(vocabularyBudget)
+                .environment(corrections)
                 .environment(historyDeletion)
         }
         .commands {
