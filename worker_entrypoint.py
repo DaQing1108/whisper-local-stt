@@ -72,6 +72,8 @@ class WorkerRuntime:
             self._start_transcription(command.request_id, dict(command.payload))
         elif command.command == "model_status":
             self._model_status(command.request_id, str(command.payload["model_name"]))
+        elif command.command == "prompt_budget":
+            self._prompt_budget(command.request_id, dict(command.payload))
         elif command.command == "warmup_model":
             self._warmup_model(command.request_id, str(command.payload["model_name"]))
         elif command.command == "diarization_warmup":
@@ -184,6 +186,14 @@ class WorkerRuntime:
             })
             return
         self.emit(request_id, "model_status", self._model_manager.status(model_name))
+
+    def _prompt_budget(self, request_id: str, payload: dict) -> None:
+        """Token usage of the vocabulary prompt; answered inline, never occupies a job."""
+        self.emit(request_id, "prompt_budget", prompt_budget(
+            str(payload["model_name"]),
+            str(payload.get("domain", "general")),
+            str(payload.get("extra_terms", "")),
+        ))
 
     def _warmup_model(self, request_id: str, model_name: str) -> None:
         if self._registry.active_count:
@@ -299,6 +309,31 @@ class WorkerRuntime:
     def shutdown(self, timeout: float = 5) -> bool:
         self._registry.cancel_all()
         return self.wait_for_idle(timeout)
+
+
+def prompt_budget(model_name: str, domain: str, extra_terms: str) -> dict:
+    """Same fit_prompt_to_budget the transcription path uses, so dropped terms match exactly.
+
+    Never raises: a missing tokenizer (model not downloaded) or any failure reports
+    available=false instead of affecting transcription.
+    """
+    unavailable = {"tokens": 0, "limit": 0, "dropped_terms": [], "available": False}
+    try:
+        from whisper_core import PROMPT_TOKEN_LIMIT, fit_prompt_to_budget, load_prompt_tokenizer
+
+        unavailable["limit"] = PROMPT_TOKEN_LIMIT
+        tokenizer = load_prompt_tokenizer(model_name)
+        if tokenizer is None:
+            return unavailable
+        fitted = fit_prompt_to_budget(domain, extra_terms, tokenizer)
+    except Exception:
+        return unavailable
+    return {
+        "tokens": fitted["total_tokens"],
+        "limit": fitted["limit"],
+        "dropped_terms": fitted["dropped_terms"],
+        "available": True,
+    }
 
 
 def run_worker(stdin: TextIO, stdout: TextIO, stderr: TextIO, transcriber: Callable) -> int:

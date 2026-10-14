@@ -10,16 +10,16 @@ PROTOCOL_NAME = "whisper.worker"
 PROTOCOL_VERSION = 1
 COMMANDS = frozenset({
     "transcribe", "cancel", "ping", "capabilities", "model_status", "warmup_model",
-    "diarization_warmup", "diarize",
+    "diarization_warmup", "diarize", "prompt_budget",
 })
 EVENTS = frozenset({
     "ready", "accepted", "status", "progress", "completed",
     "failed", "cancelled", "pong", "capabilities", "model_status", "model_ready", "protocol_error",
-    "diarization_ready", "diarized",
+    "diarization_ready", "diarized", "prompt_budget",
 })
 _JOB_EVENTS = EVENTS.difference({
     "ready", "pong", "capabilities", "model_status", "model_ready", "protocol_error",
-    "diarization_ready", "diarized",
+    "diarization_ready", "diarized", "prompt_budget",
 })
 _FORBIDDEN_AUDIO_FIELDS = frozenset({"audio_b64", "audio_bytes", "audio_data", "binary"})
 
@@ -94,6 +94,12 @@ def decode_command(line: str) -> CommandEnvelope:
         model_name = payload.get("model_name")
         if not isinstance(model_name, str) or not model_name:
             raise ProtocolError("INVALID_PAYLOAD", f"{command} requires model_name")
+    elif command == "prompt_budget":
+        if not isinstance(payload.get("model_name"), str) or not payload["model_name"]:
+            raise ProtocolError("INVALID_PAYLOAD", "prompt_budget requires model_name")
+        for field in ("domain", "extra_terms"):
+            if field in payload and not isinstance(payload[field], str):
+                raise ProtocolError("INVALID_PAYLOAD", f"{field} must be a string")
     elif command == "diarize":
         audio_path = payload.get("audio_path")
         if not isinstance(audio_path, str) or not audio_path:

@@ -188,6 +188,93 @@ def build_prompt(domain: str, extra_terms: str = "") -> str:
     return "、".join(parts) if parts else ""
 
 
+# faster-whisper 只保留 initial_prompt 的最後 max_length // 2 - 1 個 token
+# （WhisperModel.max_length = 448 → 223），超過的部分從開頭默默丟掉。
+# 推論腳本設 condition_on_previous_text=False，詞彙 prompt 實際只作用於第一個 30 秒視窗，
+# 該視窗的 previous_tokens 只有 prompt 本身，所以 223 是精確上限。
+PROMPT_TOKEN_LIMIT = 448 // 2 - 1
+_PROMPT_TERM_SEPARATOR = re.compile(r"(\s*[,、，]\s*)")
+_prompt_tokenizers: dict = {}
+_prompt_tokenizers_lock = threading.Lock()
+
+
+def load_prompt_tokenizer(model_name: str):
+    """只讀本機快取的 tokenizer.json（不載權重、不連網）；取不到回傳 None。"""
+    with _prompt_tokenizers_lock:
+        if model_name in _prompt_tokenizers:
+            return _prompt_tokenizers[model_name]
+    try:
+        from huggingface_hub import try_to_load_from_cache
+        from tokenizers import Tokenizer
+        from model_runtime import ModelRuntimeManager
+
+        path = try_to_load_from_cache(ModelRuntimeManager.repository_id(model_name), "tokenizer.json")
+        if not isinstance(path, str) or not os.path.isfile(path):
+            return None
+        tokenizer = Tokenizer.from_file(path)
+    except Exception as exc:
+        logging.warning("[Whisper] prompt tokenizer unavailable for %s: %s", model_name, type(exc).__name__)
+        return None
+    with _prompt_tokenizers_lock:
+        _prompt_tokenizers[model_name] = tokenizer
+    return tokenizer
+
+
+def count_prompt_tokens(prompt: str, tokenizer) -> int:
+    """與 faster-whisper 相同的計算：" " + prompt.strip()，不加 special tokens。"""
+    if not prompt.strip():
+        return 0
+    return len(tokenizer.encode(" " + prompt.strip(), add_special_tokens=False).ids)
+
+
+def fit_prompt_to_budget(
+    domain: str, extra_terms: str, tokenizer, limit: int = PROMPT_TOKEN_LIMIT,
+) -> dict:
+    """以 build_prompt 組 prompt；超過 limit 時從開頭以「整個詞」為單位捨棄。
+
+    保留的 prompt 一定是原 prompt 從某個詞開頭起的後綴，分隔符維持原樣，
+    所以未超過時與 build_prompt 逐字相同，超過時也不會出現殘字。
+    """
+    full_prompt = build_prompt(domain, extra_terms)
+    pieces = _PROMPT_TERM_SEPARATOR.split(full_prompt)
+    # pieces 交錯為 [詞, 分隔符, 詞, ...]；記下每個非空詞在原字串中的起點
+    terms: list[tuple[int, str]] = []
+    offset = 0
+    for index, piece in enumerate(pieces):
+        if index % 2 == 0 and piece.strip():
+            terms.append((offset, piece.strip()))
+        offset += len(piece)
+
+    total_tokens = count_prompt_tokens(full_prompt, tokenizer)
+    prompt, tokens, dropped = full_prompt, total_tokens, 0
+    while tokens > limit and dropped < len(terms):
+        dropped += 1
+        prompt = full_prompt[terms[dropped][0]:] if dropped < len(terms) else ""
+        tokens = count_prompt_tokens(prompt, tokenizer)
+    return {
+        "prompt": prompt,
+        "tokens": tokens,
+        "total_tokens": total_tokens,
+        "limit": limit,
+        "kept_terms": [term for _, term in terms[dropped:]],
+        "dropped_terms": [term for _, term in terms[:dropped]],
+    }
+
+
+def budgeted_prompt(domain: str, extra_terms: str, model_name: str) -> str:
+    """轉錄用 prompt：tokenizer 可用時套用 token 上限，否則維持 build_prompt 原行為。"""
+    tokenizer = load_prompt_tokenizer(model_name)
+    if tokenizer is None:
+        return build_prompt(domain, extra_terms)
+    fitted = fit_prompt_to_budget(domain, extra_terms, tokenizer)
+    if fitted["dropped_terms"]:
+        logging.info(
+            "[Whisper] prompt over token budget: %d > %d, dropped %d terms",
+            fitted["total_tokens"], fitted["limit"], len(fitted["dropped_terms"]),
+        )
+    return fitted["prompt"]
+
+
 MERGED_PROMPT_MAX_CHARS = 200  # initial_prompt 合併後長度上限，避免過長被截斷或誤判為 prompt echo
 
 
@@ -596,7 +683,7 @@ def run_whisper(
 
         domain      = kwargs.get("domain", "general")
         extra_terms = kwargs.get("extra_terms", "")
-        prompt      = build_prompt(domain, extra_terms)
+        prompt      = budgeted_prompt(domain, extra_terms, model_name)
         # 分段錄音：合併前段結尾語境與領域詞彙 prompt，兩者皆保留
         prompt      = _merge_prompt(prompt, kwargs.get("initial_prompt_override", ""))
         normalized_language = _normalize_language_code(language)

@@ -13,6 +13,7 @@ enum WorkerSupervisorError: Error, Equatable {
     case transcriptionAlreadyActive
     case modelOperationActive
     case diarizationOperationActive
+    case workerUnavailable
 }
 
 struct WorkerLaunchConfiguration: Sendable {
@@ -124,6 +125,10 @@ final class WorkerSupervisor {
     private var readyObservers: [UUID: @MainActor @Sendable () -> Void] = [:]
     private var unavailableObservers: [UUID: @MainActor @Sendable (WorkerState) -> Void] = [:]
     private var statusObservers: [UUID: @MainActor @Sendable (String?, String) -> Void] = [:]
+    private var promptBudgetRequests: [String: CheckedContinuation<PromptBudget, any Error>] = [:]
+    /// A rejected command comes back as `protocol_error` without our request ID, so an
+    /// unanswered budget request is failed after this long instead of waiting forever.
+    var promptBudgetTimeout: Duration = .seconds(10)
 
     private var process: Process?
     private var input: FileHandle?
@@ -303,6 +308,34 @@ final class WorkerSupervisor {
             throw error
         }
         return requestID
+    }
+
+    /// Asks the Worker how many tokens the vocabulary prompt uses. Answered inline by the
+    /// Worker (never occupies the transcription job); throws if the Worker is unavailable.
+    func promptBudget(modelName: String, domain: String, extraTerms: String) async throws -> PromptBudget {
+        let requestID = UUID().uuidString
+        return try await withCheckedThrowingContinuation { continuation in
+            promptBudgetRequests[requestID] = continuation
+            do {
+                try send(WorkerCommand(
+                    requestID: requestID, command: "prompt_budget",
+                    payload: [
+                        "model_name": .string(modelName),
+                        "domain": .string(domain),
+                        "extra_terms": .string(extraTerms),
+                    ]
+                ))
+            } catch {
+                promptBudgetRequests[requestID] = nil
+                continuation.resume(throwing: error)
+                return
+            }
+            Task { [weak self, promptBudgetTimeout] in
+                try? await Task.sleep(for: promptBudgetTimeout)
+                self?.promptBudgetRequests.removeValue(forKey: requestID)?
+                    .resume(throwing: WorkerSupervisorError.workerUnavailable)
+            }
+        }
     }
 
     @discardableResult
@@ -557,6 +590,9 @@ final class WorkerSupervisor {
             }
             modelOperationInProgress = false
             modelRequestID = nil
+        case "prompt_budget":
+            promptBudgetRequests.removeValue(forKey: event.requestID)?
+                .resume(returning: PromptBudget(payload: event.payload))
         case "diarization_ready":
             guard event.requestID == diarizationRequestID else { return }
             diarizationStatus = event.payload["cached"] == .bool(true) ? "ready" : "needs_download"
@@ -689,6 +725,7 @@ final class WorkerSupervisor {
         state = .restarting(restartCount)
         log("worker_restart", level: .error, detail: "exit_status=\(status) attempt=\(restartCount)")
         loseActiveRequest()
+        failPendingPromptBudgets()
         do {
             try launch(configuration, isRestart: true)
         } catch {
@@ -704,6 +741,7 @@ final class WorkerSupervisor {
         default: break
         }
         loseActiveRequest()
+        failPendingPromptBudgets()
         if case .failed = state { notifyUnavailable(state) }
         if state == .stopped { notifyUnavailable(state) }
         output?.readabilityHandler = nil
@@ -738,6 +776,12 @@ final class WorkerSupervisor {
             process.waitUntilExit()
         }
         reset(state: .failed(message))
+    }
+
+    private func failPendingPromptBudgets() {
+        let pending = promptBudgetRequests.values
+        promptBudgetRequests.removeAll()
+        for continuation in pending { continuation.resume(throwing: WorkerSupervisorError.workerUnavailable) }
     }
 
     private func loseActiveRequest() {

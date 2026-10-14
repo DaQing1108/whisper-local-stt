@@ -90,6 +90,46 @@ struct WorkerSupervisorTests {
     }
 
     @Test
+    func promptBudgetRoundTripsTimesOutAndFailsPendingRequestsOnStop() async throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let workerScript = temporary.appendingPathComponent("fake_worker.py")
+        try fakeWorkerScript.write(to: workerScript, atomically: true, encoding: .utf8)
+        let supervisor = WorkerSupervisor()
+        try supervisor.start(
+            pythonURL: URL(fileURLWithPath: "/usr/bin/python3"),
+            workerURL: workerScript, workingDirectory: temporary
+        )
+        try await waitUntil { supervisor.state == .ready }
+
+        let budget = try await supervisor.promptBudget(
+            modelName: "base", domain: "media", extraTerms: "Zyntrix, Quorvane"
+        )
+        #expect(budget == PromptBudget(tokens: 231, limit: 223, droppedTerms: ["Zyntrix"], available: true))
+        #expect(budget.isOverLimit)
+        let missing = try await supervisor.promptBudget(
+            modelName: "not-downloaded", domain: "general", extraTerms: ""
+        )
+        #expect(missing == .unavailable)
+        #expect(supervisor.activeRequestID == nil)
+
+        supervisor.promptBudgetTimeout = .milliseconds(200)
+        await #expect(throws: WorkerSupervisorError.workerUnavailable) {
+            try await supervisor.promptBudget(modelName: "never-answers", domain: "general", extraTerms: "")
+        }
+        supervisor.promptBudgetTimeout = .seconds(10)
+
+        let pending = Task {
+            try await supervisor.promptBudget(modelName: "never-answers", domain: "general", extraTerms: "")
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        supervisor.stop()
+        await #expect(throws: WorkerSupervisorError.workerUnavailable) { try await pending.value }
+    }
+
+    @Test
     func diarizationWarmupAndDiarizeUpdateStatusAndSegments() async throws {
         let temporary = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -453,6 +493,15 @@ struct WorkerSupervisorTests {
                 emit(command["request_id"], "diarization_ready", {"cached":True,"segmentation_cached":True,"embedding_cached":True,"status":"cached"})
             elif command["command"] == "diarize":
                 emit(command["request_id"], "diarized", {"segments":[{"start":0.03,"end":19.12,"text":"a","speaker":"Speaker A"},{"start":19.12,"end":33.83,"text":"b","speaker":"Speaker B"}]})
+            elif command["command"] == "prompt_budget":
+                payload = command["payload"]
+                if payload["model_name"] == "never-answers":
+                    continue
+                if payload["model_name"] == "not-downloaded":
+                    emit(command["request_id"], "prompt_budget", {"tokens":0,"limit":223,"dropped_terms":[],"available":False})
+                    continue
+                assert payload["domain"] == "media" and payload["extra_terms"] == "Zyntrix, Quorvane"
+                emit(command["request_id"], "prompt_budget", {"tokens":231,"limit":223,"dropped_terms":["Zyntrix"],"available":True})
         """
     }
 

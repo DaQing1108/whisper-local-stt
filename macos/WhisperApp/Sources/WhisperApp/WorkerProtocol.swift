@@ -72,3 +72,35 @@ enum JSONValue: Codable, Sendable, Equatable {
         return nil
     }
 }
+
+/// Result of the Worker `prompt_budget` command: token usage of the vocabulary prompt
+/// (before trimming) against faster-whisper's 223-token initial_prompt window.
+struct PromptBudget: Equatable, Sendable {
+    let tokens: Int
+    let limit: Int
+    let droppedTerms: [String]
+    let available: Bool
+
+    static let unavailable = PromptBudget(tokens: 0, limit: 0, droppedTerms: [], available: false)
+
+    var isOverLimit: Bool { available && tokens > limit }
+
+    init(tokens: Int, limit: Int, droppedTerms: [String], available: Bool) {
+        self.tokens = tokens
+        self.limit = limit
+        self.droppedTerms = droppedTerms
+        self.available = available
+    }
+
+    init(payload: [String: JSONValue]) {
+        guard payload["available"] == .bool(true),
+              let tokens = payload["tokens"]?.number, let limit = payload["limit"]?.number else {
+            self = .unavailable
+            return
+        }
+        let dropped: [String]
+        if case .array(let values) = payload["dropped_terms"] { dropped = values.compactMap(\.string) }
+        else { dropped = [] }
+        self.init(tokens: Int(tokens), limit: Int(limit), droppedTerms: dropped, available: true)
+    }
+}

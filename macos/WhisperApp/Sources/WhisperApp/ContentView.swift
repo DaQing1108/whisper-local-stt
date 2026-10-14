@@ -19,6 +19,7 @@ struct ContentView: View {
     @Environment(MeetingSummaryController.self) var summaryController
     @Environment(VocabularyStore.self) var vocabulary
     @Environment(VocabularySuggestionController.self) var vocabularySuggestions
+    @Environment(VocabularyBudgetController.self) var vocabularyBudget
     @Environment(HistoryDeletionCoordinator.self) var historyDeletion
     @State var isChoosingFile = false
     @State var isChoosingBatchFiles = false
@@ -117,6 +118,7 @@ struct ContentView: View {
             presentNextCompletedResult = false
         }
         .onChange(of: currentEntryID) { _, _ in switchSummaryWorkspace() }
+        .onChange(of: vocabularyBudgetInputs, initial: true) { _, inputs in vocabularyBudget.scheduleRefresh(inputs) }
         .onChange(of: currentSummary?.updatedAt) { _, _ in
             if !isSummaryDirty { loadSummaryWorkspace() }
         }

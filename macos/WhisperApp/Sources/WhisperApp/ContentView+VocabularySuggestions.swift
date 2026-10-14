@@ -16,6 +16,7 @@ extension ContentView {
             if let addError = vocabularySuggestions.addError {
                 Text(addError).font(.caption).foregroundStyle(.red)
             }
+            if vocabularySuggestions.status == .loaded { vocabularyBudgetSuggestionWarning }
             if vocabularySuggestions.status == .loaded && vocabularySuggestions.suggestions.isEmpty {
                 Text("沒有新的建議詞彙").font(.caption).foregroundStyle(.secondary)
             }
