@@ -105,6 +105,22 @@ final class MeetingSummaryStore {
         try replaceAndPersist(summary)
     }
 
+    /// Saves the meeting name on its own. A record that has no summary yet is created with
+    /// status `.empty` (existing case and fields only), so a later `begin()` reuses it and keeps the name.
+    func saveTitle(transcriptionID: UUID, title: String) throws {
+        if var existing = summary(for: transcriptionID) {
+            guard existing.meetingTitle != title else { return }
+            existing.meetingTitle = title
+            existing.updatedAt = now()
+            try replaceAndPersist(existing)
+        } else {
+            try replaceAndPersist(MeetingSummary(
+                transcriptionID: transcriptionID, meetingTitle: title, status: .empty,
+                createdAt: now(), updatedAt: now()
+            ))
+        }
+    }
+
     func markUnpersistedFailure(transcriptionID: UUID, message: String) {
         guard let index = summaries.firstIndex(where: { $0.transcriptionID == transcriptionID }) else {
             writeError = message

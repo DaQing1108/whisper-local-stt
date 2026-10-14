@@ -73,9 +73,15 @@ struct ObsidianExportService: Sendable {
     }
 
     private func markdown(for entry: TranscriptionHistoryEntry, summary: MeetingSummary?) -> String {
-        let summarySection = summary.map {
-            "# \($0.meetingTitle)\n\n## AI 會議摘要\n\n\($0.effectiveText)\n\n## Source Transcript"
-        } ?? "# Transcription"
+        let summarySection: String
+        if let summary, !summary.effectiveText.isEmpty {
+            summarySection = "# \(summary.meetingTitle)\n\n## AI 會議摘要\n\n\(summary.effectiveText)\n\n## Source Transcript"
+        } else if let summary {
+            // A name-only record (status .empty): keep the meeting name, no empty summary section.
+            summarySection = "# \(summary.meetingTitle)\n\n## Source Transcript"
+        } else {
+            summarySection = "# Transcription"
+        }
         return """
         ---
         date: "\(ISO8601DateFormatter().string(from: entry.completedAt))"
