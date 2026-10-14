@@ -240,12 +240,6 @@ extension ContentView {
                 if let diarizationFailureMessage = worker.diarizationFailureMessage, worker.diarizationStatus == "failed" {
                     Text(diarizationFailureMessage).font(.caption).foregroundStyle(.red)
                 }
-                if !worker.diagnostics.isEmpty {
-                    DisclosureGroup("Worker diagnostics") {
-                        Text(worker.diagnostics).font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
         }
         .tint(DaylightPalette.accentActive)
     }

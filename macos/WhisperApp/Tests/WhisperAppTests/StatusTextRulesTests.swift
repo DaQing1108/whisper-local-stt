@@ -66,3 +66,20 @@ struct StatusTextRulesTests {
         #expect(StatusTextRules.batchStatus(.pending) == "等待中")
     }
 }
+
+@MainActor
+struct ModelDisplayNameTests {
+    @Test func largeV3IsMarkedSlowButStoredValueUnchanged() throws {
+        #expect(AppSettingsStore.displayName(for: "large-v3").contains("較慢"))
+        #expect(AppSettingsStore.displayName(for: "large-v3-turbo") == "large-v3-turbo（快速）")
+        #expect(AppSettingsStore.displayName(for: "base") == "base")
+        #expect(AppSettingsStore.supportedModels.contains("large-v3"))
+
+        let suite = "model-display-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettingsStore(defaults: defaults)
+        settings.defaultModel = "large-v3"
+        #expect(defaults.string(forKey: AppSettingsStore.modelKey) == "large-v3")
+    }
+}

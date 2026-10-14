@@ -57,9 +57,11 @@ struct AppSettingsStoreTests {
     @Test
     func displayNameLabelsTurboAndKeepsOtherModelNames() {
         #expect(AppSettingsStore.displayName(for: "large-v3-turbo") == "large-v3-turbo（快速）")
-        for model in ["tiny", "base", "small", "medium", "large-v3"] {
+        for model in ["tiny", "base", "small", "medium"] {
             #expect(AppSettingsStore.displayName(for: model) == model)
         }
+        // UI tidy round 1: large-v3 is labelled slow (it can stall on long recordings).
+        #expect(AppSettingsStore.displayName(for: "large-v3") == "large-v3（較慢，長錄音可能卡住）")
     }
 
     @Test

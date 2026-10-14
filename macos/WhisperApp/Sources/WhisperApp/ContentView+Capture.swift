@@ -95,10 +95,6 @@ extension ContentView {
                     Label(StatusTextRules.modelReadiness(worker.modelReadiness), systemImage: modelReadinessSymbol)
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Button("檢查模型") { checkModelStatus() }
-                        .disabled(worker.state != .ready || worker.modelOperationInProgress)
-                    Button("下載 / 驗證模型 Cache") { warmupSelectedModel() }
-                        .disabled(worker.state != .ready || worker.activeRequestID != nil || worker.modelOperationInProgress)
                 }
                 HStack {
                     Picker("領域", selection: Binding(

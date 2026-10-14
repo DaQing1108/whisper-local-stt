@@ -19,7 +19,11 @@ final class AppSettingsStore {
 
     /// Picker label only; the stored/Worker value is always the raw model name.
     static func displayName(for model: String) -> String {
-        model == "large-v3-turbo" ? "large-v3-turbo（快速）" : model
+        switch model {
+        case "large-v3-turbo": "large-v3-turbo（快速）"
+        case "large-v3": "large-v3（較慢，長錄音可能卡住）"
+        default: model
+        }
     }
     // Must match whisper_core.py's DOMAIN_TERMS keys exactly, or a selection silently
     // resolves to an empty prompt server-side.
