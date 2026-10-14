@@ -1,10 +1,10 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-10-14 17:45
-Phase: 逐字稿品質修正上線（A `2a06de1`、B `88b3914`、C `c4fbbbf`，Worker 重建並安裝）。起因：10/14 近 2 小時會議與 Teams 逐字稿對照。
-Working: (A) 時間軸改用 Worker 回傳的 chunk 實長推進、segment 夾在 chunk 範圍內、依 chunk 順序套用（`ChunkTimeline`，Mixed/Live 共用）；修正原本時間軸多出 377 秒的累積偏移，並修正靜音 chunk 插隊到仍在轉錄的 chunk 之前。(B) `llm_punctuate` 逐段驗證 LLM 輸出（後設回覆、長度比 0.7–1.3、行數差 ≤20%），不通過退回原文；自訂 prompt 只檢查後設回覆。(C) `clean_segments` 新增短句連續重複、句內循環、中文數字清單、外文字元污染（僅 zh）四條規則。以 10/14 會議 1,647 段離線重放：刪 43 段、改 21 段，無誤刪真實發言；真實拒答文字被擋下。測試：pytest 446、swift test 300（含 TSAN）。
-Next action: 使用者下一場會議實測（時間軸總長＝錄音實長、跳播位置正確）；已知限制：純英文亂碼不清除、移除外文字可能留下多餘標點、只修正之後的錄音；在會議室戴耳機測試遠端聲音回授是否為亂碼來源。舊版 `.bak` 已刪除。
+Last checkpoint: 2026-10-14 18:30
+Phase: UI/UX 整理第一輪上線（`199dbfa`、`d56eebf`、`21a4688`、`b25666a`、`f15631c`；whisper-bc 開發，已安裝，待使用者確認外觀）。
+Working: macOS 原生風格整理——介面中文化、轉錄引擎正常與閒置時不顯示狀態、主按鈕統一「開始錄音」；逐字稿預設閱讀模式（可點擊跳播的時間碼清單），按「編輯」才出現編輯框；模型檢查與診斷資訊移到偏好設定、large-v3 標示較慢；混音顯示麥克風／系統兩條音量，任一路連續 ≥20 秒無聲提示（音量只在既有收音處讀取，未動混音／切段／時間軸）。測試：swift test 321（含 TSAN）、pytest 446。
+Next action: 使用者確認外觀（控制列寬度、閱讀模式、偏好設定）；觀察系統音訊 20 秒無聲提示在會議中是否太敏感；下一輪處理錄音 controller 的英文錯誤訊息與選單列英文。
 Blockers: none（Gate E 仍待憑證，非本輪範圍）
 
 ### 舊記錄
@@ -75,6 +75,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-10-14 18:30｜UI/UX 整理第一輪上線
+- Completed: 依使用者決定（macOS 原生風格、預設閱讀模式）寫規格交 whisper-bc → 規劃端驗收（重跑測試、逐行檢查錄音 controller diff）→ ff push → 打包安裝
+- State: 321 Swift 測試全過；外觀待使用者確認
+- Next: 外觀確認、無聲提示敏感度、剩餘英文訊息
+
 ### 2026-10-14 17:45｜詞彙與逐字稿品質整輪收斂
 - Completed: 今日四輪上線（詞彙建議 `0c0741c`、token 上限 `c1deda5`、智慧保留＋誤聽修正 `091cab7`/`5628110`、逐字稿品質 `2a06de1`/`88b3914`/`c4fbbbf`），皆規劃端獨立驗收；舊版備份已清除
 - State: 安裝版簽章有效、與驗證暫存版一致；待使用者下一場會議實測
