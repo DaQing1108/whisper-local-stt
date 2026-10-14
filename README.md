@@ -1,10 +1,10 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-10-14 11:30
-Phase: 會後「詞彙建議」功能上線（AI Summary 分頁「建議詞彙」按鈕；`0c0741c`，已 push 並安裝到 `~/Applications/Whisper Swift.app`）。
-Working: 使用者按鈕觸發才把畫面上的逐字稿送 LLM（沿用摘要供應商與金鑰），回傳 JSON 候選詞；app 端過濾（不分大小寫去重既有詞彙、長度 1–40 且無換行、回應內去重、最多 20 筆）；使用者逐個或「全部加入」寫入 `VocabularyStore`，不自動觸發、不自動寫入。新增 `VocabularySuggestionClient/Controller`、`ContentView+VocabularySuggestions`，`VocabularyStore` 僅新增 `addAll`；零觸碰 Python／Package.swift／scripts／`MeetingSummaryClient`。驗收：`swift test` 與 `--sanitize=thread` 各 264 通過（規劃端獨立重跑）；新舊 `vocabulary.json` 互讀。分工：本 session 規劃／spec／驗收／push／打包，開發由 `whisper-d3` 完成（規格 `HANDOFF_CLAUDE_VOCAB_SUGGESTIONS.md`）。
-Next action: 使用者已於 2026-10-14 真機驗證「建議詞彙」正常（按鈕、候選詞、加入詞庫）；舊版備份 `.bak` 已刪除。後續觀察多場會議的建議品質；是否做 Obsidian／Notion 批次抽詞（另案）。
+Last checkpoint: 2026-10-14 13:30
+Phase: 詞彙 Prompt Token 上限上線（`c1deda5`，Worker 重建並安裝，使用者真機確認詞庫頁顯示正確）。
+Working: faster-whisper 的 initial_prompt 只保留最後 223 token（`448//2-1`），先前詞庫超過時會從開頭默默切掉、甚至留殘字。現在 `fit_prompt_to_budget` 以整個詞為單位從開頭捨棄（未超過時與 `build_prompt` 逐字相同），計法與 faster-whisper 一致（`add_special_tokens=False`）；Worker 新指令 `prompt_budget`（加法，不佔 job）；詞庫頁顯示「X / 223 tokens」、超過時警示並標「不會套用」，建議詞彙加入後超過也會警示；只警示不自動刪詞。使用者詞庫實測 228/223，捨棄 Dream Ku、Michael Chien（bundle 內驗證一致）。測試：pytest 397、swift test 275（含 TSAN）。同日實測否決「錄音後整段重轉」與「前段文字帶入 prompt」（時間碼偏移／副作用多）。
+Next action: 下一輪——依使用頻率決定保留順序；誤聽修正表（建議詞彙的 heard_as 做精確替換，不佔 prompt）。使用者確認後刪 `~/Applications/Whisper Swift.app.bak`。
 Blockers: none（Gate E 仍待憑證，非本輪範圍）
 
 ### 舊記錄
@@ -75,6 +75,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-10-14 13:30｜詞彙 Prompt Token 上限上線
+- Completed: 實測 prompt 截斷問題 → spec-writer 規格交 whisper-d3 → 規劃端獨立驗收（重跑測試、實際詞庫重現 228/223）→ ff push `c1deda5` → 重建 Worker、打包（清除 iCloud 混入的 184 個「 2」副本後重簽）→ 安裝
+- State: 使用者真機確認詞庫頁顯示 228/223 與「不會套用」標示
+- Next: 依頻率保留＋誤聽修正表
+
 ### 2026-10-14 11:30｜會後詞彙建議功能上線
 - Completed: 檢查 10/14 三分鐘會議錄音（品質正常，逐字稿專有名詞誤聽多）→ 規劃「詞彙建議」並以 spec-writer 寫規格 → SendMessage 交 `whisper-d3` 開發 → 規劃端獨立驗收（diff 範圍、264 測試＋TSAN、無自動觸發）→ ff 併入 `whisper-swift` 並 push → 打包安裝
 - State: `swift test` 264 通過（含 TSAN）；新版 app 簽章驗證通過、Worker ready、含「建議詞彙」；真實 LLM 回應品質與 UI 排版尚待使用者真機驗證
