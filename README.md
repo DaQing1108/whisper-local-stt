@@ -1,10 +1,10 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-10-14 15:00
-Phase: 詞彙智慧保留＋誤聽修正表上線（Part A `091cab7`、Part B `5628110`，Worker 重建並安裝；使用者已開啟，回填在真實資料驗證通過）。
-Working: (A) 送進 prompt 的順序改依「最近活動時間」max(addedAt, lastSeenAt) 由舊到新，最重要的在尾端不被截斷；usage 存 `vocabulary-usage.json`（vocabulary.json 格式不變），首次以歷史回填；實測 228/223 時改為捨棄從未出現的 Steve Liu、Tom Liu（不再是 Dream Ku、Michael Chien）。(B) 誤聽修正規則存 `correction-rules.json`，`transcribe` 新增選填 `corrections`，在 Worker 出口精確替換（ASCII 邊界、長規則優先、區分大小寫）；建議詞彙可勾選一併建立 heard_as→term 規則；bundle 實測 `free 上傳`→`FTP 上傳`、`Briant`→`Brand`。測試：pytest 410、swift test 292（含 TSAN）。
-Next action: 觀察真實會議的修正效果；已知盲點：「從未出現」可能是每次都被聽錯，會被優先捨棄——視情況加「釘選」或請使用者建立修正規則；修正規則區分大小寫，若語意校對改變大小寫導致常失效，評估改不分大小寫。使用者確認後刪 `.bak`。
+Last checkpoint: 2026-10-14 17:30
+Phase: 逐字稿品質修正上線（A `2a06de1`、B `88b3914`、C `c4fbbbf`，Worker 重建並安裝）。起因：10/14 近 2 小時會議與 Teams 逐字稿對照。
+Working: (A) 時間軸改用 Worker 回傳的 chunk 實長推進、segment 夾在 chunk 範圍內、依 chunk 順序套用（`ChunkTimeline`，Mixed/Live 共用）；修正原本時間軸多出 377 秒的累積偏移，並修正靜音 chunk 插隊到仍在轉錄的 chunk 之前。(B) `llm_punctuate` 逐段驗證 LLM 輸出（後設回覆、長度比 0.7–1.3、行數差 ≤20%），不通過退回原文；自訂 prompt 只檢查後設回覆。(C) `clean_segments` 新增短句連續重複、句內循環、中文數字清單、外文字元污染（僅 zh）四條規則。以 10/14 會議 1,647 段離線重放：刪 43 段、改 21 段，無誤刪真實發言；真實拒答文字被擋下。測試：pytest 446、swift test 300（含 TSAN）。
+Next action: 使用者下一場會議實測（時間軸總長＝錄音實長、跳播位置正確）；已知限制：純英文亂碼不清除、移除外文字可能留下多餘標點、只修正之後的錄音；在會議室戴耳機測試遠端聲音回授是否為亂碼來源。使用者確認後刪 `.bak`。
 Blockers: none（Gate E 仍待憑證，非本輪範圍）
 
 ### 舊記錄
@@ -75,6 +75,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-10-14 17:30｜逐字稿品質修正上線
+- Completed: Whisper vs Teams 逐字稿對照找出時間碼偏移、LLM 拒答混入、幻聽三類問題 → spec-writer 規格交 whisper-bc → 規劃端獨立驗收（重跑測試、真實 segment 離線重放、bundle 內新程式確認）→ ff push → 重建 Worker、打包、安裝
+- State: 驗收全過；使用者確認無日文會議，接受 Part C 取捨
+- Next: 下一場會議實測時間軸與幻聽過濾
+
 ### 2026-10-14 15:00｜詞彙智慧保留＋誤聽修正表上線
 - Completed: spec-writer 規格交 whisper-d3 → 規劃端獨立驗收（重跑測試、diff 範圍、bundle 內 corrections 往返）→ ff push → 重建 Worker、打包（再次清除 iCloud 混入副本並重簽）→ 安裝 → 真實資料驗證回填與排序
 - State: 回填 36/50 詞有出現紀錄；捨棄改為從未出現的詞
