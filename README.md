@@ -1,12 +1,11 @@
 # 🎙️ Whisper STT 本地語音轉文字系統 v2.4.0
 
 ## Current State
-Last checkpoint: 2026-10-13 15:00
-Phase: 送出失敗原因記錄、假字幕規則泛化、講者辨識進行中錄音提示上線，版號 0.2.6 → 0.2.7（`9aea5e3`、`b594b17`、`9f79c22`、`39a43bf`；皆 push 並安裝到 `~/Applications/Whisper Swift.app`）。
-Working: (1) 診斷：`WorkerSupervisor.transcribe` 的三個 guard 拒絕時以 error 等級記 `submit_rejected`（reason=transcriptionAlreadyActive/modelOperationActive/diarizationOperationActive、active_request 前 8 碼、state）；`OrderedChunkSubmissionQueue` 送出失敗記 `queue_submit_failed`（脫敏）並於每個失敗 episode 首次記一次 `queue_paused`；Worker/job 生命週期事件由 info 改 notice 等級，會持久化到 unified log（`/usr/bin/log show --predicate 'subsystem == "com.via.whisper-swiftui"'` 不加 --info 也看得到）。(2) `clean_segments` 假字幕規則新增 `^\s*字幕[^\s，。,.:：]{1,4}者[\s:：]*[^\s，。,.]{0,6}\s*$`，涵蓋 字幕作成者／制作者／製作者／志願者＋人名；用 142 份歷史重放只多抓到 2 行（字幕作成者 李宗盛），字幕機／中文字幕等真實內容保留。(3) 錄音區新增提示（`CaptureUIRules.transcriptionDeferralNotice`）：講者辨識或模型操作進行中且正在錄音時顯示橘色小字「…這次錄音的轉錄會等…才開始（錄音檔會正常儲存）」，不阻擋開始錄音。測試：`tests/unit` 379、`swift test` 243 通過。
-根因（已由使用者確認）：講者辨識尚未結束就開始新會議錄音；Worker 同一時間只做一件事，辨識進行中拒絕新轉錄，錄音中各段送出失敗（63 次、每 5 秒重試），停止後才補轉；逐字稿與錄音檔完整，只是失去即時預覽。程式缺口：`canStartMixedAudioRecording`/`canStartLiveRecording` 只檢查 `worker.activeRequestID == nil`。
-Next action: 觀察下次講者辨識進行中錄音時提示是否出現且清楚（AC-5）；看門狗在 app 內真的觸發（診斷出現 beam_size=1）；`MixedSettings` 暫時診斷日誌穩定後請 `whisper-d5` 移除；是否把講者辨識獨立成另一個 Worker 行程（根本解法）；`exportDiagnostics()` 接 UI；Swift 端單段重試上限視診斷決定。
-Blockers: none（Gate E notarization/Developer ID 簽章仍待使用者提供憑證，非本輪範圍）
+Last checkpoint: 2026-10-14 11:30
+Phase: 會後「詞彙建議」功能上線（AI Summary 分頁「建議詞彙」按鈕；`0c0741c`，已 push 並安裝到 `~/Applications/Whisper Swift.app`）。
+Working: 使用者按鈕觸發才把畫面上的逐字稿送 LLM（沿用摘要供應商與金鑰），回傳 JSON 候選詞；app 端過濾（不分大小寫去重既有詞彙、長度 1–40 且無換行、回應內去重、最多 20 筆）；使用者逐個或「全部加入」寫入 `VocabularyStore`，不自動觸發、不自動寫入。新增 `VocabularySuggestionClient/Controller`、`ContentView+VocabularySuggestions`，`VocabularyStore` 僅新增 `addAll`；零觸碰 Python／Package.swift／scripts／`MeetingSummaryClient`。驗收：`swift test` 與 `--sanitize=thread` 各 264 通過（規劃端獨立重跑）；新舊 `vocabulary.json` 互讀。分工：本 session 規劃／spec／驗收／push／打包，開發由 `whisper-d3` 完成（規格 `HANDOFF_CLAUDE_VOCAB_SUGGESTIONS.md`）。
+Next action: 使用者用真實會議逐字稿按「建議詞彙」，驗證真實 OpenAI／Anthropic 是否穩定回純 JSON、建議品質與畫面排版；確認後刪除 `~/Applications/Whisper Swift.app.bak`。
+Blockers: none（Gate E 仍待憑證，非本輪範圍）
 
 ### 舊記錄
 Last checkpoint: 2026-10-13 11:30
@@ -76,6 +75,11 @@ Next action：A（音量平衡）與 B（切點對齊）仍缺「舊 build 同�
 Blockers: Gate E（Developer ID notarization / 乾淨 Mac 測試 / Sparkle）仍待使用者提供 Apple Developer 憑證，尚未開始。三週的 `WHISPER_DEBUG_SEPARATE_TRACKS` SPIKE 本輪已清除（不再是 dirty state）。
 
 ## Checkpoint History
+### 2026-10-14 11:30｜會後詞彙建議功能上線
+- Completed: 檢查 10/14 三分鐘會議錄音（品質正常，逐字稿專有名詞誤聽多）→ 規劃「詞彙建議」並以 spec-writer 寫規格 → SendMessage 交 `whisper-d3` 開發 → 規劃端獨立驗收（diff 範圍、264 測試＋TSAN、無自動觸發）→ ff 併入 `whisper-swift` 並 push → 打包安裝
+- State: `swift test` 264 通過（含 TSAN）；新版 app 簽章驗證通過、Worker ready、含「建議詞彙」；真實 LLM 回應品質與 UI 排版尚待使用者真機驗證
+- Next: 使用者真機驗證；確認後清 `.bak`；視成效再評估自動從 Obsidian／Notion 抽詞（另案）
+
 ### 2026-10-13 15:00｜送出失敗記錄、假字幕泛化、辨識進行中錄音提示上線，版號 0.2.7
 - Completed: 為「錄音中途沒有即時轉錄」加診斷並由使用者確認根因（講者辨識進行中又開始錄音）；上線 submit_rejected／queue_submit_failed／queue_paused 日誌與 notice 持久化（獨立審查 APPROVE）；假字幕規則泛化（歷史重放驗證）；錄音區「轉錄會延後」提示；版號 0.2.6→0.2.7；與 `whisper-d5` 分工（本 session 規劃/驗收/push/打包）
 - State: `tests/unit` 379、`swift test` 243 通過；0.2.7 已安裝，簽章驗證通過；打包踩坑：`dist/` 在 iCloud 目錄，隔離屬性（quarantine）與 FinderInfo 會被加回，導致簽章失效、複製後 app 被系統移走一次（已從 .bak 還原）；之後流程改為：清 dist/WhisperWorker 的 ` 2` 副本與 quarantine → 組裝 → 立刻 `ditto --noqtn` 到 /tmp 暫存 → 清屬性、`codesign --verify`、Gate B → 才安裝到 ~/Applications 並再驗
