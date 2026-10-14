@@ -38,6 +38,7 @@ struct PendingRetranscribeResultOverwrite: Identifiable {
 enum WorkspaceTab: Hashable, Identifiable, CaseIterable {
     case transcript
     case summary
+    case vocabulary
 
     var id: Self { self }
 
@@ -45,28 +46,14 @@ enum WorkspaceTab: Hashable, Identifiable, CaseIterable {
         switch self {
         case .transcript: "逐字稿"
         case .summary: "AI 摘要"
+        case .vocabulary: "詞彙建議"
         }
     }
 }
 
 extension ContentView {
     var workspaceContainer: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("工作區").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-                PillSegmentedControl(
-                    options: WorkspaceTab.allCases,
-                    selection: $selectedWorkspaceTab,
-                    accessibilityLabel: "工作區分頁"
-                ) { tab in Text(tab.title) }
-            }
-            switch selectedWorkspaceTab {
-            case .transcript: transcriptContent
-            case .summary: summaryContent
-            }
-        }
+        reviewPage
         .cardStyle()
         .onChange(of: worker.diarizedSegments) { _, segments in
             guard !segments.isEmpty else { return }
@@ -156,92 +143,8 @@ extension ContentView {
         }
     }
 
-    private var transcriptContent: some View {
-        VStack(alignment: .leading, spacing: 10) {
-                if TranscriptViewRules.showsJobControls(
-                    hasActiveRequest: worker.activeRequestID != nil,
-                    isChunkedCaptureActive: liveOwnsMicrophone || mixedAudioOwnsCapture
-                ) {
-                    HStack {
-                        Text(StatusTextRules.jobStatus(worker.jobStatus)).font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("取消", role: .destructive) { try? worker.cancel() }
-                            .disabled(worker.activeJobID == nil)
-                    }
-                    ProgressView(value: worker.progress)
-                }
-                Text(worker.llmPunctuationEnabled ? "✨ 語意校對：已啟用" : "🔇 語意校對：未設定 API Key，已跳過")
-                    .font(.caption2).foregroundStyle(.secondary)
-                if mixedAudioRecording.isDraining {
-                    Text("⏳ 混音錄音已停止，最後片段仍在轉錄中…")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-                transcriptBody
-                HStack {
-                    Button(TranscriptViewRules.editToggleLabel(isEditing: isEditingTranscript)) {
-                        isEditingTranscript.toggle()
-                    }
-                    .buttonStyle(.bordered)
-                    Button("儲存修改") { saveDraft() }.disabled(currentEntryID == nil)
-                        .buttonStyle(.bordered)
-                    Button("複製") { copyDraft() }.disabled(transcriptDraft.isEmpty)
-                        .buttonStyle(.bordered)
-                    if TranscriptViewRules.showsClearButton(isEditing: isEditingTranscript) {
-                        Button("清空文字") { transcriptDraft = ""; isDraftDirty = true }.disabled(transcriptDraft.isEmpty)
-                            .buttonStyle(.bordered)
-                    }
-                    if let entry = currentEntry {
-                        Button(audioPlayer?.isPlaying == true ? "暫停音訊" : "播放音訊") { togglePlayback(entry) }
-                            .buttonStyle(.bordered)
-                        if !worker.diarizationAvailable && worker.diarizationStatus != "ready" {
-                            Button(worker.diarizationStatus == "loading" ? "下載模型中…" : "下載講者辨識模型") {
-                                triggerDiarizationWarmup()
-                            }
-                            .disabled(worker.diarizationOperationInProgress || worker.activeRequestID != nil)
-                            .buttonStyle(.bordered)
-                        }
-                        TextField("已知講者人數", text: $knownSpeakerCount)
-                            .frame(width: 90)
-                            .disabled(worker.diarizationOperationInProgress || worker.activeRequestID != nil)
-                        Button("辨識講者") { triggerDiarization(entry) }
-                            .disabled(entry.segments.isEmpty || worker.diarizationOperationInProgress || worker.activeRequestID != nil)
-                            .buttonStyle(.bordered)
-                        if !SpeakerRename.extractSpeakerLabels(from: transcriptDraft).isEmpty {
-                            Button("重新命名講者") { openSpeakerRenameSheet() }
-                                .buttonStyle(.bordered)
-                        }
-                        Menu("匯出") {
-                            ForEach(TranscriptionExportFormat.allCases) { format in
-                                Button(format.rawValue) { export(entry, as: format) }
-                                    .disabled(format == .srt && entry.segments.isEmpty)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .menuStyle(.button)
-                    }
-                }
-                if worker.diarizationStatus == "processing" {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
-                        Text("講者辨識進行中，可能需要數十秒…").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                if let diarizationFailureMessage = worker.diarizationFailureMessage, worker.diarizationStatus == "failed" {
-                    Text(diarizationFailureMessage).font(.caption).foregroundStyle(.red)
-                }
-        }
-        .tint(DaylightPalette.accentActive)
-    }
-
-    private static let playbackPollInterval: TimeInterval = 0.3
+    static let playbackPollInterval: TimeInterval = 0.3
     static let activeSegmentHighlightOpacity: Double = 0.18
-
-    static func segmentLabel(_ segment: TranscriptionSegment) -> String {
-        let wholeSeconds = max(0, Int(segment.start.rounded(.down)))
-        let timestamp = String(format: "%02d:%02d", wholeSeconds / 60, wholeSeconds % 60)
-        let speakerPrefix = segment.speaker.map { "[\($0)] " } ?? ""
-        return "[\(timestamp)] \(speakerPrefix)\(segment.text)"
-    }
 
     static func renderSpeakerLabeled(_ segments: [TranscriptionSegment]) -> String {
         segments.map { segment in
@@ -323,13 +226,9 @@ extension ContentView {
         }
     }
 
-    private var summaryContent: some View {
+    var summaryContent: some View {
         VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    TextField("會議標題", text: Binding(
-                        get: { meetingTitle },
-                        set: { meetingTitle = $0; isSummaryDirty = true }
-                    ))
                     Picker("供應商", selection: Binding(
                         get: { settings.summaryProvider },
                         set: { settings.summaryProvider = $0 }
@@ -341,7 +240,8 @@ extension ContentView {
                     .frame(width: 190)
                     .disabled(summaryController.activeTranscriptionID != nil)
                     Spacer()
-                    if let summary = currentSummary {
+                    // A name-only record (status .empty) has no summary to describe.
+                    if let summary = currentSummary, ReviewHeaderRules.hasSummaryContent(summary) {
                         StatusBadge(
                             text: "\(summary.provider) · \(summary.status.rawValue)",
                             color: summary.status.daylightColor
@@ -353,7 +253,7 @@ extension ContentView {
                     set: { summaryDraft = $0; isSummaryDirty = true }
                 ))
                 .lineSpacing(8)
-                .frame(minHeight: 150, maxHeight: 260)
+                .frame(minHeight: 300, maxHeight: .infinity)
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
                 HStack {
                     Button("產生摘要") { generateSummary() }
@@ -361,14 +261,11 @@ extension ContentView {
                         .tint(DaylightPalette.accentActive)
                         .disabled(currentEntryID == nil || summaryController.activeTranscriptionID != nil)
                     Button("儲存摘要修改") { saveSummaryEdit() }
-                        .disabled(currentEntryID == nil || currentSummary == nil || !isSummaryDirty)
-                    Button(vocabularySuggestions.isLoading ? "建議中…" : "建議詞彙") { requestVocabularySuggestions() }
-                        .disabled(!canRequestVocabularySuggestions)
+                        .disabled(currentEntryID == nil || !ReviewHeaderRules.hasSummaryContent(currentSummary) || !isSummaryDirty)
                     if let error = currentSummary?.errorMessage {
                         Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
                     }
                 }
-                vocabularySuggestionList
         }
     }
 
@@ -453,6 +350,9 @@ extension ContentView {
 
     func restore(_ entry: TranscriptionHistoryEntry) {
         if currentEntryID != entry.id {
+            // Save a header name still being typed while the old record is current.
+            commitMeetingTitle()
+            transcriptSearchPosition = nil
             // A different record: start in reading mode, scrolled to its top.
             isEditingTranscript = false
             isTranscriptListAtBottom = false
@@ -654,52 +554,6 @@ extension ContentView {
     func copyDraft() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(transcriptDraft, forType: .string)
-    }
-
-    func togglePlayback(_ entry: TranscriptionHistoryEntry) {
-        do {
-            if audioPlayer?.isPlaying == true { audioPlayer?.pause(); return }
-            if audioPlayer == nil { audioPlayer = try AVAudioPlayer(contentsOf: URL(fileURLWithPath: entry.audioPath)) }
-            audioPlayer?.play()
-            errorMessage = nil
-        } catch { errorMessage = "無法播放來源音訊：\(error.localizedDescription)" }
-    }
-
-    func seek(to segment: TranscriptionSegment, index: Int, in entry: TranscriptionHistoryEntry) {
-        do {
-            let audioURL = URL(fileURLWithPath: entry.audioPath)
-            if audioPlayer == nil || audioPlayer?.url != audioURL {
-                audioPlayer = try AVAudioPlayer(contentsOf: audioURL)
-            }
-            audioPlayer?.currentTime = segment.start
-            audioPlayer?.play()
-            playingSegmentIndex = index
-            errorMessage = nil
-            startPlaybackPolling(entry)
-        } catch { errorMessage = "無法播放來源音訊：\(error.localizedDescription)" }
-    }
-
-    func startPlaybackPolling(_ entry: TranscriptionHistoryEntry) {
-        stopPlaybackPolling()
-        playbackPollTimer = Timer.scheduledTimer(withTimeInterval: Self.playbackPollInterval, repeats: true) { _ in
-            Task { @MainActor in
-                guard let player = audioPlayer, player.isPlaying else {
-                    stopPlaybackPolling()
-                    return
-                }
-                let currentTime = player.currentTime
-                // Segments may have gaps (silence with no transcript); when currentTime falls in
-                // a gap, deliberately keep the previous highlight rather than clearing it.
-                if let match = entry.segments.firstIndex(where: { currentTime >= $0.start && currentTime < $0.end }) {
-                    playingSegmentIndex = match
-                }
-            }
-        }
-    }
-
-    func stopPlaybackPolling() {
-        playbackPollTimer?.invalidate()
-        playbackPollTimer = nil
     }
 
     func export(_ entry: TranscriptionHistoryEntry, as format: TranscriptionExportFormat) {

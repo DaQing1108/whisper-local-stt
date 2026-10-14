@@ -29,7 +29,7 @@ extension ContentView {
                             }
                             Text(entry.text).lineLimit(3).textSelection(.enabled)
                             HStack {
-                                Button("載入結果") { restore(entry) }
+                                Button("載入結果") { restore(entry); selectedSection = .capture }
                                 Button("發布會議筆記至 Obsidian") { exportToObsidian(entry) }
                                     .disabled(settings.obsidianVaultPath.isEmpty)
                                 Button("發布至 Notion") { publishToNotion(entry) }

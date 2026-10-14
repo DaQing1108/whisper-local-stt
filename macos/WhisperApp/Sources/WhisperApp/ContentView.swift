@@ -74,6 +74,12 @@ struct ContentView: View {
     @State var languageDraft = ""
     @State var isSettingsPopoverPresented = false
     @State var selectedWorkspaceTab: WorkspaceTab = .transcript
+    @State var transcriptSearchQuery = ""
+    @State var transcriptSearchPosition: Int?
+    @State var playbackRate: Float = 1
+    @State var scrubTime: TimeInterval?
+    @State var isDiarizationSheetPresented = false
+    @FocusState var isMeetingTitleFocused: Bool
 
     var body: some View {
         NavigationSplitView {
@@ -90,11 +96,22 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 12)
                 Divider()
+                if selectedSection ?? .capture == .capture {
+                    // The review page fills the remaining height: header and playback bar stay put,
+                    // only the tab content scrolls. Other sections keep their scrolling layout.
+                    VStack(alignment: .leading, spacing: 8) {
+                        workspaceContainer.frame(maxHeight: .infinity)
+                        messages
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(24)
+                    .background(DaylightPalette.surface)
+                } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: DaylightMetric.sectionSpacing) {
                         switch selectedSection ?? .capture {
                         case .capture:
-                            workspaceContainer
+                            EmptyView()
                         case .history:
                             historySection
                         case .vocabulary:
@@ -111,6 +128,7 @@ struct ContentView: View {
                     .padding(24)
                 }
                 .background(DaylightPalette.surface)
+                }
             }
         }
         .frame(minWidth: 820, minHeight: 620)

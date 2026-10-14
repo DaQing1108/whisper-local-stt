@@ -8,6 +8,21 @@ extension ContentView {
         return !transcriptDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// 「詞彙建議」tab: the request button (moved out of the AI 摘要 tab) and the candidate list.
+    var vocabularySuggestionsTab: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Button(vocabularySuggestions.isLoading ? "建議中…" : "建議詞彙") { requestVocabularySuggestions() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(DaylightPalette.accentActive)
+                    .disabled(!canRequestVocabularySuggestions)
+                Text("把逐字稿送給 AI，找出可能被誤聽的專有名詞；確認後再加入詞庫。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            vocabularySuggestionList
+        }
+    }
+
     @ViewBuilder var vocabularySuggestionList: some View {
         if vocabularySuggestions.sourceTranscriptionID == currentEntry?.id {
             if case let .failed(message) = vocabularySuggestions.status {
