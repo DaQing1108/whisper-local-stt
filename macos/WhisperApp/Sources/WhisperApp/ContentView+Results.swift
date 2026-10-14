@@ -158,7 +158,10 @@ extension ContentView {
 
     private var transcriptContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-                if TranscriptViewRules.showsJobControls(hasActiveRequest: worker.activeRequestID != nil) {
+                if TranscriptViewRules.showsJobControls(
+                    hasActiveRequest: worker.activeRequestID != nil,
+                    isChunkedCaptureActive: liveOwnsMicrophone || mixedAudioOwnsCapture
+                ) {
                     HStack {
                         Text(StatusTextRules.jobStatus(worker.jobStatus)).font(.caption).foregroundStyle(.secondary)
                         Spacer()
@@ -173,21 +176,7 @@ extension ContentView {
                     Text("⏳ 混音錄音已停止，最後片段仍在轉錄中…")
                         .font(.caption).foregroundStyle(.orange)
                 }
-                if TranscriptViewRules.showsUnsavedNotice(isEditing: isEditingTranscript, isDraftDirty: isDraftDirty) {
-                    Label("有未儲存的修改", systemImage: "pencil.circle")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-                switch TranscriptViewRules.body(
-                    isEditing: isEditingTranscript,
-                    hasSegments: !(currentEntry?.segments.isEmpty ?? true)
-                ) {
-                case .editor:
-                    transcriptEditor
-                case .segmentList:
-                    if let entry = currentEntry { segmentListView(entry) }
-                case .readOnlyText:
-                    transcriptReadOnlyText
-                }
+                transcriptBody
                 HStack {
                     Button(TranscriptViewRules.editToggleLabel(isEditing: isEditingTranscript)) {
                         isEditingTranscript.toggle()
@@ -245,79 +234,7 @@ extension ContentView {
     }
 
     private static let playbackPollInterval: TimeInterval = 0.3
-    private static let activeSegmentHighlightOpacity: Double = 0.18
-
-    private static let transcriptAreaMinHeight: CGFloat = 300
-    private static let transcriptAreaMaxHeight: CGFloat = 420
-
-    private var transcriptEditor: some View {
-        TextEditor(text: Binding(
-            get: { transcriptDraft },
-            set: { transcriptDraft = $0; isDraftDirty = true }
-        ))
-            .lineSpacing(8)
-            .overlay(alignment: .topLeading) {
-                if transcriptDraft.isEmpty {
-                    Text("完成錄音或選擇音訊檔後，逐字稿會顯示在這裡。")
-                        .foregroundStyle(.tertiary).padding(8).allowsHitTesting(false)
-                }
-            }
-            .background(.background, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-            .frame(minHeight: Self.transcriptAreaMinHeight, maxHeight: Self.transcriptAreaMaxHeight)
-    }
-
-    /// Reading mode for records without timecoded segments (older or text-only entries).
-    private var transcriptReadOnlyText: some View {
-        ScrollView {
-            Text(transcriptDraft.isEmpty ? "完成錄音或選擇音訊檔後，逐字稿會顯示在這裡。" : transcriptDraft)
-                .foregroundStyle(transcriptDraft.isEmpty ? .tertiary : .primary)
-                .lineSpacing(8)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-        }
-        .frame(minHeight: Self.transcriptAreaMinHeight, maxHeight: Self.transcriptAreaMaxHeight)
-        .background(.background, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-    }
-
-    private func segmentListView(_ entry: TranscriptionHistoryEntry) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(entry.segments.enumerated()), id: \.offset) { index, segment in
-                        Button {
-                            seek(to: segment, index: index, in: entry)
-                        } label: {
-                            Text(Self.segmentLabel(segment))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 6).padding(.vertical, 3)
-                                .background(
-                                    index == playingSegmentIndex
-                                        ? DaylightPalette.accentActive.opacity(Self.activeSegmentHighlightOpacity) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 4)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .id(index)
-                        .onAppear { if index == entry.segments.count - 1 { isTranscriptListAtBottom = true } }
-                        .onDisappear { if index == entry.segments.count - 1 { isTranscriptListAtBottom = false } }
-                    }
-                }
-                .padding(4)
-            }
-            .onChange(of: entry.segments.count) { oldCount, newCount in
-                guard TranscriptViewRules.shouldAutoScroll(
-                    isAtBottom: isTranscriptListAtBottom, segmentCountIncreased: newCount > oldCount
-                ) else { return }
-                proxy.scrollTo(newCount - 1, anchor: .bottom)
-            }
-        }
-        .frame(minHeight: Self.transcriptAreaMinHeight, maxHeight: Self.transcriptAreaMaxHeight)
-        .background(.background, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-    }
+    static let activeSegmentHighlightOpacity: Double = 0.18
 
     static func segmentLabel(_ segment: TranscriptionSegment) -> String {
         let wholeSeconds = max(0, Int(segment.start.rounded(.down)))
@@ -535,6 +452,11 @@ extension ContentView {
     }
 
     func restore(_ entry: TranscriptionHistoryEntry) {
+        if currentEntryID != entry.id {
+            // A different record: start in reading mode, scrolled to its top.
+            isEditingTranscript = false
+            isTranscriptListAtBottom = false
+        }
         currentEntryID = entry.id
         transientEntry = nil
         transcriptDraft = entry.text
@@ -549,6 +471,7 @@ extension ContentView {
         guard let currentEntryID else { return }
         do {
             try history.updateText(id: currentEntryID, text: transcriptDraft)
+            if let segments = currentEntry?.segments { segmentsWhenTranscriptEdited[currentEntryID] = segments }
             isDraftDirty = false
             errorMessage = nil
         }

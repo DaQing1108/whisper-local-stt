@@ -116,9 +116,26 @@ enum TranscriptViewRules {
         case editor
     }
 
-    static func body(isEditing: Bool, hasSegments: Bool) -> Body {
+    /// `draftDiverged`: the draft no longer matches the saved segments (unsaved edits, or an
+    /// edit saved since those segments were transcribed — e.g. speaker labels or a rename).
+    /// The timecode list would show stale text then, so reading mode shows the draft instead.
+    static func body(isEditing: Bool, hasSegments: Bool, draftDiverged: Bool = false) -> Body {
         if isEditing { return .editor }
-        return hasSegments ? .segmentList : .readOnlyText
+        return hasSegments && !draftDiverged ? .segmentList : .readOnlyText
+    }
+
+    /// True while there are unsaved edits, or an edit was saved and the segments have not been
+    /// re-transcribed since (`segmentsWhenEdited` equals the entry's current segments).
+    static func draftDiverged(
+        isDraftDirty: Bool,
+        segmentsWhenEdited: [TranscriptionSegment]?,
+        currentSegments: [TranscriptionSegment]
+    ) -> Bool {
+        isDraftDirty || segmentsWhenEdited == currentSegments
+    }
+
+    static func showsEditedNotice(isEditing: Bool, isDraftDirty: Bool, draftDiverged: Bool) -> Bool {
+        !isEditing && !isDraftDirty && draftDiverged
     }
 
     /// Reading mode shows saved segments; flag that the draft has edits not reflected there.
@@ -130,8 +147,11 @@ enum TranscriptViewRules {
 
     static func editToggleLabel(isEditing: Bool) -> String { isEditing ? "完成" : "編輯" }
 
-    /// Job status, progress bar and cancel only while a transcription request is in flight.
-    static func showsJobControls(hasActiveRequest: Bool) -> Bool { hasActiveRequest }
+    /// Job status, progress bar and cancel only while a transcription request is in flight —
+    /// but not per-chunk during live/mixed capture, where they would flicker on every chunk.
+    static func showsJobControls(hasActiveRequest: Bool, isChunkedCaptureActive: Bool = false) -> Bool {
+        hasActiveRequest && !isChunkedCaptureActive
+    }
 
     /// Follow new segments only when the user is already looking at the end of the list.
     static func shouldAutoScroll(isAtBottom: Bool, segmentCountIncreased: Bool) -> Bool {

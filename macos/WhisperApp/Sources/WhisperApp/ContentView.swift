@@ -39,6 +39,9 @@ struct ContentView: View {
     @State var isDraftDirty = false
     @State var isEditingTranscript = false
     @State var isTranscriptListAtBottom = true
+    /// Segments of each entry when an edited draft was saved (see TranscriptViewRules.draftDiverged).
+    /// Recorded only on save, so edits discarded by switching records leave no trace.
+    @State var segmentsWhenTranscriptEdited: [UUID: [TranscriptionSegment]] = [:]
     @State var diarizationTargetEntryID: UUID?
 @State var retranscribeTargetEntryID: UUID?
     @State var knownSpeakerCount = ""
