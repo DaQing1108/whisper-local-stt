@@ -58,6 +58,32 @@ extension ContentView {
         }
     }
 
+    /// 「混音 · turbo · 中文 · 詞庫 220/223」— opens the same quick-settings popover as the gear.
+    /// Not clickable while capturing (settings can't change mid-recording).
+    private var captureSettingsSummary: some View {
+        let summary = CaptureSummaryRules.summary(
+            mode: audioMode, includesMicrophone: settings.includeMicrophoneInMixedMode,
+            model: settings.defaultModel, language: settings.language, budget: vocabularyBudget.budget
+        )
+        return Button { isSettingsPopoverPresented = true } label: {
+            HStack(spacing: 0) {
+                Text(summary.main)
+                if let vocabulary = summary.vocabulary {
+                    Text(" · ")
+                    Text(vocabulary).foregroundStyle(summary.isVocabularyOverLimit ? Color.orange : Color.secondary)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+        .buttonStyle(.plain)
+        .disabled(anyCaptureActive)
+        .help("快速設定")
+        .accessibilityLabel("目前設定：\(summary.main)\(summary.vocabulary.map { "，\($0)" } ?? "")")
+    }
+
     private var controlBarRow: some View {
         HStack(spacing: 14) {
             Button(action: primaryCaptureAction) {
@@ -71,6 +97,8 @@ extension ContentView {
             // Never truncate the primary action; the meters and status text give way first.
             .fixedSize()
             .layoutPriority(1)
+
+            captureSettingsSummary
 
             if isPrimaryRecording, let captureStartedAt {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
