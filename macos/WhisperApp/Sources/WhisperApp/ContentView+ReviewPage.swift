@@ -230,8 +230,10 @@ extension ContentView {
                     isEditingTranscript.toggle()
                 }
                 .buttonStyle(.bordered)
-                Button("儲存修改") { saveDraft() }.disabled(currentEntryID == nil)
-                    .buttonStyle(.bordered)
+                if TranscriptViewRules.showsSaveButton(isDraftDirty: isDraftDirty) {
+                    Button("儲存修改") { saveDraft() }.disabled(currentEntryID == nil)
+                        .buttonStyle(.bordered)
+                }
                 if worker.diarizationStatus == "processing" {
                     ProgressView().controlSize(.small)
                     Text("講者辨識進行中，可能需要數十秒…").font(.caption).foregroundStyle(.secondary)

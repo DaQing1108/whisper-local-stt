@@ -143,3 +143,8 @@ enum ReviewHeaderRules {
         return summary.status != .empty || !summary.effectiveText.isEmpty
     }
 }
+
+extension TranscriptViewRules {
+    /// 「儲存修改」appears only when there is something to save.
+    static func showsSaveButton(isDraftDirty: Bool) -> Bool { isDraftDirty }
+}
