@@ -81,6 +81,10 @@ _FOREIGN_DROP_RATIO = 0.10        # foreign share of content chars at/above whic
 _FOREIGN_SHORT_SEGMENT_LEN = 6    # segments this short (content chars) go if any foreign char
 _EXTRA_SPACES_RE = re.compile(r'[ \t]{2,}')
 
+# English filler-only segments Whisper hallucinates in zh transcripts (whole segment only,
+# compared case-insensitively after removing punctuation/whitespace, so「uh-huh」→「uhhuh」).
+_ENGLISH_FILLERS = frozenset({"mm", "mmm", "mmmm", "hmm", "hm", "mhm", "uh", "um", "uhhuh"})
+
 DOMAIN_LABELS: dict[str, str] = {
     "media":   "媒體",
     "medical": "醫療",
@@ -231,6 +235,11 @@ def _clean_foreign_chars(text: str) -> Optional[str]:
     return _EXTRA_SPACES_RE.sub(' ', _FOREIGN_CHAR_RE.sub('', text)).strip()
 
 
+def _is_english_filler_only(text: str) -> bool:
+    """整段只有英文語助詞（mm、hmm、uh-huh…）；句中含有語助詞的正常句子不算。"""
+    return "".join(_content_chars(text)).lower() in _ENGLISH_FILLERS
+
+
 def _applies_foreign_rule(language: Optional[str]) -> bool:
     return bool(language) and language.lower().replace('_', '-').split('-')[0] == 'zh'
 
@@ -251,6 +260,11 @@ def clean_segments(segments: list[dict], language: Optional[str] = None) -> list
     for seg in segments:
         text = seg.get("text", "").strip()
         original_text = text
+
+        # 整段只有英文語助詞（僅 zh）→ 丟棄
+        if check_foreign and _is_english_filler_only(text):
+            rule_counts["english-filler dropped"] += 1
+            continue
 
         # 中文數字清單幻聽（「一、四、二、五、…」≥10 個）→ 整段丟棄
         if _NUMERAL_LIST_RE.search(text):
