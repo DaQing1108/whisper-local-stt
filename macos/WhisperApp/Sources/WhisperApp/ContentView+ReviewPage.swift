@@ -65,12 +65,38 @@ extension ContentView {
                 }
             }
             .layoutPriority(0)
+            recentMeetingsMenu
             Spacer(minLength: 8)
             if let entry = currentEntry {
                 exportMenu(entry)
                 moreActionsMenu(entry)
             }
         }
+    }
+
+    /// Recent meetings next to the name; picking one uses the existing `restore(entry)` switch
+    /// (which commits an unsaved name first), exactly like the history list's「載入結果」.
+    private var recentMeetingsMenu: some View {
+        Menu {
+            ForEach(RecentMeetingRules.recent(history.entries, excluding: currentEntryID)) { entry in
+                Button(RecentMeetingRules.label(
+                    for: entry,
+                    savedTitle: summaries.summary(for: entry.id)?.meetingTitle,
+                    durationSeconds: ReviewHeaderRules.durationSeconds(
+                        of: entry, actualAudioSeconds: actualAudioSeconds[entry.audioPath]
+                    )
+                )) { restore(entry) }
+            }
+            Divider()
+            Button("所有紀錄…") { selectedSection = .history }
+        } label: {
+            Image(systemName: "chevron.down")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("最近的會議")
+        .accessibilityLabel("切換到最近的會議")
     }
 
     private func headerFacts(_ entry: TranscriptionHistoryEntry) -> String {
