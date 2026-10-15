@@ -22,7 +22,7 @@ extension ContentView {
 
     private func playbackControls(_ entry: TranscriptionHistoryEntry) -> some View {
         let isPlaying = audioPlayer?.isPlaying == true
-        let duration = max(audioPlayer?.duration ?? ReviewHeaderRules.durationSeconds(of: entry) ?? 0, 0)
+        let duration = max(reviewDuration(of: entry) ?? 0, 0)
         let position = min(scrubTime ?? audioPlayer?.currentTime ?? 0, duration)
         return HStack(spacing: 10) {
             Button { togglePlayback(entry) } label: {

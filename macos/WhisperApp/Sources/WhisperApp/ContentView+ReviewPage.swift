@@ -25,6 +25,19 @@ extension ContentView {
             }
         }
         .sheet(isPresented: $isDiarizationSheetPresented) { diarizationSheet }
+        // Read the real audio length once per loaded record (file header only), cached in view state.
+        .task(id: currentEntry?.audioPath) {
+            guard let path = currentEntry?.audioPath, actualAudioSeconds[path] == nil else { return }
+            let seconds = await Task.detached(priority: .userInitiated) {
+                ReviewHeaderRules.sessionAudioDuration(atPath: path)
+            }.value
+            if let seconds { actualAudioSeconds[path] = seconds }
+        }
+    }
+
+    /// The one length source for the header, the playback bar's total and the scrubber range.
+    func reviewDuration(of entry: TranscriptionHistoryEntry) -> TimeInterval? {
+        ReviewHeaderRules.durationSeconds(of: entry, actualAudioSeconds: actualAudioSeconds[entry.audioPath])
     }
 
     func tabTitle(_ tab: WorkspaceTab) -> String {
@@ -62,7 +75,7 @@ extension ContentView {
 
     private func headerFacts(_ entry: TranscriptionHistoryEntry) -> String {
         var facts = [ReviewHeaderRules.dateText(entry.completedAt)]
-        if let duration = ReviewHeaderRules.durationSeconds(of: entry) { facts.append(PlaybackRules.timeText(duration)) }
+        if let duration = reviewDuration(of: entry) { facts.append(PlaybackRules.timeText(duration)) }
         let speakers = ReviewHeaderRules.speakerCount(entry.segments)
         if speakers > 0 { facts.append("\(speakers) 位講者") }
         return facts.joined(separator: " · ")
@@ -72,11 +85,15 @@ extension ContentView {
     /// Unchanged names are not written, so merely viewing a record never creates a summary record.
     func commitMeetingTitle() {
         guard let entry = currentEntry, currentEntryID == entry.id else { return }
+        let savedTitle = currentSummary?.meetingTitle
         let defaultTitle = ReviewHeaderRules.defaultTitle(for: entry)
-        let trimmed = meetingTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = trimmed.isEmpty ? defaultTitle : trimmed
+        guard let title = ReviewHeaderRules.titleToSave(
+            typed: meetingTitle, savedTitle: savedTitle, defaultTitle: defaultTitle
+        ) else {
+            meetingTitle = savedTitle ?? defaultTitle
+            return
+        }
         meetingTitle = title
-        guard title != (currentSummary?.meetingTitle ?? defaultTitle) else { return }
         do {
             try summaries.saveTitle(transcriptionID: entry.id, title: title)
             if var pending = pendingSummaryDrafts[entry.id] {

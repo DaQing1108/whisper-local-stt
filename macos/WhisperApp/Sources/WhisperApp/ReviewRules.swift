@@ -82,9 +82,33 @@ enum ReviewHeaderRules {
         return String(format: "%d/%d %02d:%02d", parts.month ?? 0, parts.day ?? 0, parts.hour ?? 0, parts.minute ?? 0)
     }
 
-    /// Recording length: stored duration, else the end of the last segment.
-    static func durationSeconds(of entry: TranscriptionHistoryEntry) -> TimeInterval? {
-        entry.durationSeconds ?? entry.segments.map(\.end).max()
+    /// Recording length: the audio file's real length first (older records stored an inflated
+    /// `durationSeconds` from before the timeline fix), then the stored length, then the last segment end.
+    static func durationSeconds(of entry: TranscriptionHistoryEntry, actualAudioSeconds: TimeInterval?) -> TimeInterval? {
+        actualAudioSeconds ?? entry.durationSeconds ?? entry.segments.map(\.end).max()
+    }
+
+    /// Real session length for a record's audio, or nil when the file is only one chunk of the
+    /// session (a mixed recording still in progress, or any live-mode record) — a chunk's length
+    /// would understate the meeting, so the stored length is used instead.
+    static func sessionAudioDuration(atPath path: String) -> TimeInterval? {
+        guard !isPerChunkAudio(path) else { return nil }
+        return audioFileDuration(atPath: path)
+    }
+
+    static func isPerChunkAudio(_ path: String) -> Bool {
+        let folder = URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
+        return folder == "LiveChunks" || folder == "MixedAudioChunks"
+    }
+
+    /// Real length from the audio file header only (frame count ÷ sample rate) — the audio data
+    /// itself is never read. nil when the file is missing or unreadable.
+    static func audioFileDuration(atPath path: String) -> TimeInterval? {
+        guard FileManager.default.fileExists(atPath: path),
+              let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else { return nil }
+        let sampleRate = file.processingFormat.sampleRate
+        guard sampleRate > 0 else { return nil }
+        return Double(file.length) / sampleRate
     }
 
     /// Distinct speakers in the segments; 0 means "don't show".
@@ -92,9 +116,25 @@ enum ReviewHeaderRules {
         Set(segments.compactMap(\.speaker)).count
     }
 
-    /// Fallback name when none was saved — the existing rule (audio file name).
-    static func defaultTitle(for entry: TranscriptionHistoryEntry) -> String {
-        URL(fileURLWithPath: entry.audioPath).deletingPathExtension().lastPathComponent
+    /// Name shown when the user hasn't named the meeting: 「會議 M/d HH:mm」 of the completion time.
+    /// Display / summary-generation default only — never written just because a record was viewed.
+    static func defaultTitle(for entry: TranscriptionHistoryEntry, calendar: Calendar = .current) -> String {
+        "會議 \(dateText(entry.completedAt, calendar: calendar))"
+    }
+
+    /// What the header should persist: nil when nothing changed (viewing a record, or a blank field
+    /// that falls back to the shown name), so browsing never writes a summary record.
+    static func titleToSave(typed: String, savedTitle: String?, defaultTitle: String) -> String? {
+        let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = trimmed.isEmpty ? (savedTitle ?? defaultTitle) : trimmed
+        return title == (savedTitle ?? defaultTitle) ? nil : title
+    }
+
+    /// Meeting name made safe as a file name (`/` and `:` are not allowed in macOS file names).
+    static func fileNameStem(for title: String) -> String {
+        let stem = title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stem.isEmpty ? "transcript" : stem
     }
 
     /// A name-only record (status .empty, no text) is not a summary for summary-tab purposes.

@@ -300,9 +300,7 @@ extension ContentView {
             return
         }
         let summary = currentSummary
-        meetingTitle = summary?.meetingTitle ?? currentEntry.map {
-            URL(fileURLWithPath: $0.audioPath).deletingPathExtension().lastPathComponent
-        } ?? ""
+        meetingTitle = summary?.meetingTitle ?? currentEntry.map { ReviewHeaderRules.defaultTitle(for: $0) } ?? ""
         summaryDraft = summary?.effectiveText ?? ""
         isSummaryDirty = false
     }
@@ -560,8 +558,8 @@ extension ContentView {
         do {
             let content = try format.render(entry: entry, editedText: transcriptDraft)
             exportDocument = TranscriptionExportDocument(content: content)
-            let stem = URL(fileURLWithPath: entry.audioPath).deletingPathExtension().lastPathComponent
-            exportFilename = "\(stem).\(format.filenameExtension)"
+            let title = summaries.summary(for: entry.id)?.meetingTitle ?? ReviewHeaderRules.defaultTitle(for: entry)
+            exportFilename = "\(ReviewHeaderRules.fileNameStem(for: title)).\(format.filenameExtension)"
             isExporting = true
             errorMessage = nil
         } catch { errorMessage = "Export failed: \(error.localizedDescription)" }

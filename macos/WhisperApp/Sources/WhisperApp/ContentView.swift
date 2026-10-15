@@ -77,6 +77,8 @@ struct ContentView: View {
     @State var transcriptSearchQuery = ""
     @State var transcriptSearchPosition: Int?
     @State var playbackRate: Float = 1
+    /// Real audio length per file path (header read), so stale stored durations aren't shown.
+    @State var actualAudioSeconds: [String: TimeInterval] = [:]
     @State var scrubTime: TimeInterval?
     @State var isDiarizationSheetPresented = false
     @FocusState var isMeetingTitleFocused: Bool

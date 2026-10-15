@@ -113,16 +113,15 @@ struct ReviewHeaderRulesTests {
             audioPath: "/tmp/週會.wav", model: "base", language: "zh", text: "x",
             segments: [segment(0, 30, "a", "A"), segment(30, 95, "b", "B"), segment(95, 100, "c", "A")]
         )
-        #expect(ReviewHeaderRules.durationSeconds(of: short) == 100)       // 無 durationSeconds：用最後一段結尾
-        #expect(PlaybackRules.timeText(ReviewHeaderRules.durationSeconds(of: short)!) == "1:40")
+        #expect(ReviewHeaderRules.durationSeconds(of: short, actualAudioSeconds: nil) == 100)       // 無 durationSeconds：用最後一段結尾
+        #expect(PlaybackRules.timeText(ReviewHeaderRules.durationSeconds(of: short, actualAudioSeconds: nil)!) == "1:40")
         #expect(ReviewHeaderRules.speakerCount(short.segments) == 2)
-        #expect(ReviewHeaderRules.defaultTitle(for: short) == "週會")
 
         let long = TranscriptionHistoryEntry(
             audioPath: "/tmp/b.wav", model: "base", language: "zh", text: "x",
             segments: [segment(0, 1, "a")], durationSeconds: 4_000
         )
-        #expect(PlaybackRules.timeText(ReviewHeaderRules.durationSeconds(of: long)!) == "1:06:40")
+        #expect(PlaybackRules.timeText(ReviewHeaderRules.durationSeconds(of: long, actualAudioSeconds: nil)!) == "1:06:40")
         #expect(ReviewHeaderRules.speakerCount(long.segments) == 0)            // 0 → 標頭不顯示
     }
 
