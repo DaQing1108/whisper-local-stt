@@ -3,6 +3,8 @@ import SwiftUI
 @main
 @MainActor
 struct WhisperDesktopApp: App {
+    @NSApplicationDelegateAdaptor(WhisperAppDelegate.self) private var appDelegate
+    @State private var captureBoard: CaptureStatusBoard
     @State private var worker: WorkerSupervisor
     @State private var recording: StandardRecordingController
     @State private var liveRecording: LiveRecordingController
@@ -21,6 +23,9 @@ struct WhisperDesktopApp: App {
     @State private var historyDeletion: HistoryDeletionCoordinator
 
     init() {
+        let captureBoard = CaptureStatusBoard()
+        WhisperAppDelegate.board = captureBoard
+        _captureBoard = State(initialValue: captureBoard)
         let worker = WorkerSupervisor()
         let settings = AppSettingsStore()
         let history = TranscriptionHistoryStore(maximumEntries: settings.historyRetention)
@@ -119,6 +124,7 @@ struct WhisperDesktopApp: App {
                 .environment(vocabularyBudget)
                 .environment(corrections)
                 .environment(historyDeletion)
+                .environment(captureBoard)
         }
         .commands {
             CommandMenu("Transcription") {
@@ -139,5 +145,20 @@ struct WhisperDesktopApp: App {
                 .keyboardShortcut(.delete, modifiers: [.command, .shift])
             }
         }
+
+        // Shown only while a capture is active (including finishing); never starts a capture.
+        MenuBarExtra(isInserted: Binding(
+            get: { MenuBarRules.isShown(captureBoard.snapshot.phase) },
+            set: { _ in }
+        )) {
+            MenuBarRecordingView(board: captureBoard)
+                .environment(mixedAudioRecording)
+                .environment(liveRecording)
+                .environment(recording)
+                .environment(settings)
+        } label: {
+            MenuBarRecordingLabel(board: captureBoard)
+        }
+        .menuBarExtraStyle(.window)
     }
 }

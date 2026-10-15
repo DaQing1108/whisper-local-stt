@@ -18,6 +18,7 @@ struct ContentView: View {
     @Environment(MeetingSummaryStore.self) var summaries
     @Environment(MeetingSummaryController.self) var summaryController
     @Environment(VocabularyStore.self) var vocabulary
+    @Environment(CaptureStatusBoard.self) var captureBoard
     @Environment(VocabularySuggestionController.self) var vocabularySuggestions
     @Environment(VocabularyBudgetController.self) var vocabularyBudget
     @Environment(CorrectionRuleStore.self) var corrections
@@ -134,6 +135,8 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 820, minHeight: 620)
+        .background(MainWindowAccessor(windowGuard: captureBoard.windowGuard))
+        .onChange(of: captureSnapshot, initial: true) { _, snapshot in captureBoard.update(snapshot) }
         .task {
             if worker.state == .stopped { startWorker() }
             systemAudioPermission.refresh()
