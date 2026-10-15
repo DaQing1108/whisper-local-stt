@@ -11,28 +11,33 @@ extension ContentView {
         )
     }
 
-    @ViewBuilder var transcriptBody: some View {
-        let diverged = transcriptDraftDiverged
-        if TranscriptViewRules.showsUnsavedNotice(isEditing: isEditingTranscript, isDraftDirty: isDraftDirty) {
-            Label("有未儲存的修改", systemImage: "pencil.circle")
-                .font(.caption).foregroundStyle(.orange)
-        } else if TranscriptViewRules.showsEditedNotice(
-            isEditing: isEditingTranscript, isDraftDirty: isDraftDirty, draftDiverged: diverged
-        ) {
-            Label("逐字稿已手動編輯，時間碼清單暫不顯示", systemImage: "info.circle")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        switch TranscriptViewRules.body(
-            isEditing: isEditingTranscript,
-            hasSegments: !(currentEntry?.segments.isEmpty ?? true),
-            draftDiverged: diverged
-        ) {
-        case .editor:
-            transcriptEditor
-        case .segmentList:
-            if let entry = currentEntry { segmentListView(entry) } else { transcriptReadOnlyText }
-        case .readOnlyText:
-            transcriptReadOnlyText
+    /// One view, not a builder tuple: the caller's `.frame(maxHeight: .infinity)` would otherwise be
+    /// applied to *each* child, making the notice label flexible too — it then split the height with
+    /// the transcript (empty band with the notice centred, read-only text squeezed to the bottom).
+    var transcriptBody: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            let diverged = transcriptDraftDiverged
+            if TranscriptViewRules.showsUnsavedNotice(isEditing: isEditingTranscript, isDraftDirty: isDraftDirty) {
+                Label("有未儲存的修改", systemImage: "pencil.circle")
+                    .font(.caption).foregroundStyle(.orange)
+            } else if TranscriptViewRules.showsEditedNotice(
+                isEditing: isEditingTranscript, isDraftDirty: isDraftDirty, draftDiverged: diverged
+            ) {
+                Label("逐字稿已手動編輯，時間碼清單暫不顯示", systemImage: "info.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            switch TranscriptViewRules.body(
+                isEditing: isEditingTranscript,
+                hasSegments: !(currentEntry?.segments.isEmpty ?? true),
+                draftDiverged: diverged
+            ) {
+            case .editor:
+                transcriptEditor
+            case .segmentList:
+                if let entry = currentEntry { segmentListView(entry) } else { transcriptReadOnlyText }
+            case .readOnlyText:
+                transcriptReadOnlyText
+            }
         }
     }
 
