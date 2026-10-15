@@ -85,7 +85,7 @@ extension ContentView {
                     durationSeconds: ReviewHeaderRules.durationSeconds(
                         of: entry, actualAudioSeconds: actualAudioSeconds[entry.audioPath]
                     )
-                )) { restore(entry) }
+                )) { requestSwitch(to: entry, showsCapturePage: false) }
             }
             Divider()
             Button("所有紀錄…") { selectedSection = .history }

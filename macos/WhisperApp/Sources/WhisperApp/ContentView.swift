@@ -82,6 +82,7 @@ struct ContentView: View {
     @State var actualAudioSeconds: [String: TimeInterval] = [:]
     @State var scrubTime: TimeInterval?
     @State var isDiarizationSheetPresented = false
+    @State var pendingRecordSwitch: PendingRecordSwitch?
     @FocusState var isMeetingTitleFocused: Bool
 
     var body: some View {
@@ -137,6 +138,22 @@ struct ContentView: View {
         .frame(minWidth: 820, minHeight: 620)
         .background(MainWindowAccessor(windowGuard: captureBoard.windowGuard))
         .onChange(of: captureSnapshot, initial: true) { _, snapshot in captureBoard.update(snapshot) }
+        .confirmationDialog(
+            SwitchGuardRules.title,
+            isPresented: Binding(
+                get: { pendingRecordSwitch != nil },
+                set: { if !$0 { pendingRecordSwitch = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingRecordSwitch
+        ) { pending in
+            Button("儲存並切換") { resolvePendingSwitch(pending, choice: .saveAndSwitch) }
+                .keyboardShortcut(.defaultAction)
+            Button("不儲存", role: .destructive) { resolvePendingSwitch(pending, choice: .discardAndSwitch) }
+            Button("取消", role: .cancel) { resolvePendingSwitch(pending, choice: .cancel) }
+        } message: { _ in
+            Text(SwitchGuardRules.message)
+        }
         .task {
             if worker.state == .stopped { startWorker() }
             systemAudioPermission.refresh()

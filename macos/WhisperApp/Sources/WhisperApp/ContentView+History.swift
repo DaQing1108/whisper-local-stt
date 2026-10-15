@@ -29,7 +29,7 @@ extension ContentView {
                             }
                             Text(entry.text).lineLimit(3).textSelection(.enabled)
                             HStack {
-                                Button("載入結果") { restore(entry); selectedSection = .capture }
+                                Button("載入結果") { requestSwitch(to: entry, showsCapturePage: true) }
                                 Button("發布會議筆記至 Obsidian") { exportToObsidian(entry) }
                                     .disabled(settings.obsidianVaultPath.isEmpty)
                                 Button("發布至 Notion") { publishToNotion(entry) }
@@ -221,5 +221,35 @@ extension ContentView {
                 notionStatus = "Notion upload failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    // MARK: - User-initiated record switch (「載入結果」, recent-meetings menu)
+
+    /// Both user entry points come here. Without unsaved edits (or when re-selecting the same
+    /// record) it behaves exactly as before: `restore` and, for「載入結果」, show the 錄製 page.
+    func requestSwitch(to entry: TranscriptionHistoryEntry, showsCapturePage: Bool) {
+        guard SwitchGuardRules.needsConfirmation(
+            isDraftDirty: isDraftDirty, currentID: currentEntryID, targetID: entry.id
+        ) else {
+            performSwitch(to: entry, showsCapturePage: showsCapturePage)
+            return
+        }
+        pendingRecordSwitch = PendingRecordSwitch(entry: entry, showsCapturePage: showsCapturePage)
+    }
+
+    func resolvePendingSwitch(_ pending: PendingRecordSwitch, choice: SwitchGuardRules.Choice) {
+        pendingRecordSwitch = nil
+        var saveSucceeded = false
+        if choice == .saveAndSwitch {
+            saveDraft()                       // unchanged; on failure it keeps the draft dirty and sets errorMessage
+            saveSucceeded = !isDraftDirty
+        }
+        guard SwitchGuardRules.shouldSwitch(after: choice, saveSucceeded: saveSucceeded) else { return }
+        performSwitch(to: pending.entry, showsCapturePage: pending.showsCapturePage)
+    }
+
+    private func performSwitch(to entry: TranscriptionHistoryEntry, showsCapturePage: Bool) {
+        restore(entry)
+        if showsCapturePage { selectedSection = .capture }
     }
 }
