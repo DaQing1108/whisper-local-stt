@@ -5,6 +5,7 @@ import logging
 import re
 import unicodedata
 from collections import Counter
+from difflib import SequenceMatcher
 from typing import Optional
 
 # Whisper phantom output during near-silence: only timestamps, no speech words.
@@ -240,6 +241,50 @@ def _is_english_filler_only(text: str) -> bool:
     return "".join(_content_chars(text)).lower() in _ENGLISH_FILLERS
 
 
+# Same-start near-duplicates: Whisper sometimes emits many zero-length segments at one start time
+# that are variants of one phrase. Real speech can also be squeezed onto one timecode (turbo with a
+# prompt), so only segments similar to an earlier kept one in the group are dropped.
+_SAME_START_GROUP_MIN = 4
+_SAME_START_PRECISION = 2           # round start times to 0.01 s
+_NEAR_DUPLICATE_RATIO = 0.6
+_NEAR_DUPLICATE_CONTAINMENT_MIN = 2
+
+
+def _is_near_duplicate(a: str, b: str) -> bool:
+    """去標點與空白後：SequenceMatcher ratio ≥ 0.6，或較短者（≥2 字）完整包含於較長者。"""
+    x, y = "".join(_content_chars(a)).lower(), "".join(_content_chars(b)).lower()
+    if not x or not y:
+        return False
+    shorter, longer = sorted((x, y), key=len)
+    if len(shorter) >= _NEAR_DUPLICATE_CONTAINMENT_MIN and shorter in longer:
+        return True
+    return SequenceMatcher(None, x, y).ratio() >= _NEAR_DUPLICATE_RATIO
+
+
+def _drop_same_start_near_duplicates(segments: list[dict]) -> tuple[list[dict], int]:
+    """同起始時間群組（≥4 段）內，丟棄與群組內前面保留段近似的段；其他一律保留。"""
+    def start_key(seg: dict) -> float:
+        return round(float(seg.get("start", 0) or 0), _SAME_START_PRECISION)
+
+    group_sizes = Counter(start_key(seg) for seg in segments)
+    kept_texts: dict[float, list[str]] = {}
+    kept: list[dict] = []
+    dropped = 0
+    for seg in segments:
+        key = start_key(seg)
+        if group_sizes[key] < _SAME_START_GROUP_MIN:
+            kept.append(seg)
+            continue
+        text = seg.get("text", "")
+        earlier = kept_texts.setdefault(key, [])
+        if any(_is_near_duplicate(text, previous) for previous in earlier):
+            dropped += 1
+            continue
+        earlier.append(text)
+        kept.append(seg)
+    return kept, dropped
+
+
 def _applies_foreign_rule(language: Optional[str]) -> bool:
     return bool(language) and language.lower().replace('_', '-').split('-')[0] == 'zh'
 
@@ -315,6 +360,9 @@ def clean_segments(segments: list[dict], language: Optional[str] = None) -> list
         logging.warning("[CleanSegments] fake-subtitle rule dropped %d segment(s)", fake_subtitles)
     for rule, count in sorted(rule_counts.items()):
         logging.warning("[CleanSegments] %s rule: %d segment(s)", rule, count)
+    cleaned, same_start_dropped = _drop_same_start_near_duplicates(cleaned)
+    if same_start_dropped:
+        logging.warning("[CleanSegments] same-start near-duplicate rule dropped %d segment(s)", same_start_dropped)
     cleaned, _ = _collapse_consecutive_repeats(cleaned)
 
     if len(cleaned) < len(segments):
